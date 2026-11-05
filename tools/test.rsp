@@ -1,0 +1,32 @@
+/nologo
+/target:exe
+/platform:anycpu
+/langversion:7.3
+/optimize-
+/out:"C:\Users\Administrator\Documents\New folder\JoeBrowser\tools\TestHarness.exe"
+/r:"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.dll"
+/r:"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Core.dll"
+/r:"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Drawing.dll"
+/r:"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Windows.Forms.dll"
+/r:"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Web.Extensions.dll"
+/r:"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Security.dll"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\AppPaths.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\BrowserLocator.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\BrowserSession.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\Cdp.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\Controls.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\EditorForm.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\FingerprintFactory.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\FingerprintScript.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\Icons.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\Log.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\MainForm.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\Models.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\ProfileCard.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\ProfileStore.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\ProxyRelay.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\ProxyTester.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\src\Theme.cs"
+"C:\Users\Administrator\Documents\New folder\JoeBrowser\tools\TestHarness.cs"
+"C:/Users/Administrator/Documents/New folder/JoeBrowser/src/Downloader.cs"
+"C:/Users/Administrator/Documents/New folder/JoeBrowser/src/Flags.cs"
