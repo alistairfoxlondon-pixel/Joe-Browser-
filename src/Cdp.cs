@@ -22,6 +22,9 @@ namespace JoeBrowser
             new ConcurrentDictionary<int, TaskCompletionSource<Dictionary<string, object>>>();
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private readonly JavaScriptSerializer _json = new JavaScriptSerializer();
+        /* ClientWebSocket allows one SendAsync at a time. Several targets can be stamped in
+           parallel when tabs or popups appear, so writes are serialised here. */
+        private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
         private int _nextId;
         private int _disposed;
 
@@ -65,7 +68,12 @@ namespace JoeBrowser
             byte[] data = Encoding.UTF8.GetBytes(_json.Serialize(payload));
             try
             {
-                await _ws.SendAsync(new ArraySegment<byte>(data), WebSocketMessageType.Text, true, _cts.Token).ConfigureAwait(false);
+                await _sendLock.WaitAsync(_cts.Token).ConfigureAwait(false);
+                try
+                {
+                    await _ws.SendAsync(new ArraySegment<byte>(data), WebSocketMessageType.Text, true, _cts.Token).ConfigureAwait(false);
+                }
+                finally { _sendLock.Release(); }
             }
             catch (Exception ex)
             {
@@ -172,6 +180,7 @@ namespace JoeBrowser
             catch { }
             try { if (_ws != null) _ws.Dispose(); } catch { }
             _ws = null;
+            try { _sendLock.Dispose(); } catch { }
             SignalClosed();
         }
     }

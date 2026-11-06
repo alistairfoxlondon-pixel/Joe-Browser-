@@ -49,6 +49,7 @@ namespace JoeBrowser
                     if (preference.Equals("brave", StringComparison.OrdinalIgnoreCase) && b.IsBrave) return b;
                     if (preference.Equals("firefox", StringComparison.OrdinalIgnoreCase) && b.IsFirefox) return b;
                     if (preference.Equals("chrome", StringComparison.OrdinalIgnoreCase) && !b.IsEdge && !b.IsBrave && !b.IsFirefox && b.Name == "Chrome") return b;
+                    if (preference.Equals("chromium", StringComparison.OrdinalIgnoreCase) && b.EngineKey == "chromium") return b;
                 }
             }
 
@@ -169,6 +170,14 @@ namespace JoeBrowser
                 else if (info.IsBrave) info.Name = "Brave";
                 else if (info.IsFirefox) info.Name = "Firefox";
                 else if (info.Name.IndexOf("chrome", StringComparison.OrdinalIgnoreCase) >= 0) info.Name = "Chrome";
+                // The browser Joe Browser downloads for itself lives under the app data folder;
+                // it is Chromium, not Google Chrome, and must appear as such in the pickers.
+                try
+                {
+                    if (string.Equals(System.IO.Path.GetFullPath(path), System.IO.Path.GetFullPath(AppPaths.ChromiumExe), StringComparison.OrdinalIgnoreCase))
+                        info.Name = "Chromium";
+                }
+                catch { }
             }
             catch (Exception ex)
             {

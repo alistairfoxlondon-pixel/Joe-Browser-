@@ -1,13 +1,33 @@
-﻿# Generates the Joe Browser application icon (multi-size PNG-in-ICO)
+﻿# Generates the Joe Browser application icon (multi-size PNG-in-ICO).
+# The artwork intentionally matches Logo.cs (shield + white J + windows-ui accent
+# gradient) so the taskbar, title bar, header and About page show the same mark.
 Add-Type -AssemblyName System.Drawing
 
-function New-RoundedPath([float]$x, [float]$y, [float]$w, [float]$h, [float]$r) {
+function New-ShieldPath([float]$x, [float]$y, [float]$w, [float]$h) {
     $p = New-Object Drawing.Drawing2D.GraphicsPath
-    $d = $r * 2
-    $p.AddArc($x, $y, $d, $d, 180, 90)
-    $p.AddArc($x + $w - $d, $y, $d, $d, 270, 90)
-    $p.AddArc($x + $w - $d, $y + $h - $d, $d, $d, 0, 90)
-    $p.AddArc($x, $y + $h - $d, $d, $d, 90, 90)
+    $p.StartFigure()
+    $p.AddBezier(
+        ($x + $w * 0.50), ($y + $h * 0.02),
+        ($x + $w * 0.66), ($y + $h * 0.12),
+        ($x + $w * 0.84), ($y + $h * 0.15),
+        ($x + $w * 0.97), ($y + $h * 0.15))
+    $p.AddLine(($x + $w * 0.97), ($y + $h * 0.15), ($x + $w * 0.97), ($y + $h * 0.54))
+    $p.AddBezier(
+        ($x + $w * 0.97), ($y + $h * 0.54),
+        ($x + $w * 0.97), ($y + $h * 0.76),
+        ($x + $w * 0.78), ($y + $h * 0.91),
+        ($x + $w * 0.50), ($y + $h * 0.98))
+    $p.AddBezier(
+        ($x + $w * 0.50), ($y + $h * 0.98),
+        ($x + $w * 0.22), ($y + $h * 0.91),
+        ($x + $w * 0.03), ($y + $h * 0.76),
+        ($x + $w * 0.03), ($y + $h * 0.54))
+    $p.AddLine(($x + $w * 0.03), ($y + $h * 0.54), ($x + $w * 0.03), ($y + $h * 0.15))
+    $p.AddBezier(
+        ($x + $w * 0.03), ($y + $h * 0.15),
+        ($x + $w * 0.16), ($y + $h * 0.15),
+        ($x + $w * 0.34), ($y + $h * 0.12),
+        ($x + $w * 0.50), ($y + $h * 0.02))
     $p.CloseFigure()
     return $p
 }
@@ -18,37 +38,54 @@ function New-LogoPng([int]$S) {
     $g.SmoothingMode = 'AntiAlias'
     $g.TextRenderingHint = 'AntiAliasGridFit'
     $g.InterpolationMode = 'HighQualityBicubic'
+    $g.PixelOffsetMode = 'HighQuality'
     $g.Clear([Drawing.Color]::Transparent)
 
-    $pad = [float]($S * 0.035)
-    $path = New-RoundedPath $pad $pad ($S - 2 * $pad) ($S - 2 * $pad) ($S * 0.25)
-    $c1 = [Drawing.Color]::FromArgb(255, 124, 92, 255)
-    $c2 = [Drawing.Color]::FromArgb(255, 56, 132, 255)
+    $pad = [float]($S * 0.055)
+    $size = $S - 2 * $pad
+    $box = New-Object Drawing.RectangleF $pad, $pad, $size, $size
+    $path = New-ShieldPath $pad $pad $size $size
+
+    # windows-ui accent gradient: #0078D7 -> #60CDFF
+    $c1 = [Drawing.Color]::FromArgb(255, 0, 120, 215)
+    $c2 = [Drawing.Color]::FromArgb(255, 96, 205, 255)
     $brush = New-Object Drawing.Drawing2D.LinearGradientBrush(
-        (New-Object Drawing.PointF 0, 0),
-        (New-Object Drawing.PointF $S, $S), $c1, $c2)
+        (New-Object Drawing.PointF $pad, $pad),
+        (New-Object Drawing.PointF ($pad + $size), ($pad + $size)), $c1, $c2)
     $g.FillPath($brush, $path)
 
-    # soft top highlight
-    $hi = New-RoundedPath ($pad * 2) ($pad * 1.6) ($S - 4 * $pad) ($S * 0.42) ($S * 0.18)
-    $hiBrush = New-Object Drawing.Drawing2D.LinearGradientBrush(
-        (New-Object Drawing.PointF(0, 0)),
-        (New-Object Drawing.PointF(0, ($S * 0.45))),
-        [Drawing.Color]::FromArgb(46, 255, 255, 255),
-        [Drawing.Color]::FromArgb(0, 255, 255, 255))
-    $g.FillPath($hiBrush, $hi)
+    # soft top sheen, clipped to the shield so it never leaks outside the shape
+    if ($S -ge 48) {
+        $oldClip = $g.Clip
+        $g.SetClip($path)
+        $sheen = New-Object Drawing.Drawing2D.LinearGradientBrush(
+            (New-Object Drawing.PointF 0, $pad),
+            (New-Object Drawing.PointF 0, ($pad + $size * 0.55)),
+            [Drawing.Color]::FromArgb(52, 255, 255, 255),
+            [Drawing.Color]::FromArgb(0, 255, 255, 255))
+        $g.FillRectangle($sheen, $pad, $pad, $size, ($size * 0.55))
+        $g.Clip = $oldClip
+        $sheen.Dispose()
+    }
 
-    $font = New-Object Drawing.Font("Segoe UI", ($S * 0.54), [Drawing.FontStyle]::Bold, [Drawing.GraphicsUnit]::Pixel)
+    # thin light rim, omitted on tiny sizes where it would blur the silhouette
+    if ($S -ge 32) {
+        $rim = New-Object Drawing.Pen(
+            [Drawing.Color]::FromArgb(70, 255, 255, 255), [Math]::Max(1.0, $S / 64.0))
+        $g.DrawPath($rim, $path)
+        $rim.Dispose()
+    }
+
+    # white J, same proportions as Logo.Draw
+    $fontSize = [float]($size * 0.56)
+    $font = New-Object Drawing.Font("Segoe UI", $fontSize, [Drawing.FontStyle]::Bold, [Drawing.GraphicsUnit]::Pixel)
     $sf = New-Object Drawing.StringFormat
     $sf.Alignment = 'Center'
     $sf.LineAlignment = 'Center'
-    $rect = New-Object Drawing.RectangleF(0, ($S * 0.015), $S, $S)
+    $rect = New-Object Drawing.RectangleF $pad, ($pad + $size * 0.02), $size, ($size * 0.92)
     $g.DrawString("J", $font, [Drawing.Brushes]::White, $rect, $sf)
 
-    # accent dot
-    $dot = [float]($S * 0.085)
-    $db = New-Object Drawing.SolidBrush ([Drawing.Color]::FromArgb(235, 255, 255, 255))
-    $g.FillEllipse($db, ($S * 0.70), ($S * 0.70), $dot, $dot)
+    $font.Dispose(); $sf.Dispose(); $brush.Dispose(); $path.Dispose()
 
     $ms = New-Object System.IO.MemoryStream
     $bmp.Save($ms, [Drawing.Imaging.ImageFormat]::Png)
@@ -79,4 +116,3 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 foreach ($b in $images) { $bw.Write($b) }
 $bw.Flush(); $bw.Close(); $fs.Close()
 Write-Output ("icon written: {0} ({1} bytes)" -f $out, (Get-Item $out).Length)
-

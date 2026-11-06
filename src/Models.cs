@@ -84,6 +84,49 @@ namespace JoeBrowser
         }
     }
 
+    /// <summary>
+    /// Per-profile built-in browser tools. These are injected by the app itself through CDP,
+    /// not installed from a store; the unpacked folders are only an optional second channel.
+    /// </summary>
+    public class ToolConfig
+    {
+        /// <summary>Type clipboard content one character at a time with human-like timing.</summary>
+        public bool HumanPaste { get; set; }
+        /// <summary>relaxed | natural | fast | instant</summary>
+        public string HumanPasteSpeed { get; set; }
+        /// <summary>Notify when the public IP rotates or the proxy goes offline.</summary>
+        public bool ProxyWatch { get; set; }
+        /// <summary>Seconds between checks (30 ... 600).</summary>
+        public int ProxyWatchInterval { get; set; }
+        /// <summary>Restore the native right-click menu and copy on pages that block them.</summary>
+        public bool EnableRightClick { get; set; }
+        /// <summary>Also remove selection / drag blockers installed by the page.</summary>
+        public bool UnlockSelection { get; set; }
+        /// <summary>Extra unpacked extension folders, one absolute path per line.</summary>
+        public string CustomExtensions { get; set; }
+
+        /// <summary>Legacy name kept so older builds still compile; never persisted twice.</summary>
+        [ScriptIgnore]
+        public bool RightClickGuard
+        {
+            get { return EnableRightClick; }
+            set { EnableRightClick = value; }
+        }
+
+        public ToolConfig()
+        {
+            HumanPaste = true;
+            HumanPasteSpeed = "natural";
+            ProxyWatch = true;
+            ProxyWatchInterval = 60;
+            EnableRightClick = true;
+            UnlockSelection = true;
+            CustomExtensions = "";
+        }
+
+        public ToolConfig Copy() { return (ToolConfig)MemberwiseClone(); }
+    }
+
     public class FingerprintConfig
     {
         public int Seed { get; set; }
@@ -110,7 +153,7 @@ namespace JoeBrowser
         public bool SpoofBattery { get; set; }
         public bool SpoofMac { get; set; }
         public bool WebRtcProtect { get; set; }
-        public string WebRtcMode { get; set; }    // disabled | proxy | public
+        public string WebRtcMode { get; set; }    // off | proxy | public
         public string GeoMode { get; set; }       // proxy | system | custom | block
         public string GeoLat { get; set; }
         public string GeoLng { get; set; }
@@ -187,13 +230,20 @@ namespace JoeBrowser
         public string Name { get; set; }
         public string Notes { get; set; }
         public string StartUrl { get; set; }
-        public string BrowserKind { get; set; }   // auto | chrome | edge | brave | firefox | custom
+        public string BrowserKind { get; set; }   // auto | chrome | edge | brave | chromium | firefox | custom
         public string BrowserPath { get; set; }
+        /// <summary>Folder-style grouping, as in AdsPower / Dolphin Anty.</summary>
+        public string Group { get; set; }
+        /// <summary>Comma separated labels, searchable and shown on the card.</summary>
+        public string Tags { get; set; }
+        /// <summary>Free-form account login / status marker.</summary>
+        public string Status { get; set; }
         public int OpenCount { get; set; }
         public DateTime Created { get; set; }
         public DateTime LastOpened { get; set; }
         public FingerprintConfig Fp { get; set; }
         public ProxyConfig Proxy { get; set; }
+        public ToolConfig Tools { get; set; }
 
         public Profile()
         {
@@ -203,10 +253,19 @@ namespace JoeBrowser
             StartUrl = "";
             BrowserKind = "auto";
             BrowserPath = "";
+            Group = "";
+            Tags = "";
+            Status = "";
             Created = DateTime.Now;
             LastOpened = DateTime.MinValue;
             Fp = new FingerprintConfig();
             Proxy = new ProxyConfig();
+            Tools = new ToolConfig();
+        }
+
+        public string GroupOrUngrouped
+        {
+            get { return string.IsNullOrWhiteSpace(Group) ? "Ungrouped" : Group.Trim(); }
         }
 
         public string Initials
@@ -246,11 +305,15 @@ namespace JoeBrowser
                 StartUrl = StartUrl,
                 BrowserKind = BrowserKind,
                 BrowserPath = BrowserPath,
+                Group = Group,
+                Tags = Tags,
+                Status = Status,
                 OpenCount = freshId ? 0 : OpenCount,
                 Created = freshId ? DateTime.Now : Created,
                 LastOpened = freshId ? DateTime.MinValue : LastOpened,
                 Fp = Fp.Copy(),
-                Proxy = Proxy.Copy()
+                Proxy = Proxy.Copy(),
+                Tools = Tools == null ? new ToolConfig() : Tools.Copy()
             };
             return p;
         }
@@ -262,8 +325,25 @@ namespace JoeBrowser
         public string DefaultStartUrl { get; set; }
         /// <summary>0 = never chosen (dark), 1 = dark, 2 = light.</summary>
         public int ThemeMode { get; set; }
-        /// <summary>0 recent, 1 name, 2 created, 3 running first, 4 operating system.</summary>
+        /// <summary>0 recent, 1 name, 2 created, 3 running first, 4 operating system, 5 group.</summary>
         public int SortBy { get; set; }
+        /// <summary>UI language key, e.g. "en". Never shown to the user as a bare code.</summary>
+        public string UiLanguage { get; set; }
+        /// <summary>Group assigned to profiles created with Batch create.</summary>
+        public string DefaultGroup { get; set; }
+        /// <summary>Master switch for shipping the built-in unpacked extensions.</summary>
+        public bool EnableExtensions { get; set; }
+        /// <summary>Load user-added extensions from the Extensions library into Chromium profiles.</summary>
+        public bool EnableCustomExtensions { get; set; }
+        /// <summary>Open the window maximized so every page uses the full screen width.</summary>
+        public bool StartMaximized { get; set; }
+        /// <summary>Keep deleted profile JSON in a recycle bin instead of erasing it.</summary>
+        public bool UseTrash { get; set; }
+        /// <summary>Window was maximized when the app last closed.</summary>
+        public bool WinMaximized { get; set; }
+        /// <summary>Restored window size from the last session, in device-independent pixels.</summary>
+        public int WinWidth { get; set; }
+        public int WinHeight { get; set; }
 
         public AppSettings()
         {
@@ -271,6 +351,15 @@ namespace JoeBrowser
             DefaultStartUrl = "https://www.google.com";
             ThemeMode = 0;
             SortBy = 0;
+            UiLanguage = "en";
+            DefaultGroup = "";
+            EnableExtensions = true;
+            EnableCustomExtensions = true;
+            StartMaximized = true;
+            UseTrash = true;
+            WinMaximized = true;
+            WinWidth = 0;
+            WinHeight = 0;
         }
     }
 }

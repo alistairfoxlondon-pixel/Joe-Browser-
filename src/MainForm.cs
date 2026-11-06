@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -21,9 +23,11 @@ namespace JoeBrowser
         private readonly Dictionary<string, BrowserSession> _sessions = new Dictionary<string, BrowserSession>();
         private readonly HashSet<string> _launching = new HashSet<string>();
         private readonly Dictionary<string, ProfileCard> _cards = new Dictionary<string, ProfileCard>();
+        private List<ProxyEntry> _proxies = new List<ProxyEntry>();
+        private List<ExtensionItem> _extensions = new List<ExtensionItem>();
 
         // Sidebar
-        private JBButton _navProfiles, _navSettings, _navAbout;
+        private JBButton _navProfiles, _navProxies, _navExtensions, _navSettings, _navTools, _navAbout;
         private JBThemeSwitch _themeSwitch;
 
         // Caption buttons
@@ -44,16 +48,41 @@ namespace JoeBrowser
         private JBScrollHost _host;
         private JBGrid _grid;
         private Panel _settingsPage, _aboutPage, _emptyPanel;
+        private Panel _aboutColumn;
+        private JBScrollHost _aboutHost;
+        private ToolsPage _toolsPage;
+        private ProxyPage _proxyPage;
+        private ExtensionPage _extensionPage;
         private JBButton _emptyBtn, _aboutTelegram;
         private JBToast _toast;
 
         // Settings controls
-        private JBLabel _setBrowserInfo, _setBrowserHint, _setStartHint, _setStoragePath, _setStorageHint;
-        private JBTextBox _setBrowserPath, _setStartUrl;
+        private JBLabel _setBrowserInfo, _setStoragePath;
+        private JBTextBox _setBrowserPath, _setStartUrl, _setDefaultGroup;
         private JBButton _setBrowse, _setDetect, _setOpenData, _setDownload;
-        private JBPanel _cardBrowser, _cardStart, _cardStorage;
+        private JBLangPicker _setLang;
+        private JBToggle _setExtensions, _setCustomExt, _setTrash;
         private Panel _settingsColumn;
         private JBScrollHost _settingsHost;
+        private readonly List<SetCard> _setCards = new List<SetCard>();
+
+        /// <summary>A full-width settings section: a title plus rows separated by hairlines.</summary>
+        private sealed class SetCard
+        {
+            public JBPanel Panel;
+            public string Key;
+            public readonly List<SetRow> Rows = new List<SetRow>();
+        }
+
+        /// <summary>One settings row: label on the left, optional value text and controls flush right.</summary>
+        private sealed class SetRow
+        {
+            public JBLabel Title;
+            public string Key;
+            public JBLabel Value;
+            public Control[] Controls;
+            public int[] Widths;
+        }
 
         private int _page;
         private bool _built;
@@ -71,19 +100,45 @@ namespace JoeBrowser
             MinimizeBox = true;
 
             _settings = _store.LoadSettings();
+            L10n.Set(_settings.UiLanguage);
             Theme.SetMode(_settings.ThemeMode != 2);
+            _proxies = ProxyVault.Load();
+            _extensions = ExtensionCatalog.Load();
             Build();
+            L10n.Changed += OnLanguageChanged;
+        }
+
+        private void OnLanguageChanged()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired) { BeginInvoke(new Action(OnLanguageChanged)); return; }
+            ApplyLanguage();
         }
 
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
             ApplyScale();
+            ResolveAutoBrowserKind();
             ReloadCards(true);
             SetPage(0);
             LayoutAll();
             ShowInTaskbar = true;
             _search.Box.AccessibleName = "Search profiles";
+        }
+
+        /// <summary>
+        /// Profiles created with "auto" detection have no engine recorded, so the card would show
+        /// a placeholder. Resolve the engine once and let the marks draw the real browser logo.
+        /// </summary>
+        private void ResolveAutoBrowserKind()
+        {
+            try
+            {
+                var info = BrowserLocator.Detect("auto", _settings.BrowserPath);
+                BrowserMark.AutoKind = info.Found ? info.EngineKey : "";
+            }
+            catch (Exception ex) { Log.Error("Auto engine lookup failed", ex); }
         }
 
         private void ApplyScale()
@@ -96,10 +151,20 @@ namespace JoeBrowser
             if (Ui.Scale < 1f) Ui.Scale = 1f;
 
             MinimumSize = new Size(Ui.S(1000), Ui.S(660));
-            Size max = Ui.FitToScreen(this, Ui.S(1280), Ui.S(820));
-            SuppressSurfaceEvents(() => ClientSize = new Size(Math.Max(MinimumSize.Width, max.Width), Math.Max(MinimumSize.Height, max.Height)));
-            FitToWorkArea();
+
+            // The app is a workspace, not a dialog: it opens across the whole working area and
+            // remembers the size it was closed at. Nothing is capped at a fixed 1280 box.
+            var area = Screen.FromControl(this).WorkingArea;
+            int savedW = _settings.WinWidth > 0 ? Ui.S(_settings.WinWidth) : 0;
+            int savedH = _settings.WinHeight > 0 ? Ui.S(_settings.WinHeight) : 0;
+            int wantW = Math.Max(MinimumSize.Width, savedW > 0 ? savedW : Ui.S(1440));
+            int wantH = Math.Max(MinimumSize.Height, savedH > 0 ? savedH : Ui.S(900));
+            wantW = Math.Min(wantW, area.Width - Ui.S(16));
+            wantH = Math.Min(wantH, area.Height - Ui.S(16));
+
+            SuppressSurfaceEvents(() => ClientSize = new Size(wantW, wantH));
             CenterToScreen();
+            if (_settings.WinMaximized) Maximize();
         }
 
         protected override void OnScaleChanged()
@@ -133,21 +198,26 @@ namespace JoeBrowser
 
         private void Build()
         {
-            _navProfiles = Nav("Profiles", "layers", delegate { SetPage(0); });
-            _navSettings = Nav("Settings", "sliders", delegate { SetPage(1); });
-            _navAbout = Nav("About", "info", delegate { SetPage(2); });
+            _navProfiles = Nav(L10n.T("nav.profiles"), "layers", delegate { SetPage(0); });
+            _navProxies = Nav(L10n.T("nav.proxies"), "proxy", delegate { SetPage(1); });
+            _navExtensions = Nav(L10n.T("nav.extensions"), "apps", delegate { SetPage(2); });
+            _navSettings = Nav(L10n.T("nav.settings"), "sliders", delegate { SetPage(3); });
+            _navTools = Nav(L10n.T("header.tools"), "command", delegate { SetPage(4); });
+            _navAbout = Nav(L10n.T("nav.about"), "info", delegate { SetPage(5); });
 
             _themeSwitch = new JBThemeSwitch { Checked = Theme.Dark };
+            _themeSwitch.NightText = L10n.T("theme.night");
+            _themeSwitch.DayText = L10n.T("theme.day");
             _themeSwitch.CheckedChanged += delegate { ToggleTheme(); };
 
-            _search = new JBTextBox { Icon = "search", Placeholder = "Search profiles", Height = Ui.S(33) };
+            _search = new JBTextBox { Icon = "search", Placeholder = L10n.T("btn.search"), Height = Ui.S(33) };
             _search.Box.TextChanged += delegate
             {
                 _filter = (_search.Value ?? "").Trim();
                 ApplyFilter();
             };
 
-            _newBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = "New profile", Radius = 4, Height = Ui.S(33) };
+            _newBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("btn.new"), Radius = 4, Height = Ui.S(33) };
             _newBtn.Click += delegate { NewProfile(); };
 
             _sortBtn = new JBButton { Text = "Sort: recent", Radius = 4, Height = Ui.S(33), Tip = "Change the order of the list (Ctrl+O)" };
@@ -155,10 +225,10 @@ namespace JoeBrowser
 
             _bulk = new JBPanel { Visible = false };
             _bulkCount = new Label { AutoSize = true, Font = Theme.H3, ForeColor = Theme.Text, BackColor = Color.Transparent };
-            _bulkOpen = new JBButton { Kind = BtnKind.Primary, Icon = "play", Text = "Open all", Radius = 4, Height = Ui.S(31) };
-            _bulkStop = new JBButton { Kind = BtnKind.Soft, Icon = "power", Text = "Stop", Radius = 4, Height = Ui.S(31) };
-            _bulkDup = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Duplicate", Radius = 4, Height = Ui.S(31) };
-            _bulkDel = new JBButton { Kind = BtnKind.Danger, Icon = "trash", Text = "Delete", Radius = 4, Height = Ui.S(31) };
+            _bulkOpen = new JBButton { Kind = BtnKind.Primary, Icon = "play", Text = L10n.T("btn.openall"), Radius = 4, Height = Ui.S(31) };
+            _bulkStop = new JBButton { Kind = BtnKind.Soft, Icon = "power", Text = L10n.T("btn.stop"), Radius = 4, Height = Ui.S(31) };
+            _bulkDup = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = L10n.T("btn.duplicate"), Radius = 4, Height = Ui.S(31) };
+            _bulkDel = new JBButton { Kind = BtnKind.Danger, Icon = "trash", Text = L10n.T("btn.delete"), Radius = 4, Height = Ui.S(31) };
             _bulkCancel = new JBButton { Kind = BtnKind.Ghost, Icon = "close", Radius = 4, Height = Ui.S(31), Tip = "Clear selection (Esc)" };
             _bulkOpen.Click += delegate { BulkOpen(); };
             _bulkStop.Click += delegate { BulkStop(); };
@@ -172,7 +242,7 @@ namespace JoeBrowser
             _bulk.Controls.Add(_bulkDel);
             _bulk.Controls.Add(_bulkCancel);
 
-            _saveSettings = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = "Save changes", Radius = 4, Height = Ui.S(33) };
+            _saveSettings = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = L10n.T("btn.save"), Radius = 4, Height = Ui.S(33) };
             _saveSettings.Click += delegate { SaveSettings(); };
 
             _minBtn = new JBIconButton { Icon = "min", IconSize = 11, Caption = true, Tip = "Minimize" };
@@ -182,12 +252,12 @@ namespace JoeBrowser
             _maxBtn.Click += delegate { ToggleMaximize(); };
             _closeBtn.Click += delegate { Close(); };
 
-            _grid = new JBGrid { MinCell = 240, CellHeight = 172, Gap = 16 };
+            _grid = new JBGrid { MinCell = 360, CellHeight = 200, Gap = 16 };
             _host = new JBScrollHost(_grid);
 
             _emptyPanel = new Panel { BackColor = Theme.Bg, Visible = false };
             _emptyPanel.Paint += EmptyPaint;
-            _emptyBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = "Create profile", Radius = 4, Height = Ui.S(33) };
+            _emptyBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("empty.action"), Radius = 4, Height = Ui.S(33) };
             _emptyBtn.Click += delegate
             {
                 if (_filter.Length > 0) { _search.Value = ""; _filter = ""; ApplyFilter(); }
@@ -203,14 +273,32 @@ namespace JoeBrowser
             _settingsPage = new Panel { BackColor = Theme.Bg, Visible = false };
             _settingsPage.Controls.Add(_settingsHost);
 
-            _aboutPage = new Panel { BackColor = Theme.Bg };
-            _aboutPage.Paint += AboutPaint;
+            _toolsPage = new ToolsPage { Visible = false };
+            _toolsPage.ActionRequested += delegate(object sender, ToolsActionEventArgs e) { ToolsAction(e.Key); };
+
+            _proxyPage = new ProxyPage { Visible = false };
+            _proxyPage.ActionRequested += delegate(object sender, ProxyActionEventArgs e) { ProxyAction(e.Key, e.Index); };
+            _proxyPage.SetItems(_proxies);
+
+            _extensionPage = new ExtensionPage { Visible = false };
+            _extensionPage.ActionRequested += delegate(object sender, ExtensionActionEventArgs e) { ExtensionAction(e.Key, e.Index); };
+            _extensionPage.SetItems(_extensions);
+
+            // The About page grows past a short window, so it scrolls like the settings page.
+            _aboutPage = new Panel { BackColor = Theme.Bg, Visible = false };
+            _aboutColumn = new Panel { BackColor = Theme.Bg };
+            _aboutColumn.Paint += AboutPaint;
+            _aboutHost = new JBScrollHost(_aboutColumn);
             _aboutTelegram = new JBButton { Kind = BtnKind.Soft, BrandIcon = "telegram", Text = "@joegoldberg2025", Radius = 4, Height = Ui.S(33) };
             _aboutTelegram.Click += delegate { OpenUrl("https://t.me/joegoldberg2025"); };
-            _aboutPage.Controls.Add(_aboutTelegram);
+            _aboutColumn.Controls.Add(_aboutTelegram);
+            _aboutPage.Controls.Add(_aboutHost);
 
             Controls.Add(_navProfiles);
+            Controls.Add(_navProxies);
+            Controls.Add(_navExtensions);
             Controls.Add(_navSettings);
+            Controls.Add(_navTools);
             Controls.Add(_navAbout);
             Controls.Add(_themeSwitch);
             Controls.Add(_search);
@@ -221,6 +309,9 @@ namespace JoeBrowser
             Controls.Add(_host);
             Controls.Add(_emptyPanel);
             Controls.Add(_settingsPage);
+            Controls.Add(_toolsPage);
+            Controls.Add(_proxyPage);
+            Controls.Add(_extensionPage);
             Controls.Add(_aboutPage);
             Controls.Add(_toast);
             Controls.Add(_minBtn);
@@ -230,11 +321,15 @@ namespace JoeBrowser
             _pulse = new Timer { Interval = 90 };
             _pulse.Tick += delegate
             {
+                /* The running-card animation is cosmetic, so it stops costing anything the moment
+                   the window cannot be seen: hidden, minimised or behind another app. */
                 if (_sessions.Count == 0) { _pulse.Stop(); return; }
+                if (!Visible || WindowState == FormWindowState.Minimized) return;
                 foreach (var c in _cards.Values) if (c.Running) c.Invalidate();
             };
 
             _built = true;
+            ApplyLanguage();
         }
 
         private void OpenUrl(string url)
@@ -243,37 +338,838 @@ namespace JoeBrowser
             catch (Exception ex) { Log.Error("Open url failed", ex); Toast("Could not open the link", ToastKind.Error); }
         }
 
+        /* ------------------------------------------------------------------ *
+         * Interface language. Codes are storage keys only - the picker always
+         * shows a circular flag and the full language name.
+         * ------------------------------------------------------------------ */
+
+        private static IEnumerable<LangItem> UiLangItems()
+        {
+            var list = new List<LangItem>();
+            foreach (var l in L10n.Languages)
+            {
+                string subtitle = l.Native.Equals(l.English, StringComparison.OrdinalIgnoreCase)
+                    ? "" : l.Native;
+                list.Add(new LangItem(l.Key, l.Flag, l.English, subtitle));
+            }
+            return list;
+        }
+
+        private void ApplyLanguage()
+        {
+            if (!_built) return;
+
+            _navProfiles.Text = L10n.T("nav.profiles");
+            _navProxies.Text = L10n.T("nav.proxies");
+            _navExtensions.Text = L10n.T("nav.extensions");
+            _navSettings.Text = L10n.T("nav.settings");
+            _navTools.Text = L10n.T("header.tools");
+            _navAbout.Text = L10n.T("nav.about");
+            _themeSwitch.NightText = L10n.T("theme.night");
+            _themeSwitch.DayText = L10n.T("theme.day");
+            _themeSwitch.Invalidate();
+
+            _search.Placeholder = L10n.T("btn.search");
+            _newBtn.Text = L10n.T("btn.new");
+            _saveSettings.Text = L10n.T("btn.save");
+            _bulkOpen.Text = L10n.T("btn.openall");
+            _bulkStop.Text = L10n.T("btn.stop");
+            _bulkDup.Text = L10n.T("btn.duplicate");
+            _bulkDel.Text = L10n.T("btn.delete");
+            _emptyBtn.Text = L10n.T("empty.action");
+
+            foreach (var card in _setCards)
+            {
+                var lbl = card.Panel.Tag as JBLabel;
+                if (lbl != null && lbl.Text != L10n.T(card.Key)) lbl.Text = L10n.T(card.Key);
+                foreach (var r in card.Rows) r.Title.Text = L10n.T(r.Key);
+            }
+            _setBrowse.Text = L10n.T("btn.browse");
+            _setDetect.Text = L10n.T("btn.detect");
+            _setOpenData.Text = L10n.T("btn.opendata");
+            _setDownload.Text = L10n.T("btn.download");
+            _setDefaultGroup.Placeholder = L10n.T("set.group.hint");
+
+            _toolsPage.ApplyText();
+            _emptyPanel.Invalidate();
+            _aboutColumn.Invalidate();
+            FreezeRedraw(LayoutAll);
+        }
+
+        /* ------------------------------------------------------------------ *
+         * Tools & data - batch / maintenance operations, all local.
+         * ------------------------------------------------------------------ */
+
+        private void ToolsAction(string key)
+        {
+            try
+            {
+                switch (key)
+                {
+                    case "batch": BatchCreate(); break;
+                    case "import": ImportProfiles(); break;
+                    case "export": ExportProfiles(); break;
+                    case "proxy": ProxyBatchTest(); break;
+                    case "cookies": CookieManager(); break;
+                    case "ext": OpenExtensionFolder(); break;
+                    case "trash": RecycleBin(); break;
+                    case "shortcuts": ShortcutHelp(); break;
+                    case "clean": ClearCaches(); break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Tools action failed: " + key, ex);
+                Toast(ShortError(ex), ToastKind.Error);
+            }
+        }
+
+        private void BatchCreate()
+        {
+            string prefix, group, proxyText;
+            int count;
+
+            using (var dlg = new ToolDialog("Batch create", "Create", "Cancel", 520, 660))
+            {
+                dlg.AddNote("Every profile gets its own fingerprint, cookies and browser data.");
+                var prefixBox = dlg.AddField("NAME PREFIX", "Profile", "", "pencil", false, 33);
+                var countBox = dlg.AddSelect("HOW MANY", new[] { "5", "10", "25", "50", "100" }, 1, "layers");
+                var groupBox = dlg.AddField("GROUP / FOLDER", _settings.DefaultGroup ?? "",
+                    L10n.T("set.group.hint"), "folder", false, 33);
+                var proxyBox = dlg.AddField("PROXIES · ONE PER LINE (OPTIONAL)", "",
+                    "http://user:pass@host:port", "proxy", true, 120);
+                dlg.AddNote("Also accepts socks5://host:port and host:port:user:pass. Lines are reused in order.");
+
+                dlg.Validator = delegate
+                {
+                    if (!string.IsNullOrWhiteSpace(prefixBox.Value)) return true;
+                    Toast("Give the profiles a name prefix", ToastKind.Info);
+                    return false;
+                };
+
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                prefix = (prefixBox.Value ?? "Profile").Trim();
+                group = (groupBox.Value ?? "").Trim();
+                proxyText = proxyBox.Value ?? "";
+                if (!int.TryParse(countBox.Value, out count) || count < 1) count = 10;
+                if (count > 200) count = 200;
+            }
+
+            string[] lines = proxyText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim()).Where(x => x.Length > 0).ToArray();
+
+            int made = 0;
+            for (int i = 0; i < count; i++)
+            {
+                var p = new Profile();
+                p.Name = prefix + " " + (made + 1).ToString("00");
+                p.Group = group;
+                if (lines.Length > 0)
+                {
+                    var proxy = ParseProxyLine(lines[made % lines.Length]);
+                    if (proxy.Enabled) p.Proxy = proxy;
+                }
+                p.Tools.ProxyWatch = p.Proxy.Enabled;
+                FingerprintFactory.Regenerate(p.Fp, "System default", p.Proxy);
+                _store.Save(p);
+                made++;
+            }
+
+            ReloadCards(true);
+            Toast(made + " profiles created", ToastKind.Success);
+        }
+
+        /// <summary>Accepts scheme://user:pass@host:port, host:port and host:port:user:pass.</summary>
+        private static ProxyConfig ParseProxyLine(string line)
+        {
+            var p = new ProxyConfig();
+            string s = (line ?? "").Trim();
+            if (s.Length == 0) return p;
+
+            string type = "http";
+            int scheme = s.IndexOf("://", StringComparison.Ordinal);
+            if (scheme > 0)
+            {
+                string head = s.Substring(0, scheme).ToLowerInvariant();
+                if (head == "socks5" || head == "socks5h") type = "socks5";
+                else if (head == "https") type = "https";
+                s = s.Substring(scheme + 3);
+            }
+            int slash = s.IndexOf('/');
+            if (slash > 0) s = s.Substring(0, slash);
+
+            string user = "", pass = "";
+            int at = s.LastIndexOf('@');
+            if (at > 0)
+            {
+                string cred = s.Substring(0, at);
+                s = s.Substring(at + 1);
+                int colon = cred.IndexOf(':');
+                if (colon >= 0) { user = cred.Substring(0, colon); pass = cred.Substring(colon + 1); }
+                else user = cred;
+            }
+
+            string[] bits = s.Split(':');
+            if (bits.Length < 2 || string.IsNullOrWhiteSpace(bits[0])) return p;
+            int port;
+            if (!int.TryParse(bits[1], out port) || port <= 0 || port > 65535) return p;
+            if (bits.Length >= 4) { user = bits[2]; pass = bits[3]; }
+
+            p.Type = type;
+            p.Host = bits[0].Trim();
+            p.Port = port;
+            p.User = user;
+            p.Password = pass;
+            return p;
+        }
+
+        private void ImportProfiles()
+        {
+            using (var ofd = new OpenFileDialog
+            {
+                Title = "Import profiles",
+                Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*",
+                CheckFileExists = true
+            })
+            {
+                if (ofd.ShowDialog(this) != DialogResult.OK) return;
+                var list = _store.ImportFrom(ofd.FileName);
+                if (list.Count == 0) { Toast("No profiles found in that file", ToastKind.Error); return; }
+                foreach (var p in list) _store.Save(p);
+                ReloadCards(true);
+                Toast(list.Count + " profiles imported · re-enter proxy passwords", ToastKind.Success);
+            }
+        }
+
+        private void ExportProfiles()
+        {
+            Directory.CreateDirectory(AppPaths.Exports);
+            using (var sfd = new SaveFileDialog
+            {
+                Title = "Export profiles",
+                Filter = "JSON files (*.json)|*.json",
+                InitialDirectory = AppPaths.Exports,
+                FileName = "joebrowser-profiles-" + DateTime.Now.ToString("yyyyMMdd-HHmm") + ".json",
+                OverwritePrompt = true
+            })
+            {
+                if (sfd.ShowDialog(this) != DialogResult.OK) return;
+                int n = _store.ExportTo(sfd.FileName, _profiles);
+                Toast(n + " profiles exported · proxy secrets excluded", ToastKind.Success);
+            }
+        }
+
+        private void ProxyBatchTest()
+        {
+            using (var dlg = new ToolDialog("Proxy batch test", "Close", "", 620, 640))
+            {
+                dlg.Secondary.Visible = false;
+                var input = dlg.AddField("PROXIES · ONE PER LINE", "",
+                    "http://user:pass@host:port", "proxy", true, 150);
+                var output = dlg.AddReadOnlyText("Results appear here.", 210);
+                dlg.AddAction("Test every proxy", "bolt", async delegate
+                {
+                    string[] lines = (input.Value ?? "")
+                        .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(x => x.Trim()).Where(x => x.Length > 0).ToArray();
+                    if (lines.Length == 0)
+                    {
+                        output.Text = "Paste at least one proxy above.";
+                        return;
+                    }
+
+                    output.Text = "Checking " + lines.Length + " proxies…";
+                    var sb = new StringBuilder();
+                    foreach (string line in lines)
+                    {
+                        if (output.IsDisposed) return;
+                        var cfg = ParseProxyLine(line);
+                        if (!cfg.Enabled)
+                        {
+                            sb.Append("SKIP   ").Append(line).Append("   (could not parse)").AppendLine();
+                            continue;
+                        }
+                        try
+                        {
+                            var r = await ProxyTester.TestAsync(cfg);
+                            sb.Append(r.Ok ? "OK     " : "FAIL   ")
+                              .Append(cfg.Host).Append(':').Append(cfg.Port)
+                              .Append("   ").Append(r.Ok ? r.Ip : r.Error)
+                              .Append(r.Ok ? "   " + r.Country + "   " + r.LatencyMs + " ms" : "")
+                              .AppendLine();
+                        }
+                        catch (Exception ex)
+                        {
+                            sb.Append("FAIL   ").Append(cfg.Host).Append("   ").Append(ex.Message).AppendLine();
+                        }
+                    }
+                    if (!output.IsDisposed) output.Text = sb.ToString();
+                });
+                dlg.ShowDialog(this);
+            }
+        }
+
+        private void CookieManager()
+        {
+            var running = _sessions.Values.Where(s => s != null && s.IsRunning && s.Profile != null).ToList();
+            using (var dlg = new ToolDialog("Cookie manager", "Close", "", 560, 560))
+            {
+                dlg.Secondary.Visible = false;
+                dlg.AddNote(running.Count == 0
+                    ? "Open a profile first. Cookies are read from a running browser."
+                    : "Choose a running browser, then import or export its cookies.");
+                var names = running.Select(s => s.Profile.Name ?? s.Profile.Id).ToArray();
+                var sel = dlg.AddSelect("RUNNING BROWSER", names, names.Length > 0 ? 0 : -1, "window");
+                var status = dlg.AddReadOnlyText("", 90);
+                dlg.AddAction("Export cookies…", "download", async delegate
+                {
+                    if (sel.SelectedIndex < 0 || status.IsDisposed) return;
+                    if (running.Count <= sel.SelectedIndex) { status.Text = "Open a profile first."; return; }
+                    try
+                    {
+                        string json = await running[sel.SelectedIndex].ExportCookiesAsync();
+                        if (status.IsDisposed) return;
+                        using (var sfd = new SaveFileDialog
+                        {
+                            Title = "Export cookies",
+                            Filter = "JSON files (*.json)|*.json",
+                            FileName = "cookies-" + DateTime.Now.ToString("yyyyMMdd-HHmm") + ".json"
+                        })
+                        {
+                            if (sfd.ShowDialog(dlg) != DialogResult.OK) return;
+                            File.WriteAllText(sfd.FileName, json, new UTF8Encoding(false));
+                        }
+                        status.Text = "Cookies exported.";
+                    }
+                    catch (Exception ex) { if (!status.IsDisposed) status.Text = ex.Message; }
+                });
+                dlg.AddAction("Import cookies…", "external", async delegate
+                {
+                    if (sel.SelectedIndex < 0 || status.IsDisposed) return;
+                    if (running.Count <= sel.SelectedIndex) { status.Text = "Open a profile first."; return; }
+                    try
+                    {
+                        using (var ofd = new OpenFileDialog
+                        {
+                            Title = "Import cookies",
+                            Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*",
+                            CheckFileExists = true
+                        })
+                        {
+                            if (ofd.ShowDialog(dlg) != DialogResult.OK) return;
+                            string json = File.ReadAllText(ofd.FileName, Encoding.UTF8);
+                            int n = await running[sel.SelectedIndex].ImportCookiesAsync(json);
+                            if (!status.IsDisposed) status.Text = n + " cookies imported.";
+                        }
+                    }
+                    catch (Exception ex) { if (!status.IsDisposed) status.Text = ex.Message; }
+                });
+                dlg.ShowDialog(this);
+            }
+        }
+
+        private void OpenExtensionFolder()
+        {
+            ExtensionManager.EnsureAll();
+            try
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", "\"" + AppPaths.Extensions + "\"")
+                { UseShellExecute = true });
+            }
+            catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
+        }
+
+        private void RecycleBin()
+        {
+            ProfileStore.TrashItem chosen = null;
+            using (var dlg = new ToolDialog("Recycle bin", "Restore", "Close", 560, 540))
+            {
+                var items = _store.ListTrash();
+                var list = new ListBox
+                {
+                    BackColor = Theme.Input,
+                    ForeColor = Theme.Text,
+                    Font = Theme.Body,
+                    BorderStyle = BorderStyle.FixedSingle,
+                    IntegralHeight = false
+                };
+                foreach (var item in items) list.Items.Add(item);
+                dlg.AddRow(null, list, Ui.S(200));
+                dlg.AddNote(items.Count == 0
+                    ? "The recycle bin is empty."
+                    : "Select a profile and choose Restore to bring it back with its cookies.");
+                dlg.Validator = delegate
+                {
+                    chosen = list.SelectedItem as ProfileStore.TrashItem;
+                    if (chosen != null) return true;
+                    Toast("Select a profile first", ToastKind.Info);
+                    return false;
+                };
+                dlg.AddAction("Empty recycle bin", "trash", delegate
+                {
+                    if (!ConfirmForm.Ask(dlg, "Empty recycle bin",
+                        "Erase every deleted profile from the recycle bin?",
+                        "This cannot be undone. Browser data folders stay on disk.", "Empty", BtnKind.Danger)) return;
+                    _store.EmptyTrash();
+                    list.Items.Clear();
+                    dlg.Primary.Enabled = false;
+                });
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            }
+
+            if (chosen == null) return;
+            if (_store.Restore(chosen.File))
+            {
+                ReloadCards(true);
+                Toast("\"" + (chosen.Name ?? chosen.Id) + "\" restored", ToastKind.Success);
+            }
+            else Toast("Could not restore that profile", ToastKind.Error);
+        }
+
+        /// <summary>Shortcut table shared by the help dialog and the About page.</summary>
+        private static readonly string[][] ShortcutRows =
+        {
+            new[] { "Ctrl + N", "New profile", "PROFILE LIST" },
+            new[] { "Ctrl + F", "Search profiles", "" },
+            new[] { "Ctrl + O", "Change sort order", "" },
+            new[] { "Ctrl + A", "Select every visible profile", "" },
+            new[] { "F2", "Edit the focused profile", "" },
+            new[] { "F5", "Reload profiles from disk", "" },
+            new[] { "Esc", "Clear search or selection", "" },
+            new[] { "Shift + click", "Select a range of profiles", "" },
+            new[] { "Ctrl + V", "Paste as human, typed like a person", "IN THE BROWSER" },
+            new[] { "Right click", "Restored on sites that block it", "" },
+            new[] { "On-page alert", "Proxy rotated or went offline", "" }
+        };
+
+        private void ShortcutHelp()
+        {
+            using (var dlg = new ToolDialog("Keyboard shortcuts", "Close", "", 560, 560))
+            {
+                dlg.Secondary.Visible = false;
+                string text = "";
+                foreach (var s in ShortcutRows)
+                {
+                    if (s[2].Length > 0) text += (text.Length > 0 ? "\r\n\r\n" : "") + s[2] + "\r\n";
+                    text += s[0].PadRight(18) + s[1] + "\r\n";
+                }
+                dlg.AddReadOnlyText(text, 360);
+                dlg.ShowDialog(this);
+            }
+        }
+
+        private void ClearCaches()
+        {
+            if (!ConfirmForm.Ask(this, "Clear browser caches",
+                "Empty Chromium cache folders for every profile?",
+                "Cookies, logins and local storage are kept. Close running browsers first for the best result.",
+                "Clean", BtnKind.Primary)) return;
+            long bytes = ProfileStore.ClearCaches();
+            Toast("Freed " + (bytes / 1048576.0).ToString("0.0") + " MB", ToastKind.Success);
+        }
+
+        /* ------------------------------------------------------------------ *
+         * Proxy Library - save once, check, pick when creating a profile, and
+         * re-point a running browser without closing its tab or losing cookies.
+         * ------------------------------------------------------------------ */
+
+        private void ProxyAction(string key, int index)
+        {
+            try
+            {
+                switch (key)
+                {
+                    case "add": EditProxy(-1); break;
+                    case "edit": EditProxy(index); break;
+                    case "delete": DeleteProxy(index); break;
+                    case "import": ImportProxyList(); break;
+                    case "checkall": CheckAllProxies(); break;
+                    case "test": CheckProxy(index); break;
+                    case "use": CreateProfileWithProxy(index); break;
+                    case "live": ApplyProxyLive(index); break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Proxy action failed: " + key, ex);
+                Toast(ShortError(ex), ToastKind.Error);
+            }
+        }
+
+        private ProxyEntry ProxyAt(int index)
+        {
+            return index >= 0 && index < _proxies.Count ? _proxies[index] : null;
+        }
+
+        private void SaveProxies()
+        {
+            ProxyVault.Save(_proxies);
+            _proxyPage.SetItems(_proxies);
+        }
+
+        private void EditProxy(int index)
+        {
+            ProxyEntry entry = ProxyAt(index);
+            bool isNew = entry == null;
+            var cfg = isNew ? new ProxyConfig() : ProxyVault.Copy(entry.Config);
+            string name, note;
+            int typeIdx;
+
+            using (var dlg = new ToolDialog(isNew ? "Add proxy" : "Edit proxy", "Save", "Cancel", 540, 560))
+            {
+                dlg.AddNote(isNew
+                    ? "Saved proxies can be picked when creating a profile, or applied to a running browser."
+                    : "Changes apply the next time a profile uses this proxy.");
+                var nameBox = dlg.AddField("NAME", isNew ? "" : entry.Name, "Home IP · Frankfurt", "pencil", false, 33);
+                var typeBox = dlg.AddSelect("TYPE", new[] { "HTTP", "HTTPS", "SOCKS5" },
+                    cfg.Type == "socks5" ? 2 : cfg.Type == "https" ? 1 : 0, "proxy");
+                var lineBox = dlg.AddField("HOST : PORT",
+                    isNew || !cfg.Enabled ? "" : cfg.Host + ":" + cfg.Port, "proxy.example.com:8080", "globe", false, 33);
+                var userBox = dlg.AddField("USERNAME (OPTIONAL)", cfg.User, "Optional", "user", false, 33);
+                var passBox = dlg.AddField("PASSWORD (OPTIONAL)", cfg.Password, "Optional", "key", false, 33);
+                var noteBox = dlg.AddField("NOTE (OPTIONAL)", isNew ? "" : entry.Note, "Optional", "file", false, 33);
+                dlg.AddNote("Passwords are encrypted on this device with Windows DPAPI and never written to exports.");
+
+                dlg.Validator = delegate
+                {
+                    string rawLine = (lineBox.Value ?? "").Trim();
+                    int colon = rawLine.LastIndexOf(':');
+                    int port;
+                    if (colon < 1 || !int.TryParse(rawLine.Substring(colon + 1), out port) || port < 1 || port > 65535)
+                    {
+                        Toast("Enter the host and port, for example proxy.example.com:8080", ToastKind.Info);
+                        return false;
+                    }
+                    return true;
+                };
+
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                name = (nameBox.Value ?? "").Trim();
+                note = (noteBox.Value ?? "").Trim();
+                typeIdx = typeBox.SelectedIndex;
+                string line = (lineBox.Value ?? "").Trim();
+                int c = line.LastIndexOf(':');
+                cfg.Type = typeIdx == 2 ? "socks5" : typeIdx == 1 ? "https" : "http";
+                cfg.Host = line.Substring(0, c).Trim();
+                cfg.Port = int.Parse(line.Substring(c + 1));
+                cfg.User = (userBox.Value ?? "").Trim();
+                cfg.Password = passBox.Value ?? "";
+            }
+
+            if (isNew)
+            {
+                entry = new ProxyEntry { Name = name, Note = note, Config = cfg };
+                entry.Config.LastIp = "";
+                _proxies.Add(entry);
+            }
+            else
+            {
+                entry.Name = name;
+                entry.Note = note;
+                entry.Config = cfg;
+                entry.LastStatus = 0;
+            }
+            SaveProxies();
+            Toast(isNew ? "Proxy saved" : "Proxy updated", ToastKind.Success);
+        }
+
+        private void DeleteProxy(int index)
+        {
+            var entry = ProxyAt(index);
+            if (entry == null) return;
+            if (!ConfirmForm.Ask(this, "Delete proxy", "Remove \"" + (string.IsNullOrWhiteSpace(entry.Name) ? entry.Connection : entry.Name) + "\" from the library?",
+                "Profiles already using it keep their own copy.", "Delete", BtnKind.Danger)) return;
+            _proxies.RemoveAt(index);
+            SaveProxies();
+            Toast("Proxy removed", ToastKind.Success);
+        }
+
+        private void ImportProxyList()
+        {
+            using (var ofd = new OpenFileDialog
+            {
+                Title = "Import proxy list",
+                Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*",
+                CheckFileExists = true
+            })
+            {
+                if (ofd.ShowDialog(this) != DialogResult.OK) return;
+                string[] lines = File.ReadAllLines(ofd.FileName);
+                int added = 0;
+                foreach (string raw in lines)
+                {
+                    var cfg = ProxyVault.ParseLine(raw);
+                    if (!cfg.Enabled) continue;
+                    _proxies.Add(new ProxyEntry { Config = cfg, Name = cfg.Host });
+                    added++;
+                }
+                SaveProxies();
+                Toast(added + (added == 1 ? " proxy" : " proxies") + " imported", added > 0 ? ToastKind.Success : ToastKind.Info);
+            }
+        }
+
+        private async void CheckAllProxies()
+        {
+            if (_proxies.Count == 0) { Toast("Add a proxy first", ToastKind.Info); return; }
+            _proxyPage.SetBusy(true, "Checking…");
+            try
+            {
+                for (int i = 0; i < _proxies.Count; i++)
+                {
+                    var e = _proxies[i];
+                    var r = await ProxyTester.TestAsync(e.Config);
+                    ApplyProxyResult(e, r);
+                    e.LastChecked = DateTime.Now;
+                    _proxyPage.RefreshRows();
+                }
+                ProxyVault.Save(_proxies);
+                int ok = _proxies.Count(x => x.LastStatus == 1);
+                Toast(ok + " of " + _proxies.Count + " proxies working", ok > 0 ? ToastKind.Success : ToastKind.Error);
+            }
+            catch (Exception ex) { Log.Error("Proxy check failed", ex); Toast(ShortError(ex), ToastKind.Error); }
+            finally { _proxyPage.SetBusy(false, ""); }
+        }
+
+        private async void CheckProxy(int index)
+        {
+            var e = ProxyAt(index);
+            if (e == null) return;
+            try
+            {
+                var r = await ProxyTester.TestAsync(e.Config);
+                ApplyProxyResult(e, r);
+                e.LastChecked = DateTime.Now;
+                ProxyVault.Save(_proxies);
+                _proxyPage.RefreshRows();
+                Toast(r.Ok ? "Working · " + r.Ip + " · " + r.LatencyMs + " ms" : "Offline · " + r.Error,
+                    r.Ok ? ToastKind.Success : ToastKind.Error);
+            }
+            catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
+        }
+
+        private static void ApplyProxyResult(ProxyEntry e, ProxyCheckResult r)
+        {
+            if (e == null || r == null) return;
+            e.LastStatus = r.Ok ? 1 : -1;
+            if (!r.Ok) return;
+            e.LastIp = r.Ip ?? "";
+            e.LastCountry = r.Country ?? "";
+            e.LastCity = r.City ?? "";
+            e.LastLatencyMs = r.LatencyMs;
+            if (e.Config == null) e.Config = new ProxyConfig();
+            e.Config.LastIp = r.Ip ?? "";
+            e.Config.LastCountry = r.Country ?? "";
+            e.Config.LastCountryCode = r.CountryCode ?? "";
+            e.Config.LastCity = r.City ?? "";
+            e.Config.LastTimezone = r.Timezone ?? "";
+        }
+
+        private void CreateProfileWithProxy(int index)
+        {
+            var e = ProxyAt(index);
+            if (e == null) return;
+            var p = new Profile();
+            p.Name = "Profile " + (_profiles.Count + 1).ToString("00");
+            p.Proxy = ProxyVault.Copy(e.Config);
+            p.Tools.ProxyWatch = true;
+            FingerprintFactory.Regenerate(p.Fp, "System default", p.Proxy);
+            using (var dlg = new EditorForm(p, true, _settings))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                _store.Save(dlg.Result);
+                ReloadCards(true);
+                SetPage(0);
+                Toast("Profile created with the saved proxy", ToastKind.Success);
+            }
+        }
+
+        /// <summary>
+        /// The relay reads its upstream from the live Profile reference on every new
+        /// connection, so replacing Proxy here reroutes traffic inside the SAME browser
+        /// process: tabs, cookies, logins and local storage are never closed or reset.
+        /// </summary>
+        private void ApplyProxyLive(int index)
+        {
+            var e = ProxyAt(index);
+            if (e == null) return;
+            var running = _sessions
+                .Where(kv => kv.Value != null && kv.Value.IsRunning && kv.Value.Profile != null)
+                .ToList();
+            if (running.Count == 0)
+            {
+                Toast("Open a profile first, then click a proxy row to change it live", ToastKind.Info);
+                return;
+            }
+
+            string[] names = running.Select(kv => kv.Value.Profile.Name ?? kv.Key).ToArray();
+            int picked;
+            using (var dlg = new ToolDialog("Change proxy, keep the tab open", "Apply now", "Cancel", 540, 400))
+            {
+                dlg.AddNote("The current browser window stays open. Cookies, logins and form data are untouched; only new connections use the new proxy.");
+                var sel = dlg.AddSelect("RUNNING PROFILE", names, 0, "window");
+                dlg.AddNote("New proxy: " + e.Connection);
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                picked = sel.SelectedIndex < 0 ? 0 : sel.SelectedIndex;
+            }
+            if (picked >= running.Count) return;
+
+            var session = running[picked].Value;
+            var p = session.Profile;
+            p.Proxy = ProxyVault.Copy(e.Config);
+            p.Tools.ProxyWatch = true;
+            _store.Save(p);
+            session.UpdateProfile(p);
+            ReloadCards(true);
+            Toast("Proxy changed live · your tab and session are still open", ToastKind.Success);
+        }
+
+        /* ------------------------------------------------------------------ *
+         * Extensions Library
+         * ------------------------------------------------------------------ */
+
+        private void ExtensionAction(string key, int index)
+        {
+            try
+            {
+                switch (key)
+                {
+                    case "url": AddExtensionByUrl(); break;
+                    case "folder": AddExtensionFolder(); break;
+                    case "openfolder": OpenExtensionFolder(); break;
+                    case "toggle": ToggleExtension(index); break;
+                    case "delete": DeleteExtension(index); break;
+                    case "store": OpenExtensionStore(index); break;
+                    case "recommend": OpenRecommendation(index); break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Extension action failed: " + key, ex);
+                Toast(ShortError(ex), ToastKind.Error);
+            }
+        }
+
+        private void SaveExtensions()
+        {
+            ExtensionCatalog.Save(_extensions);
+            _extensionPage.SetItems(_extensions);
+        }
+
+        private async void AddExtensionByUrl()
+        {
+            string url;
+            using (var dlg = new ToolDialog("Add extension by store link", "Import", "Cancel", 560, 340))
+            {
+                dlg.AddNote("Paste a Chrome Web Store link (or its 32-character id). The public CRX is downloaded and unpacked into Joe Browser's own extensions folder.");
+                var field = dlg.AddField("CHROME WEB STORE LINK", "", "https://chromewebstore.google.com/detail/...", "link", false, 33);
+                dlg.AddNote("No store account or system browser is touched. If the store blocks a direct download, add the unpacked folder instead.");
+                dlg.Validator = delegate
+                {
+                    if (!string.IsNullOrWhiteSpace(field.Value)) return true;
+                    Toast("Paste the extension link first", ToastKind.Info);
+                    return false;
+                };
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                url = (field.Value ?? "").Trim();
+            }
+
+            _extensionPage.SetBusy(true, "Importing…");
+            try
+            {
+                var item = await Task.Run(new Func<ExtensionItem>(delegate { return ExtensionCatalog.ImportFromUrl(url); }));
+                _extensions.Add(item);
+                SaveExtensions();
+                Toast("\"" + item.Name + "\" added to all Chromium profiles", ToastKind.Success);
+            }
+            catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
+            finally { _extensionPage.SetBusy(false, ""); }
+        }
+
+        private void AddExtensionFolder()
+        {
+            using (var fbd = new FolderBrowserDialog { Description = "Select an unpacked extension folder (contains manifest.json)" })
+            {
+                if (fbd.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    var item = ExtensionCatalog.ImportFromFolder(fbd.SelectedPath);
+                    _extensions.Add(item);
+                    SaveExtensions();
+                    Toast("\"" + item.Name + "\" added", ToastKind.Success);
+                }
+                catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
+            }
+        }
+
+        private void ToggleExtension(int index)
+        {
+            if (index < 0 || index >= _extensions.Count) return;
+            _extensions[index].Enabled = !_extensions[index].Enabled;
+            SaveExtensions();
+            Toast(_extensions[index].Enabled ? "Enabled for the next browser launch" : "Disabled", ToastKind.Success);
+        }
+
+        private void DeleteExtension(int index)
+        {
+            if (index < 0 || index >= _extensions.Count) return;
+            var item = _extensions[index];
+            if (!ConfirmForm.Ask(this, "Remove extension", "Remove \"" + item.Name + "\" from Joe Browser?",
+                "The copied files stay on disk; nothing is removed from your system browser.", "Remove", BtnKind.Danger)) return;
+            _extensions.RemoveAt(index);
+            SaveExtensions();
+            Toast("Extension removed", ToastKind.Success);
+        }
+
+        private void OpenExtensionStore(int index)
+        {
+            if (index < 0 || index >= _extensions.Count) return;
+            string url = _extensions[index].StoreUrl;
+            if (string.IsNullOrWhiteSpace(url)) { Toast("This extension was added from a local folder", ToastKind.Info); return; }
+            OpenUrl(url);
+        }
+
+        private void OpenRecommendation(int index)
+        {
+            var rec = ExtensionCatalog.Recommended();
+            if (index < 0 || index >= rec.Length) return;
+            OpenUrl(ExtensionCatalog.StoreSearchUrl(rec[index][2]));
+        }
+
         private void BuildSettingsPage(Panel page)
         {
             _setBrowserInfo = Label(LabelRole.Strong, "Detecting…");
-            _setBrowserHint = Label(LabelRole.Body,
-                "Leave empty to use the Chromium browser installed on this PC.");
-
-            _cardBrowser = Section("BROWSER ENGINE", 146);
-            _cardBrowser.Controls.Add(_setBrowserInfo);
-            _setBrowserPath = Field("Automatic (recommended)");
-            _setBrowse = new JBButton { Kind = BtnKind.Soft, Text = "Browse", Radius = 4, Height = Ui.S(33) };
-            _setDetect = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = "Auto-detect", Radius = 4, Height = Ui.S(33) };
-            _cardBrowser.Controls.Add(_setBrowserPath);
-            _cardBrowser.Controls.Add(_setBrowse);
-            _cardBrowser.Controls.Add(_setDetect);
-            _cardBrowser.Controls.Add(_setBrowserHint);
-
-            _setStartHint = Label(LabelRole.Body, "Opened in a new tab every time a profile starts.");
-            _cardStart = Section("START PAGE", 120);
-            _setStartUrl = Field("https://www.google.com");
-            _cardStart.Controls.Add(_setStartUrl);
-            _cardStart.Controls.Add(_setStartHint);
-
+            _setBrowserInfo.TextAlign = ContentAlignment.MiddleRight;
             _setStoragePath = Label(LabelRole.Body, AppPaths.Root);
-            _setStorageHint = Label(LabelRole.Body, "Everything stays on this device. No account, no cloud.");
-            _cardStorage = Section("STORAGE", 144);
-            _cardStorage.Controls.Add(_setStoragePath);
-            _setOpenData = new JBButton { Kind = BtnKind.Soft, Text = "Open data folder", Radius = 4, Height = Ui.S(33) };
-            _setDownload = new JBButton { Kind = BtnKind.Soft, Text = "Download Chromium", Radius = 4, Height = Ui.S(33) };
-            _cardStorage.Controls.Add(_setOpenData);
-            _cardStorage.Controls.Add(_setDownload);
-            _cardStorage.Controls.Add(_setStorageHint);
+            _setStoragePath.TextAlign = ContentAlignment.MiddleRight;
+
+            _setBrowserPath = Field("Automatic (recommended)");
+            _setBrowserPath.Value = _settings.BrowserPath ?? "";
+            _setBrowse = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.browse"), Radius = 4, Height = Ui.S(33) };
+            _setDetect = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = L10n.T("btn.detect"), Radius = 4, Height = Ui.S(33) };
+            _setStartUrl = Field("https://www.google.com");
+            _setDefaultGroup = Field(L10n.T("set.group.hint"));
+            _setDefaultGroup.Value = _settings.DefaultGroup ?? "";
+            _setOpenData = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.opendata"), Radius = 4, Height = Ui.S(33) };
+            _setDownload = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.download"), Radius = 4, Height = Ui.S(33) };
+
+            /* Interface language: circular flag + full language name, never a bare code. */
+            _setLang = new JBLangPicker();
+            _setLang.SetItems(UiLangItems(), _settings.UiLanguage);
+            _setLang.SelectedIndexChanged += delegate
+            {
+                if (string.IsNullOrEmpty(_setLang.Value)) return;
+                _settings.UiLanguage = _setLang.Value;
+                L10n.Set(_setLang.Value);
+                _store.SaveSettings(_settings);
+            };
+
+            // Switches carry no caption of their own; the row title to the left is the label.
+            _setExtensions = new JBToggle { Checked = _settings.EnableExtensions };
+            _setCustomExt = new JBToggle { Checked = _settings.EnableCustomExtensions };
+            _setTrash = new JBToggle { Checked = _settings.UseTrash };
+            _setExtensions.CheckedChanged += delegate { _settings.EnableExtensions = _setExtensions.Checked; };
+            _setCustomExt.CheckedChanged += delegate { _settings.EnableCustomExtensions = _setCustomExt.Checked; };
+            _setTrash.CheckedChanged += delegate { _settings.UseTrash = _setTrash.Checked; };
 
             _setBrowse.Click += delegate { BrowseBrowser(); };
             _setDetect.Click += delegate { _setBrowserPath.Value = ""; UpdateBrowserInfo(); };
@@ -284,19 +1180,67 @@ namespace JoeBrowser
             };
             _setDownload.Click += delegate { var _ = DownloadBrowserAsync("chromium"); };
 
-            page.Controls.Add(_cardBrowser);
-            page.Controls.Add(_cardStart);
-            page.Controls.Add(_cardStorage);
+            var engine = Card("set.browser");
+            Row(engine, "set.row.detected", null, _setBrowserInfo);
+            Row(engine, "set.row.path", new[] { Ui.S(520), Ui.S(76), Ui.S(86) }, _setBrowserPath, _setBrowse, _setDetect);
+
+            var workspace = Card("set.workspace");
+            Row(workspace, "set.row.start", new[] { Ui.S(560) }, _setStartUrl);
+            Row(workspace, "set.row.group", new[] { Ui.S(300) }, _setDefaultGroup);
+            Row(workspace, "set.row.lang", new[] { Ui.S(280) }, _setLang);
+
+            var defaults = Card("set.tools");
+            Row(defaults, "set.ext", new[] { Ui.S(46) }, _setExtensions);
+            Row(defaults, "set.cext", new[] { Ui.S(46) }, _setCustomExt);
+            Row(defaults, "set.trash", new[] { Ui.S(46) }, _setTrash);
+
+            var storage = Card("set.storage");
+            Row(storage, "set.row.data", new[] { Ui.S(96) }, _setOpenData, _setStoragePath);
+            Row(storage, "set.row.build", new[] { Ui.S(110) }, _setDownload);
+
+            foreach (var c in _setCards) page.Controls.Add(c.Panel);
         }
 
-        private JBPanel Section(string title, int height)
+        /// <summary>A full-bleed settings section; rows are added by Row() and divided by hairlines.</summary>
+        private SetCard Card(string key)
         {
-            var card = new JBPanel { Size = new Size(Ui.S(680), Ui.S(height)) };
-            var lbl = Label(LabelRole.Accent, title);
-            lbl.Location = new Point(Ui.S(18), Ui.S(16));
-            lbl.Size = new Size(Ui.S(300), Ui.S(16));
-            card.Controls.Add(lbl);
+            var card = new SetCard { Panel = new JBPanel { Hoverable = false }, Key = key };
+            var lbl = Label(LabelRole.Accent, L10n.T(key));
+            lbl.SetBounds(Ui.S(18), Ui.S(14), Ui.S(400), Ui.S(18));
+            card.Panel.Controls.Add(lbl);
+            card.Panel.Tag = lbl;
+            _setCards.Add(card);
             return card;
+        }
+
+        /// <summary>
+        /// Adds a row. Controls sit flush against the right edge in the order given, each at its
+        /// resting width; buttons re-measure for the current language and text fields shrink first
+        /// when the window is narrow, so the label always keeps room on the left.
+        /// A trailing JBLabel argument is drawn as the row's right-aligned value instead.
+        /// </summary>
+        private SetRow Row(SetCard card, string key, int[] widths, params Control[] right)
+        {
+            var row = new SetRow { Key = key };
+            row.Title = Label(LabelRole.Strong, L10n.T(key));
+            row.Title.TextAlign = ContentAlignment.MiddleLeft;
+            card.Panel.Controls.Add(row.Title);
+
+            var list = new List<Control>();
+            var ws = new List<int>();
+            foreach (var c in right)
+            {
+                card.Panel.Controls.Add(c);
+                var asValue = c as JBLabel;
+                if (asValue != null) { row.Value = asValue; continue; }
+                list.Add(c);
+                int w = widths != null && ws.Count < widths.Length ? widths[ws.Count] : Ui.S(180);
+                ws.Add(w);
+            }
+            row.Controls = list.ToArray();
+            row.Widths = ws.ToArray();
+            card.Rows.Add(row);
+            return row;
         }
 
         private JBLabel Label(LabelRole role, string text)
@@ -341,6 +1285,11 @@ namespace JoeBrowser
                 url = "https://" + url;
             _settings.DefaultStartUrl = string.IsNullOrEmpty(url) ? "https://www.google.com" : url;
             _settings.ThemeMode = Theme.Dark ? 1 : 2;
+            _settings.DefaultGroup = (_setDefaultGroup.Value ?? "").Trim();
+            _settings.EnableExtensions = _setExtensions.Checked;
+            _settings.EnableCustomExtensions = _setCustomExt.Checked;
+            _settings.UseTrash = _setTrash.Checked;
+            if (!string.IsNullOrEmpty(_setLang.Value)) _settings.UiLanguage = _setLang.Value;
             _store.SaveSettings(_settings);
             Toast("Settings saved", ToastKind.Success);
         }
@@ -377,34 +1326,25 @@ namespace JoeBrowser
             Ui.Text(g, "Joe Browser", Theme.BodyBold, Theme.Text, Ui.S(52), Ui.S(18), sb - Ui.S(70));
 
             using (var p = new Pen(Theme.Line))
-            {
                 g.DrawLine(p, Ui.S(20), Ui.S(114), sb - Ui.S(20), Ui.S(114));
-                g.DrawLine(p, Ui.S(20), h - Ui.S(104), sb - Ui.S(20), h - Ui.S(104));
-            }
-
-            // ---- running status footer ----
-            float fy = h - Ui.S(92);
-            Icons.Draw(g, _sessions.Count > 0 ? "window" : "shield",
-                new RectangleF(Ui.S(20), fy + (Ui.S(40) - Ui.S(16)) / 2f, Ui.S(16), Ui.S(16)),
-                _sessions.Count > 0 ? Theme.Success : Theme.TextFaint);
-            string running = _sessions.Count > 0
-                ? _sessions.Count + " browser" + (_sessions.Count == 1 ? "" : "s") + " running"
-                : "Local-first · private";
-            Ui.Text(g, running, Theme.Small, Theme.TextDim, Ui.S(44), fy + (Ui.S(40) - Theme.Small.GetHeight(g)) / 2f, sb - Ui.S(64));
-            Ui.Text(g, "Version 1.0.0", Theme.Small, Theme.TextFaint, Ui.S(20), h - Ui.S(60), sb - Ui.S(40));
 
             // ---- page header band ----
-            string title = _page == 0 ? "Profiles" : _page == 1 ? "Settings" : "About";
-            string sub;
-            if (_page == 0)
+            string title, sub;
+            switch (_page)
             {
-                int shown = ShownCount();
-                sub = _filter.Length > 0
-                    ? shown + " of " + _profiles.Count + " profiles"
-                    : _profiles.Count + (_profiles.Count == 1 ? " profile" : " profiles");
+                case 0:
+                    title = L10n.T("header.profiles");
+                    int shown = ShownCount();
+                    sub = _filter.Length > 0
+                        ? shown + " of " + _profiles.Count + " profiles"
+                        : _profiles.Count + (_profiles.Count == 1 ? " profile" : " profiles");
+                    break;
+                case 1: title = L10n.T("header.proxies"); sub = L10n.T("sub.proxies"); break;
+                case 2: title = L10n.T("header.extensions"); sub = L10n.T("sub.extensions"); break;
+                case 3: title = L10n.T("header.settings"); sub = L10n.T("sub.settings"); break;
+                case 4: title = L10n.T("header.tools"); sub = L10n.T("sub.tools"); break;
+                default: title = L10n.T("header.about"); sub = L10n.T("sub.about"); break;
             }
-            else if (_page == 1) sub = "Browser, storage and start page";
-            else sub = "Version 1.0.0 · MIT License";
 
             Ui.Text(g, title, Theme.H1, Theme.Text, sb + Ui.S(ContentPad), Ui.S(12), w - sb - Ui.S(ContentPad) - Ui.S(180));
             Ui.Text(g, sub, Theme.Small, Theme.TextDim, sb + Ui.S(ContentPad), Ui.S(36), w - sb - Ui.S(ContentPad) - Ui.S(180));
@@ -431,9 +1371,13 @@ namespace JoeBrowser
             // navbar rows
             int navX = Ui.S(10), navW = sb - Ui.S(20);
             _themeSwitch.SetBounds(navX, Ui.S(64), navW, Ui.S(42));
-            _navProfiles.SetBounds(navX, Ui.S(122), navW, Ui.S(40));
-            _navSettings.SetBounds(navX, Ui.S(167), navW, Ui.S(40));
-            _navAbout.SetBounds(navX, Ui.S(212), navW, Ui.S(40));
+            int navY = Ui.S(122), navStep = Ui.S(45);
+            _navProfiles.SetBounds(navX, navY, navW, Ui.S(40));
+            _navProxies.SetBounds(navX, navY + navStep, navW, Ui.S(40));
+            _navExtensions.SetBounds(navX, navY + navStep * 2, navW, Ui.S(40));
+            _navSettings.SetBounds(navX, navY + navStep * 3, navW, Ui.S(40));
+            _navTools.SetBounds(navX, navY + navStep * 4, navW, Ui.S(40));
+            _navAbout.SetBounds(navX, navY + navStep * 5, navW, Ui.S(40));
 
             // caption buttons, flush with the top right corner
             int cw = Ui.S(46), ch = Ui.S(32);
@@ -467,15 +1411,19 @@ namespace JoeBrowser
             int emptyW = _emptyBtn.PreferredWidth(Ui.S(160));
             _emptyBtn.SetBounds((_emptyPanel.Width - emptyW) / 2, _emptyPanel.Height / 2 + Ui.S(52), emptyW, Ui.S(33));
 
-            _settingsPage.SetBounds(contentX, headerH, contentW, h - headerH);
+            int pageH = Math.Max(1, h - headerH);
+            _settingsPage.SetBounds(contentX, headerH, contentW, pageH);
             _settingsHost.SetBounds(Ui.S(ContentPad), Ui.S(8), Math.Max(0, contentW - Ui.S(ContentPad) * 2),
-                Math.Max(0, h - headerH - Ui.S(16)));
+                Math.Max(0, pageH - Ui.S(16)));
             LayoutSettings();
 
-            _aboutPage.SetBounds(contentX, headerH, contentW, h - headerH);
+            _toolsPage.SetBounds(contentX, headerH, contentW, pageH);
+            _proxyPage.SetBounds(contentX, headerH, contentW, pageH);
+            _extensionPage.SetBounds(contentX, headerH, contentW, pageH);
+            _aboutPage.SetBounds(contentX, headerH, contentW, pageH);
             LayoutAbout();
 
-            int tw = Math.Min(Ui.S(420), Math.Max(Ui.S(240), contentW - Ui.S(64)));
+            int tw = Math.Min(Ui.S(560), Math.Max(Ui.S(240), contentW - Ui.S(64)));
             _toast.SetBounds(contentX + (contentW - tw) / 2, h - Ui.S(60), tw, Ui.S(44));
 
             ResumeLayout(false);
@@ -484,110 +1432,201 @@ namespace JoeBrowser
 
         private void LayoutSettings()
         {
-            if (_settingsColumn == null) return;
+            if (_settingsColumn == null || _setCards.Count == 0) return;
             int hostW = Math.Max(Ui.S(320), _settingsHost.Width - Ui.S(10));
-            int colW = Math.Min(Ui.S(760), hostW);
-            int x = Math.Max(0, (hostW - colW) / 2);
+            // Windows UI pages run edge to edge; a centered column only wasted the viewport.
+            int colW = Math.Max(Ui.S(320), hostW - Ui.S(8));
+            int headH = Ui.S(44), rowH = Ui.S(54), pad = Ui.S(18), gap = Ui.S(16);
 
             _settingsColumn.SetBounds(0, 0, Math.Max(colW, hostW), _settingsColumn.Height);
 
             int y = Ui.S(4);
-            int gap = Ui.S(16);
-            PlaceCard(_cardBrowser, x, y, colW, 146);
-            LayoutBrowserCard(colW);
-            y += Ui.S(146) + gap;
-            PlaceCard(_cardStart, x, y, colW, 120);
-            LayoutStartCard(colW);
-            y += Ui.S(120) + gap;
-            PlaceCard(_cardStorage, x, y, colW, 144);
-            LayoutStorageCard(colW);
-            y += Ui.S(144) + Ui.S(24);
+            foreach (var card in _setCards)
+            {
+                int h = headH + card.Rows.Count * rowH + Ui.S(10);
+                card.Panel.SetBounds(0, y, colW, h);
+                var lbl = card.Panel.Tag as JBLabel;
+                if (lbl != null) lbl.SetBounds(pad, Ui.S(14), colW - pad * 2, Ui.S(18));
 
-            _settingsColumn.Height = y;
+                var divs = new float[Math.Max(0, card.Rows.Count - 1)];
+                for (int i = 0; i < card.Rows.Count; i++)
+                {
+                    int rowY = headH + i * rowH;
+                    if (i > 0) divs[i - 1] = rowY;
+                    LayoutSetRow(card.Rows[i], colW, rowY, rowH, pad);
+                }
+                card.Panel.Dividers = divs;
+                card.Panel.Invalidate();
+                y += h + gap;
+            }
+
+            _settingsColumn.Height = y + Ui.S(8);
             _settingsColumn.Width = Math.Max(colW + Ui.S(20), hostW);
             _settingsHost.SyncExtent();
         }
 
-        private void PlaceCard(JBPanel card, int x, int y, int w, int h)
+        private void LayoutSetRow(SetRow row, int colW, int rowY, int rowH, int pad)
         {
-            card.SetBounds(x, y, w, Ui.S(h));
+            int[] w = RowWidths(row, colW, pad);
+            int right = colW - pad;
+            int edge = right;
+            for (int i = row.Controls.Length - 1; i >= 0; i--)
+            {
+                var c = row.Controls[i];
+                edge -= w[i];
+                c.SetBounds(edge, rowY + (rowH - c.Height) / 2, w[i], c.Height);
+                if (i > 0) edge -= Ui.S(8);
+            }
+
+            int valRight = row.Controls.Length > 0 ? edge - Ui.S(16) : right;
+            int usable = Math.Max(Ui.S(120), valRight - pad);
+            // A row with a value splits the card between the label and its current setting.
+            int titleW = row.Value == null ? usable : Math.Min(Ui.S(320), (int)(usable * 0.45f));
+            // Labels stop a pixel short of the boundary: an opaque label would paint over the hairline.
+            int ly = rowY + 1, lh = rowH - 2;
+            row.Title.SetBounds(pad, ly, titleW, lh);
+            if (row.Value == null) return;
+            int vx = pad + titleW + Ui.S(16);
+            row.Value.SetBounds(vx, ly, Math.Max(Ui.S(60), valRight - vx), lh);
         }
 
-        private void LayoutBrowserCard(int colW)
+        /// <summary>
+        /// Resting widths for a row's controls, re-measured for buttons so a longer translation
+        /// cannot clip them. Text fields absorb any overflow first; the label keeps its space.
+        /// </summary>
+        private int[] RowWidths(SetRow row, int colW, int pad)
         {
-            int inner = Ui.S(18);
-            int bwBrowse = _setBrowse.PreferredWidth(Ui.S(76));
-            int bwDetect = _setDetect.PreferredWidth(Ui.S(96));
-            _setBrowserInfo.SetBounds(inner, Ui.S(40), colW - inner * 2, Ui.S(18));
-            int fieldW = Math.Max(Ui.S(100), colW - inner * 2 - bwBrowse - bwDetect - Ui.S(16));
-            _setBrowserPath.SetBounds(inner, Ui.S(64), fieldW, Ui.S(33));
-            _setBrowse.SetBounds(inner + fieldW + Ui.S(8), Ui.S(64), bwBrowse, Ui.S(33));
-            _setDetect.SetBounds(_setBrowse.Right + Ui.S(8), Ui.S(64), bwDetect, Ui.S(33));
-            _setBrowserHint.SetBounds(inner, Ui.S(106), colW - inner * 2, Ui.S(18));
-        }
+            int n = row.Controls.Length;
+            var w = new int[n];
+            int total = n > 1 ? Ui.S(8) * (n - 1) : 0;
+            int flexCount = 0;
+            for (int i = 0; i < n; i++)
+            {
+                int wi = row.Widths[i];
+                var b = row.Controls[i] as JBButton;
+                if (b != null) wi = b.PreferredWidth(wi);
+                else if (row.Controls[i] is JBTextBox) flexCount++;
+                w[i] = wi;
+                total += wi;
+            }
 
-        private void LayoutStartCard(int colW)
-        {
-            int inner = Ui.S(18);
-            _setStartUrl.SetBounds(inner, Ui.S(42), colW - inner * 2, Ui.S(33));
-            _setStartHint.SetBounds(inner, Ui.S(84), colW - inner * 2, Ui.S(18));
-        }
-
-        private void LayoutStorageCard(int colW)
-        {
-            int inner = Ui.S(18);
-            _setStoragePath.SetBounds(inner, Ui.S(40), colW - inner * 2, Ui.S(18));
-            int w1 = _setOpenData.PreferredWidth(Ui.S(150)), w2 = _setDownload.PreferredWidth(Ui.S(150));
-            _setOpenData.SetBounds(inner, Ui.S(66), w1, Ui.S(33));
-            _setDownload.SetBounds(inner + w1 + Ui.S(8), Ui.S(66), w2, Ui.S(33));
-            _setStorageHint.SetBounds(inner, Ui.S(108), colW - inner * 2, Ui.S(18));
+            int limit = colW - pad * 2 - Ui.S(300);
+            if (total > limit && flexCount > 0)
+            {
+                int over = total - limit;
+                int shrunk = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    if (!(row.Controls[i] is JBTextBox)) continue;
+                    int share = over / flexCount;
+                    int nw = Math.Max(Ui.S(140), w[i] - share);
+                    shrunk += w[i] - nw;
+                    w[i] = nw;
+                }
+                if (shrunk < over)
+                {
+                    // Even at their floor the fields overflow; let the label give ground instead.
+                    int still = over - shrunk;
+                    for (int i = 0; i < n; i++)
+                        if (row.Controls[i] is JBTextBox) { w[i] = Math.Max(Ui.S(100), w[i] - still / flexCount); break; }
+                }
+            }
+            return w;
         }
 
         private void LayoutAbout()
         {
-            int w = _aboutPage.Width;
-            int colW = Math.Min(Ui.S(760), Math.Max(Ui.S(300), w - Ui.S(ContentPad) * 2));
-            int x = Math.Max(Ui.S(ContentPad), (w - Ui.S(ContentPad) - colW) / 2);
+            if (_aboutHost == null) return;
+            int w = _aboutPage.Width, h = _aboutPage.Height;
+            _aboutHost.SetBounds(Ui.S(ContentPad), Ui.S(8),
+                Math.Max(Ui.S(160), w - Ui.S(ContentPad) * 2), Math.Max(Ui.S(120), h - Ui.S(16)));
             int tw = _aboutTelegram.PreferredWidth(Ui.S(190));
-            _aboutTelegram.SetBounds(x + colW - tw - Ui.S(20), Ui.S(20) + Ui.S(20), tw, Ui.S(33));
-            _aboutPage.Invalidate();
+            _aboutTelegram.SetBounds(Math.Max(Ui.S(300), _aboutColumn.Width) - tw - Ui.S(20), Ui.S(47), tw, Ui.S(33));
+            _aboutColumn.Invalidate();
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        /// <summary>
+        /// Switching pages used to repaint once per Visible change, which showed up as a flash
+        /// of the previous page. WM_SETREDRAW freezes the whole window until the new page is
+        /// laid out, then a single paint draws the final state.
+        /// </summary>
+        private void FreezeRedraw(Action work)
+        {
+            bool frozen = IsHandleCreated;
+            if (frozen) SendMessage(Handle, 0x000B, IntPtr.Zero, IntPtr.Zero);
+            try { work(); }
+            finally
+            {
+                if (frozen && IsHandleCreated)
+                {
+                    SendMessage(Handle, 0x000B, (IntPtr)1, IntPtr.Zero);
+                    Invalidate(true);
+                }
+            }
         }
 
         private void SetPage(int page)
         {
+            FreezeRedraw(delegate { SetPageCore(page); });
+        }
+
+        private void SetPageCore(int page)
+        {
             _page = page;
-            _navProfiles.Selected = page == 0;
-            _navSettings.Selected = page == 1;
-            _navAbout.Selected = page == 2;
-            _navProfiles.Invalidate();
-            _navSettings.Invalidate();
-            _navAbout.Invalidate();
+            SuspendLayout();
+            JBButton[] navs = { _navProfiles, _navProxies, _navExtensions, _navSettings, _navTools, _navAbout };
+            for (int i = 0; i < navs.Length; i++)
+            {
+                navs[i].Selected = i == page;
+                navs[i].Invalidate();
+            }
 
             bool profiles = page == 0;
             _host.Visible = profiles && _cards.Count > 0;
             if (!profiles) _picks.Clear();
             _bulk.Visible = profiles && _picks.Count > 1;
             _emptyPanel.Visible = profiles && ShownCount() == 0;
-            _settingsPage.Visible = page == 1;
-            _aboutPage.Visible = page == 2;
+            _proxyPage.Visible = page == 1;
+            _extensionPage.Visible = page == 2;
+            _settingsPage.Visible = page == 3;
+            _toolsPage.Visible = page == 4;
+            _aboutPage.Visible = page == 5;
             _search.Visible = profiles;
             _sortBtn.Visible = profiles;
             _newBtn.Visible = profiles;
-            _saveSettings.Visible = page == 1;
+            _saveSettings.Visible = page == 3;
             _themeSwitch.Visible = true;
 
-            if (_emptyPanel.Visible) _emptyPanel.BringToFront();
-            if (_settingsPage.Visible) _settingsPage.BringToFront();
-            if (_aboutPage.Visible) _aboutPage.BringToFront();
+            Control[] pages = { _host, _emptyPanel, _proxyPage, _extensionPage, _settingsPage, _toolsPage, _aboutPage };
+            foreach (var p in pages) if (p.Visible) p.BringToFront();
             _toast.BringToFront();
 
             if (page == 1)
             {
+                _proxies = ProxyVault.Load();
+                _proxyPage.SetItems(_proxies);
+            }
+            else if (page == 2)
+            {
+                _extensions = ExtensionCatalog.Load();
+                _extensionPage.SetItems(_extensions);
+            }
+            else if (page == 3)
+            {
                 _setBrowserPath.Value = _settings.BrowserPath ?? "";
                 _setStartUrl.Value = _settings.DefaultStartUrl ?? "";
                 _setStoragePath.Text = AppPaths.Root;
+                _setDefaultGroup.Value = _settings.DefaultGroup ?? "";
+                _setExtensions.Checked = _settings.EnableExtensions;
+                _setCustomExt.Checked = _settings.EnableCustomExtensions;
+                _setTrash.Checked = _settings.UseTrash;
+                _setLang.Value = string.IsNullOrEmpty(_settings.UiLanguage) ? "en" : _settings.UiLanguage;
                 UpdateBrowserInfo();
             }
+            ResumeLayout(false);
             LayoutAll();
         }
 
@@ -638,7 +1677,8 @@ namespace JoeBrowser
                     || (p.Name ?? "").ToLowerInvariant().Contains(q)
                     || (p.Fp != null && (p.Fp.Os ?? "").ToLowerInvariant().Contains(q))
                     || (p.Fp != null && (p.Fp.Timezone ?? "").ToLowerInvariant().Contains(q))
-                    || (p.Fp != null && (p.Fp.Language ?? "").ToLowerInvariant().Contains(q))
+                    || (p.Fp != null && ((p.Fp.Language ?? "").ToLowerInvariant().Contains(q)
+                        || FingerprintFactory.LanguageName(p.Fp.Language).ToLowerInvariant().Contains(q)))
                     || (p.Proxy != null && (p.Proxy.Host ?? "").ToLowerInvariant().Contains(q));
                 kv.Value.Visible = hit;
                 if (hit) shown++;
@@ -672,10 +1712,8 @@ namespace JoeBrowser
             Icons.Draw(g, searching ? "search" : "layers",
                 new RectangleF(br.X + (badge - ic) / 2f, br.Y + (badge - ic) / 2f, ic, ic), Theme.Accent);
 
-            string title = searching ? "No matching profiles" : "No profiles yet";
-            string sub = searching
-                ? "Try another name, operating system, language or proxy host."
-                : "Create your first identity. Each one is a separate, private browser.";
+            string title = searching ? L10n.T("empty.nomatch") : L10n.T("empty.title");
+            string sub = searching ? L10n.T("empty.nomatch.sub") : L10n.T("empty.sub");
 
             Ui.Text(g, title, Theme.H1, Theme.Text, 0, br.Bottom + Ui.S(16), w, "center");
             Ui.Text(g, sub, Theme.Small, Theme.TextDim, 0, br.Bottom + Ui.S(44), w, "center", 2);
@@ -903,14 +1941,18 @@ namespace JoeBrowser
         {
             var list = _profiles.Where(p => _picks.Contains(p.Id)).ToList();
             if (list.Count == 0) { ClearPicks(); return; }
+            bool trash = _settings.UseTrash;
             if (!ConfirmForm.Ask(this, "Delete profiles",
-                "Delete " + list.Count + " profiles and all of their browsing data? This cannot be undone.",
-                "Proxy settings stored in them are removed too."))
+                trash
+                    ? "Move " + list.Count + " profiles to the recycle bin?"
+                    : "Delete " + list.Count + " profiles and all of their browsing data? This cannot be undone.",
+                trash ? "You can restore them from Tools & data → Recycle bin."
+                      : "Proxy settings stored in them are removed too."))
                 return;
             foreach (var p in list) DeleteProfile(p.Id, false);
             ReloadCards(true);
             ClearPicks();
-            Toast(list.Count + " profiles deleted", ToastKind.Success);
+            Toast(trash ? list.Count + " profiles moved to the recycle bin" : list.Count + " profiles deleted", ToastKind.Success);
         }
 
         private void DeleteProfile(string id) { DeleteProfile(id, true); }
@@ -919,9 +1961,13 @@ namespace JoeBrowser
         {
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
+            bool useTrash = _settings.UseTrash;
             if (ask && !ConfirmForm.Ask(this, "Delete profile",
-                "Delete \"" + p.Name + "\" and all of its browsing data? This cannot be undone.",
-                p.Proxy.Enabled ? "The linked proxy settings are removed too." : null))
+                useTrash
+                    ? "Move \"" + p.Name + "\" to the recycle bin?"
+                    : "Delete \"" + p.Name + "\" and all of its browsing data? This cannot be undone.",
+                useTrash ? "Browsing data and cookies are kept so a restore is complete."
+                         : p.Proxy.Enabled ? "The linked proxy settings are removed too." : null))
                 return;
 
             BrowserSession s;
@@ -932,11 +1978,11 @@ namespace JoeBrowser
             }
             try
             {
-                _store.Delete(p);
+                _store.Delete(p, useTrash);
                 _profiles = _store.LoadAll();
                 if (!ask) return;
                 ReloadCards(false);
-                Toast("Profile deleted", ToastKind.Success);
+                Toast(useTrash ? "Moved to the recycle bin" : "Profile deleted", ToastKind.Success);
             }
             catch (Exception ex)
             {
@@ -985,7 +2031,7 @@ namespace JoeBrowser
                     if (!await DownloadBrowserAsync(p.BrowserKind)) return;
                 }
 
-                var session = await BrowserSession.LaunchAsync(p, _settings.DefaultStartUrl, _settings.BrowserPath);
+                var session = await BrowserSession.LaunchAsync(p, _settings.DefaultStartUrl, _settings.BrowserPath, _settings);
                 _sessions[id] = session;
                 session.Closed += delegate { SessionClosed(id); };
                 _store.Touch(p);
@@ -995,6 +2041,8 @@ namespace JoeBrowser
                     _cards[id].Invalidate();
                 }
                 Toast("\u201c" + p.Name + "\u201d is ready", ToastKind.Success);
+                if (session.IsFirefox && p.Fp != null && !FingerprintFactory.IsWindowsTarget(p.Fp.Os))
+                    Toast("Firefox cannot spoof " + p.Fp.Os + " \u2014 WebGL, timezone and screen stay real.", ToastKind.Error);
                 Invalidate();
             }
             catch (Exception ex)
@@ -1111,7 +2159,19 @@ namespace JoeBrowser
         {
             try
             {
+                L10n.Changed -= OnLanguageChanged;
                 if (_pulse != null) _pulse.Stop();
+
+                // Remember how the window was left so the next launch opens the same width.
+                var restore = Maximized ? LastNormalBounds : new Rectangle(Location, Size);
+                _settings.WinMaximized = Maximized;
+                if (!restore.IsEmpty && restore.Width > 0 && restore.Height > 0)
+                {
+                    _settings.WinWidth = Math.Max(1000, (int)Math.Round(restore.Width / (double)Ui.Scale));
+                    _settings.WinHeight = Math.Max(660, (int)Math.Round(restore.Height / (double)Ui.Scale));
+                }
+                _store.SaveSettings(_settings);
+
                 foreach (var s in _sessions.Values.ToList())
                 {
                     try { s.Close(); } catch { }
@@ -1165,65 +2225,135 @@ namespace JoeBrowser
         {
             var g = e.Graphics;
             Ui.Quality(g);
-            int w = _aboutPage.Width;
-            int colW = Math.Min(Ui.S(760), Math.Max(Ui.S(300), w - Ui.S(ContentPad) * 2));
-            int x = Math.Max(Ui.S(ContentPad), (w - Ui.S(ContentPad) - colW) / 2);
+            int colW = Math.Max(Ui.S(300), _aboutColumn.Width);
+            int x = 0;
+            int gap = Ui.S(16);
 
             // identity card
             var card = new RectangleF(x, Ui.S(8), colW, Ui.S(112));
             Ui.Fill(g, card, Ui.S(8), Theme.Panel);
             Ui.Stroke(g, card, Ui.S(8), Theme.Line, 1f);
 
-            var mark = new RectangleF(card.X + Ui.S(20), card.Y + Ui.S(24), Ui.S(56), Ui.S(56));
+            var mark = new RectangleF(card.X + Ui.S(20), card.Y + Ui.S(28), Ui.S(56), Ui.S(56));
             Logo.Draw(g, mark);
 
             float tx = mark.Right + Ui.S(18);
-            Ui.Text(g, "Joe Browser", Theme.Display, Theme.Text, tx, card.Y + Ui.S(20), colW - (tx - card.X) - Ui.S(24));
-            Ui.Text(g, "Version 1.0.0 · MIT License", Theme.Small, Theme.TextDim, tx, card.Y + Ui.S(50),
-                colW - (tx - card.X) - Ui.S(24));
-            Ui.Text(g, AppPaths.Root, Theme.Caption, Theme.TextFaint, tx, card.Y + Ui.S(72),
-                colW - (tx - card.X) - Ui.S(24));
+            float textW = colW - (tx - card.X) - Ui.S(220);
+            Ui.Text(g, "Joe Browser", Theme.Display, Theme.Text, tx, card.Y + Ui.S(20), textW);
+            Ui.Text(g, L10n.T("sub.about"), Theme.Small, Theme.TextDim, tx, card.Y + Ui.S(52), textW);
+            Ui.Text(g, AppPaths.Root, Theme.Caption, Theme.TextFaint, tx, card.Y + Ui.S(76), textW);
 
-            // feature cards
-            float sectY = card.Bottom + Ui.S(24);
-            Ui.Text(g, "FEATURES", Theme.Micro, Theme.TextFaint, x + Ui.S(2), sectY, colW - Ui.S(4));
+            // capability tiles
+            float sectY = card.Bottom + Ui.S(26);
+            Ui.Text(g, L10n.T("about.features"), Theme.Micro, Theme.TextFaint, x + Ui.S(2), sectY, colW - Ui.S(4));
 
             string[][] features =
             {
-                new[] { "user", "Unlimited profiles", "Separate cookies, storage and sessions." },
-                new[] { "fingerprint", "Coherent fingerprints", "Canvas, WebGL, timezone and locale aligned." },
-                new[] { "lock", "Local and encrypted", "No account, no cloud. Every byte stays local." }
+                new[] { "user", L10n.T("about.f1"), L10n.T("about.f1d") },
+                new[] { "fingerprint", L10n.T("about.f2"), L10n.T("about.f2d") },
+                new[] { "lock", L10n.T("about.f3"), L10n.T("about.f3d") },
+                new[] { "proxy", L10n.T("about.f4"), L10n.T("about.f4d") },
+                new[] { "laptop", L10n.T("about.f5"), L10n.T("about.f5d") },
+                new[] { "route", L10n.T("about.f6"), L10n.T("about.f6d") },
+                new[] { "apps", L10n.T("about.f7"), L10n.T("about.f7d") },
+                new[] { "shield", L10n.T("about.f8"), L10n.T("about.f8d") }
             };
 
-            float cardY = sectY + Ui.S(26);
-            float gap = Ui.S(16);
-            int cols = colW >= Ui.S(560) ? 3 : 1;
-            float cardH = cols == 3 ? Ui.S(92) : Ui.S(64);
-            float cardW = (colW - gap * (cols - 1)) / cols;
+            float tileY = sectY + Ui.S(26);
+            int cols = colW >= Ui.S(1420) ? 4 : colW >= Ui.S(1060) ? 3 : colW >= Ui.S(680) ? 2 : 1;
+            float tileW = (colW - gap * (cols - 1)) / cols;
+            float tileH = Ui.S(104);
             for (int i = 0; i < features.Length; i++)
             {
-                int col = cols == 3 ? i : 0;
-                int row = cols == 3 ? 0 : i;
-                var r = new RectangleF(x + col * (cardW + gap), cardY + row * (cardH + gap), cardW, cardH);
+                var r = new RectangleF(x + (i % cols) * (tileW + gap), tileY + (i / cols) * (tileH + gap), tileW, tileH);
                 Ui.Fill(g, r, Ui.S(8), Theme.Card);
                 Ui.Stroke(g, r, Ui.S(8), Theme.Line, 1f);
 
-                float chip = Ui.S(26);
-                var cr = new RectangleF(r.X + Ui.S(14), r.Y + Ui.S(14), chip, chip);
+                float chip = Ui.S(28);
+                var cr = new RectangleF(r.X + Ui.S(16), r.Y + Ui.S(16), chip, chip);
                 Ui.Fill(g, cr, Ui.S(6), Theme.AccentOnBg);
-                float ic = Ui.S(16);
+                float ic = Ui.S(17);
                 Icons.Draw(g, features[i][0], new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
 
                 Ui.Text(g, features[i][1], Theme.H3, Theme.Text, cr.Right + Ui.S(10),
-                    cr.Y + (chip - Theme.H3.GetHeight(g)) / 2f, r.Width - (cr.Right - r.X) - Ui.S(22));
-
-                if (cols == 3)
-                    Ui.Text(g, features[i][2], Theme.Caption, Theme.TextFaint, r.X + Ui.S(14), r.Y + Ui.S(54), r.Width - Ui.S(28), "left", 2);
-                else
-                    Ui.Text(g, features[i][2], Theme.Caption, Theme.TextFaint, cr.Right + Ui.S(10),
-                        cr.Y + chip + Ui.S(4), r.Width - (cr.Right - r.X) - Ui.S(22));
+                    cr.Y + (chip - Theme.H3.GetHeight(g)) / 2f, r.Width - (cr.Right - r.X) - Ui.S(18));
+                Ui.Text(g, features[i][2], Theme.Caption, Theme.TextDim, r.X + Ui.S(16), r.Y + Ui.S(56),
+                    r.Width - Ui.S(32), "left", 2);
             }
 
+            float afterTiles = tileY + (float)Math.Ceiling(features.Length / (double)cols) * (tileH + gap);
+
+            // keyboard shortcuts, two columns of key chips
+            float scSect = afterTiles + Ui.S(10);
+            Ui.Text(g, L10n.T("about.shortcuts"), Theme.Micro, Theme.TextFaint, x + Ui.S(2), scSect, colW - Ui.S(4));
+
+            int scCols = colW >= Ui.S(900) ? 2 : 1;
+            int perCol = (int)Math.Ceiling(ShortcutRows.Length / (double)scCols);
+            float rowH = Ui.S(38);
+            var sc = new RectangleF(x, scSect + Ui.S(26), colW, perCol * rowH + Ui.S(14));
+            Ui.Fill(g, sc, Ui.S(8), Theme.Panel);
+            Ui.Stroke(g, sc, Ui.S(8), Theme.Line, 1f);
+
+            float halfW = colW / scCols;
+            for (int i = 0; i < ShortcutRows.Length; i++)
+            {
+                int col = i / perCol, line = i % perCol;
+                float ry = sc.Y + Ui.S(7) + line * rowH;
+                if (line > 0)
+                    using (var p = new Pen(Theme.Line))
+                    {
+                        float dy = ry + 0.5f;
+                        g.DrawLine(p, x + col * halfW + Ui.S(16), dy, x + (col + 1) * halfW - Ui.S(16), dy);
+                    }
+
+                float kx = sc.X + col * halfW + Ui.S(18);
+                float cy = ry + (rowH - Ui.S(24)) / 2f;
+                int keyW = (int)Math.Ceiling(Ui.Measure(g, ShortcutRows[i][0], Theme.Caption).Width) + Ui.S(18);
+                var chipR = new RectangleF(kx, cy, keyW, Ui.S(24));
+                Ui.Fill(g, chipR, Ui.S(4), Theme.Card);
+                Ui.Stroke(g, chipR, Ui.S(4), Theme.Line, 1f);
+                Ui.Text(g, ShortcutRows[i][0], Theme.Caption, Theme.Text, chipR.X, chipR.Y, chipR.Width, "center");
+
+                Ui.Text(g, ShortcutRows[i][1], Theme.Small, Theme.TextDim, chipR.Right + Ui.S(12),
+                    ry + (rowH - Theme.Small.GetHeight(g)) / 2f,
+                    sc.X + (col + 1) * halfW - (chipR.Right + Ui.S(30)));
+            }
+
+            // this workspace: live counts of what the app holds on this machine
+            float wsSect = sc.Bottom + Ui.S(26);
+            Ui.Text(g, L10n.T("about.workspace"), Theme.Micro, Theme.TextFaint, x + Ui.S(2), wsSect, colW - Ui.S(4));
+
+            string[][] stats =
+            {
+                new[] { L10n.T("about.w1"), (_profiles == null ? 0 : _profiles.Count).ToString() },
+                new[] { L10n.T("about.w2"), (_proxies == null ? 0 : _proxies.Count).ToString() },
+                new[] { L10n.T("about.w3"), (_extensions == null ? 0 : _extensions.Count).ToString() }
+            };
+            float wsRowH = Ui.S(44);
+            var ws = new RectangleF(x, wsSect + Ui.S(26), colW, stats.Length * wsRowH + Ui.S(12));
+            Ui.Fill(g, ws, Ui.S(8), Theme.Panel);
+            Ui.Stroke(g, ws, Ui.S(8), Theme.Line, 1f);
+            for (int i = 0; i < stats.Length; i++)
+            {
+                float ry = ws.Y + Ui.S(6) + i * wsRowH;
+                if (i > 0)
+                    using (var p = new Pen(Theme.Line))
+                    {
+                        float dy = ry + 0.5f;
+                        g.DrawLine(p, ws.X + Ui.S(18), dy, ws.Right - Ui.S(18), dy);
+                    }
+                Ui.Text(g, stats[i][0], Theme.Body, Theme.Text, ws.X + Ui.S(18),
+                    ry + (wsRowH - Theme.Body.GetHeight(g)) / 2f, ws.Width - Ui.S(120));
+                Ui.Text(g, stats[i][1], Theme.H3, Theme.Accent, ws.Right - Ui.S(90),
+                    ry + (wsRowH - Theme.H3.GetHeight(g)) / 2f, Ui.S(72), "right");
+            }
+
+            int need = (int)Math.Ceiling(ws.Bottom) + Ui.S(20);
+            if (_aboutColumn.Height != need)
+            {
+                _aboutColumn.Height = need;
+                _aboutHost.SyncExtent();
+            }
         }
     }
 }

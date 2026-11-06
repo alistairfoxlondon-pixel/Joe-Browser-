@@ -1,13 +1,14 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace JoeBrowser
 {
     /// <summary>
-    /// Profile tile styled as a windows-ui card: #303030 surface, 8px radius, hairline border,
-    /// a 36px identity chip, metadata chips and a quiet action row.
+    /// A profile card: browser mark, identity, device and proxy chips, then the actions.
+    /// Geometry is derived from the live width so chips truncate instead of overflowing, and the
+    /// selection box has a reserved slot so it never lands on top of the name.
     /// </summary>
     internal sealed class ProfileCard : Control, IReStyle
     {
@@ -25,100 +26,96 @@ namespace JoeBrowser
         public event EventHandler CloseRequested;
         public event EventHandler PickToggled;
 
-        private bool _hover, _kebabHover, _openHover;
+        // CSS pixel metrics for the whole card.
+        public const double CardH = 200;
+        public const double CardMinW = 300;
+        private const double Pad = 18;
+        private const double CheckSize = 18;
+        private const double LogoSize = 44;
+        private const double ChipH = 28;
+        private const double TagH = 22;
+        private const double BtnH = 34;
+        private const double KebabSize = 28;
+
+        private bool _hover, _kebabHover, _openHover, _checkHover;
         private ContextMenuStrip _menu;
-        private readonly ToolTip _tip;
-        private string _tipText = "";
 
         public ProfileCard()
         {
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.Selectable, true);
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.UserPaint | ControlStyles.Selectable, true);
             Ui.Opaque(this);
             Cursor = Cursors.Hand;
             TabStop = true;
             Font = Theme.Body;
-
-            _tip = new ToolTip { OwnerDraw = true, InitialDelay = 500, ReshowDelay = 200, AutoPopDelay = 9000 };
-            _tip.Popup += TipPopup;
-            _tip.Draw += TipDraw;
             Disposed += delegate { if (_menu != null) _menu.Dispose(); };
         }
 
-        private void TipPopup(object sender, PopupEventArgs e)
-        {
-            using (var g = CreateGraphics())
-            {
-                var size = Ui.Measure(g, _tipText, Theme.Small);
-                e.ToolTipSize = new Size((int)size.Width + Ui.S(24), Ui.S(36));
-            }
-        }
+        public static int PreferredHeight() { return Ui.S(CardH); }
+        public static int PreferredMinWidth() { return Ui.S(CardMinW); }
 
-        private void TipDraw(object sender, DrawToolTipEventArgs e)
-        {
-            var g = e.Graphics;
-            Ui.Quality(g);
-            var r = new RectangleF(0, 0, e.Bounds.Width, e.Bounds.Height);
-            Ui.Fill(g, r, Ui.S(4), Theme.Sidebar);
-            Ui.Stroke(g, r, Ui.S(4), Theme.Line, 1f);
-            string[] lines = (_tipText ?? "").Split('\n');
-            float y = Ui.S(8);
-            for (int i = 0; i < lines.Length; i++)
-            {
-                Ui.Text(g, lines[i], i == 0 ? Theme.SmallBold : Theme.Caption,
-                    i == 0 ? Theme.Text : Theme.TextDim, Ui.S(12), y);
-                y += Theme.Small.GetHeight(g) + Ui.S(1);
-            }
-        }
-
-        protected override void OnMouseEnter(EventArgs e)
-        {
-            _hover = true;
-            RefreshTip();
-            Invalidate();
-            base.OnMouseEnter(e);
-        }
-
-        protected override void OnGotFocus(EventArgs e) { RefreshTip(); Invalidate(); base.OnGotFocus(e); }
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
-
-        private void RefreshTip()
-        {
-            if (Model == null) return;
-            string text = Model.Proxy.Enabled ? Model.Proxy.Detail : "Direct connection";
-            _tipText = Model.Fp.Os + "  ·  " + Model.Fp.TimezoneShort + "\n" + text + "\n" + Model.LastOpenedText;
-            _tip.SetToolTip(this, _tipText);
-        }
 
         protected override void OnMouseLeave(EventArgs e)
         {
-            _hover = false; _kebabHover = false; _openHover = false;
+            _hover = false; _kebabHover = false; _openHover = false; _checkHover = false;
             Invalidate();
             base.OnMouseLeave(e);
         }
 
-        private RectangleF KebabRect
+        // ---- geometry -------------------------------------------------------------
+
+        private RectangleF CheckRect
         {
-            get { return new RectangleF(Width - Ui.S(42), Ui.S(12), Ui.S(28), Ui.S(28)); }
+            get
+            {
+                float s = Ui.S(CheckSize);
+                return new RectangleF(Ui.S(Pad), Ui.S(16 + LogoSize / 2 - CheckSize / 2), s, s);
+            }
         }
 
-        private RectangleF PickRect
+        private RectangleF LogoRect
         {
-            get { return new RectangleF(Width - Ui.S(78), Ui.S(14), Ui.S(22), Ui.S(22)); }
+            get
+            {
+                float s = Ui.S(LogoSize);
+                return new RectangleF(CheckRect.Right + Ui.S(12), Ui.S(16), s, s);
+            }
+        }
+
+        private RectangleF KebabRect
+        {
+            get
+            {
+                float s = Ui.S(KebabSize);
+                float oy = Height - Ui.S(14) - Ui.S(BtnH);
+                return new RectangleF(Width - Ui.S(Pad) - s, oy + (Ui.S(BtnH) - s) / 2f, s, s);
+            }
         }
 
         private RectangleF OpenRect
         {
-            get { return new RectangleF(Width - Ui.S(16) - Ui.S(88), Height - Ui.S(46), Ui.S(88), Ui.S(30)); }
+            get
+            {
+                float h = Ui.S(BtnH);
+                float right = Width - Ui.S(Pad) - Ui.S(KebabSize) - Ui.S(10);
+                float w = Math.Max(Ui.S(72), right - Ui.S(Pad));
+                return new RectangleF(right - w, Height - Ui.S(14) - h, w, h);
+            }
         }
+
+        // ---- interaction ----------------------------------------------------------
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
             bool k = KebabRect.Contains(e.Location);
             bool o = OpenRect.Contains(e.Location);
-            if (k != _kebabHover || o != _openHover)
+            bool c = CheckRect.Contains(e.Location);
+            if (k != _kebabHover || o != _openHover || c != _checkHover)
             {
-                _kebabHover = k;
-                _openHover = o;
+                _kebabHover = k; _openHover = o; _checkHover = c;
                 Invalidate();
             }
             base.OnMouseMove(e);
@@ -130,19 +127,18 @@ namespace JoeBrowser
             Focus();
             if (e.Button == MouseButtons.Right) { ShowMenu(); return; }
             if (e.Button != MouseButtons.Left) return;
-            if (PickRect.Contains(e.Location))
+            if (CheckRect.Contains(e.Location) || ((ModifierKeys & (Keys.Control | Keys.Shift)) != 0 && !KebabRect.Contains(e.Location) && !OpenRect.Contains(e.Location)))
             {
-                var h = PickToggled;
-                if (h != null) h(this, EventArgs.Empty);
-                return;
+                if (CheckRect.Contains(e.Location) || (ModifierKeys & (Keys.Control | Keys.Shift)) != 0)
+                {
+                    var h = PickToggled;
+                    if (h != null) h(this, EventArgs.Empty);
+                    return;
+                }
             }
             if (KebabRect.Contains(e.Location)) { ShowMenu(); return; }
-            if ((ModifierKeys & (Keys.Control | Keys.Shift)) != 0)
-            {
-                var h = PickToggled;
-                if (h != null) h(this, EventArgs.Empty);
-                return;
-            }
+            if (OpenRect.Contains(e.Location)) { RaiseOpen(); return; }
+            // A click anywhere else on the card opens it too: the whole card is the target.
             RaiseOpen();
         }
 
@@ -170,8 +166,6 @@ namespace JoeBrowser
 
         private void ShowMenu()
         {
-            // One menu at a time: ContextMenuStrip owns a window handle, so building a fresh one
-            // on every right-click leaks a handle per invocation.
             if (_menu != null) { _menu.Dispose(); _menu = null; }
             var menu = JBMenu.Create();
             _menu = menu;
@@ -181,7 +175,7 @@ namespace JoeBrowser
             if (Running)
                 JBMenu.Add(menu, "Close browser", "power", delegate { var h = CloseRequested; if (h != null) h(this, EventArgs.Empty); });
             JBMenu.Add(menu, "Edit profile", "pencil", delegate { var h = EditRequested; if (h != null) h(this, EventArgs.Empty); });
-            JBMenu.Add(menu, Model != null && Model.Proxy.Enabled ? "Change proxy" : "Set proxy", "route",
+            JBMenu.Add(menu, "Change proxy (live, keep tab open)", "route",
                 delegate { var h = ProxyRequested; if (h != null) h(this, EventArgs.Empty); });
             JBMenu.Add(menu, Picked ? "Remove from selection" : "Add to selection", "check",
                 delegate { var h = PickToggled; if (h != null) h(this, EventArgs.Empty); });
@@ -189,20 +183,17 @@ namespace JoeBrowser
             menu.Items.Add(new ToolStripSeparator());
             JBMenu.Add(menu, "Delete profile", "trash", delegate { var h = DeleteRequested; if (h != null) h(this, EventArgs.Empty); });
             int mw = menu.GetPreferredSize(Size.Empty).Width;
-            JBMenu.ShowNear(menu, this, new Point(Math.Max(Ui.S(6), Width - mw - Ui.S(10)), Ui.S(44)));
+            JBMenu.ShowNear(menu, this, new Point(Math.Max(Ui.S(6), Width - mw - Ui.S(10)), Ui.S(40)));
         }
 
-        public void ReStyle()
-        {
-            Font = Theme.Body;
-            RefreshTip();
-            Invalidate();
-        }
+        public void ReStyle() { Font = Theme.Body; Invalidate(); }
 
         protected override void OnPaintBackground(PaintEventArgs e)
         {
             e.Graphics.Clear(Ui.SurfaceColor(this));
         }
+
+        // ---- painting -------------------------------------------------------------
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -210,125 +201,266 @@ namespace JoeBrowser
             Ui.Quality(g);
             if (Model == null) return;
 
-            float rad = Theme.RLarge;
+            float rad = Ui.S(8);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
 
-            Ui.Fill(g, r, rad, _hover ? Theme.PanelHover : Theme.Card);
-            Ui.Stroke(g, r, rad, _hover ? Theme.HoverStrong : Theme.Line, 1f);
+            if (Running) Ui.Shadow(g, r, rad, 1, Theme.Dark);
+            Ui.Fill(g, r, rad, Picked ? Theme.AccentOnBg : (_hover ? Theme.PanelHover : Theme.Card));
+            Ui.Stroke(g, r, rad, Picked ? Theme.AccentBorder : (_hover ? Theme.HoverStrong : Theme.Line), 1f);
 
-            if (Picked) Ui.Stroke(g, r, rad, Theme.Accent, 2f);
-            if (Picked || _hover)
+            PaintHeader(g, r);
+            bool proxyWrapped;
+            PaintChips(g, out proxyWrapped);
+            // Tags give the card up to the proxy chip when the width cannot hold both on one line.
+            if (!proxyWrapped) PaintTags(g);
+            PaintActions(g);
+
+            if (Focused && ShowFocusCues) Ui.FocusRing(g, r, rad);
+        }
+
+        private void PaintHeader(Graphics g, RectangleF r)
+        {
+            // Selection box: the slot is always reserved, the box only draws when it is usable.
+            var box = new RectangleF(CheckRect.X + 0.5f, CheckRect.Y + 0.5f,
+                CheckRect.Width - 1f, CheckRect.Height - 1f);
+            if (Picked || _hover || _checkHover)
             {
-                var box = new RectangleF(PickRect.X + 0.5f, PickRect.Y + 0.5f, PickRect.Width - 1f, PickRect.Height - 1f);
-                Ui.Fill(g, box, Ui.S(6), Picked ? Theme.Accent : Theme.Bg);
-                Ui.Stroke(g, box, Ui.S(6), Picked ? Theme.Accent : Theme.HoverStrong, 1f);
+                Ui.Fill(g, box, Ui.S(4), Picked ? Theme.Accent : Theme.Bg);
+                Ui.Stroke(g, box, Ui.S(4), Picked ? Theme.Accent : Theme.ButtonBorder, 1f);
                 if (Picked)
                 {
                     float ci = Ui.S(12);
-                    Icons.Draw(g, "check",
-                        new RectangleF(box.X + (box.Width - ci) / 2f, box.Y + (box.Height - ci) / 2f, ci, ci),
-                        Theme.OnAccent);
+                    Icons.Draw(g, "check", new RectangleF(box.X + (box.Width - ci) / 2f,
+                        box.Y + (box.Height - ci) / 2f, ci, ci), Theme.OnAccent);
                 }
             }
 
-            int pad = Ui.S(16);
-            float av = Ui.S(36);
-            var ar = new RectangleF(pad, pad, av, av);
-            Ui.Fill(g, ar, Ui.S(8), Theme.Accent);
-            var initFont = Theme.H3;
-            Ui.Text(g, Model.Initials, initFont, Theme.OnAccent, ar.X,
-                ar.Y + (av - initFont.GetHeight(g)) / 2f - Ui.S(1), ar.Width, "center");
+            BrowserMark.Draw(g, LogoRect, BrowserMark.KindFor(Model));
 
-            float left = pad + av + Ui.S(12);
-            float rightPad = Ui.S(52);
-            float nameW = Math.Max(Ui.S(40), Width - left - rightPad);
-            Ui.Text(g, Model.Name, Theme.H3, Theme.Text, left, Ui.S(13), nameW);
-
-            string meta = Model.Fp.Os + "  ·  " + Model.Fp.Language + "  ·  " + Model.Fp.TimezoneShort;
-            Ui.Text(g, meta, Theme.Caption, Theme.TextFaint, left, Ui.S(32), nameW);
-
-            // kebab
-            if (_kebabHover) Ui.Fill(g, KebabRect, Ui.S(4), Theme.HoverOverlay);
-            float kd = Ui.S(16);
-            Icons.Draw(g, "dots", new RectangleF(KebabRect.X + (KebabRect.Width - kd) / 2f,
-                KebabRect.Y + (KebabRect.Height - kd) / 2f, kd, kd), _kebabHover ? Theme.Text : Theme.TextDim);
-
-            // metadata chips: proxy + locale, clipped rather than allowed to run off the card
-            float chipY = Ui.S(60);
-            float room = Width - pad * 2;
-            string proxyText = Model.Proxy.Enabled ? Model.Proxy.Label : "Direct";
-            float w1 = ChipWidth(g, proxyText);
-            DrawChip(g, pad, chipY, proxyText, Model.Proxy.Enabled ? "route" : "globe",
-                Model.Proxy.Enabled ? Theme.Accent : Theme.TextFaint);
-            string langText = Model.Fp.Language;
-            float w2 = ChipWidth(g, langText);
-            if (w1 + w2 + Ui.S(8) <= room)
-                DrawChip(g, pad + w1 + Ui.S(8), chipY, langText, "language", Theme.TextFaint);
-
-            float rule = Height - Ui.S(62);
-            using (var p = new Pen(Theme.Line))
-                g.DrawLine(p, pad, rule, Width - pad, rule);
-
-            // status
-            float rowY = Height - Ui.S(46);
-            float dot = Ui.S(7);
+            float tx = LogoRect.Right + Ui.S(12);
+            float nameRight = Width - Ui.S(Pad);
             string status = Running ? "Running" : Launching ? "Starting…" : "Stopped";
             Color statusColor = Running ? Theme.Success : Launching ? Theme.Accent : Theme.TextFaint;
-            float dotX = pad + Ui.S(3);
-            float dotY = rowY + Ui.S(30) / 2f;
-            if (Running || Launching)
-            {
-                float phase = Running ? (Environment.TickCount % 1600) / 1600f : 0f;
-                if (Running)
-                {
-                    float halo = dot + Ui.S(7) * (1f - phase);
-                    using (var hb = new SolidBrush(Color.FromArgb((int)(60 * (1f - phase)), statusColor.R, statusColor.G, statusColor.B)))
-                        g.FillEllipse(hb, dotX - halo / 2f, dotY - halo / 2f, halo, halo);
-                }
-            }
+
+            // The pill is sized from the measured label so the word is never ellipsised.
+            float dot = Ui.S(7);
+            float statusTextW = Ui.Measure(g, status, Theme.Micro).Width;
+            float pillW = Ui.S(10) + dot + Ui.S(6) + statusTextW + Ui.S(10);
+            float pillH = Ui.S(20);
+            var pill = new RectangleF(nameRight - pillW, Ui.S(18), pillW, pillH);
+            nameRight = pill.Left - Ui.S(10);
+
+            string name = string.IsNullOrWhiteSpace(Model.Name) ? "Untitled profile" : Model.Name;
+            float avail = Math.Max(Ui.S(40), nameRight - tx);
+            Ui.Text(g, name, Theme.H2, Theme.Text, tx, Ui.S(17), avail);
+
+            string sub = HeaderSub();
+            Ui.Text(g, sub, Theme.Caption, Theme.TextFaint, tx, Ui.S(40), avail);
+
+            Ui.Fill(g, pill, Ui.S(10), Theme.Panel2);
             using (var b = new SolidBrush(statusColor))
-                g.FillEllipse(b, dotX - dot / 2f, dotY - dot / 2f, dot, dot);
+                g.FillEllipse(b, pill.X + Ui.S(10), pill.Y + (pillH - dot) / 2f, dot, dot);
+            Ui.Text(g, status, Theme.Micro, statusColor, pill.X + Ui.S(10) + dot + Ui.S(6),
+                pill.Y + (pillH - Theme.Micro.GetHeight(g)) / 2f, statusTextW + Ui.S(2));
+        }
 
-            Ui.Text(g, status, Theme.Caption, statusColor, pad + Ui.S(12),
-                rowY + (Ui.S(30) - Theme.Caption.GetHeight(g)) / 2f, OpenRect.X - pad - Ui.S(24));
+        private string HeaderSub()
+        {
+            string kind = BrowserMark.LabelFor(BrowserMark.KindFor(Model));
+            string group = string.IsNullOrWhiteSpace(Model.Group) ? "" : Model.Group.Trim();
+            if (group.Length == 0) return kind;
+            return kind + "  ·  " + group;
+        }
 
-            // open / focus button — windows-ui subtle button
+        /// <summary>
+        /// Device and exit-node chips. Both share one line when the card is wide enough; otherwise
+        /// the proxy chip drops to the second line and the tags move down a row. Nothing truncates
+        /// into an unreadable fragment and nothing overflows the card.
+        /// </summary>
+        private void PaintChips(Graphics g, out bool proxyOnSecondLine)
+        {
+            proxyOnSecondLine = false;
+            float h = Ui.S(ChipH);
+            float x = Ui.S(Pad);
+            float right = Width - Ui.S(Pad);
+            float lineA = Ui.S(72);
+            float lineB = Ui.S(108);
+
+            string os = Model.Fp != null ? (Model.Fp.Os ?? "") : "";
+            if (string.IsNullOrWhiteSpace(os)) os = "Windows";
+            string device = FingerprintFactory.DeviceIcon(os);
+            string screen = Model.Fp != null && Model.Fp.ScreenW > 0
+                ? Model.Fp.ScreenW + "×" + Model.Fp.ScreenH : "";
+
+            var proxy = Model.Proxy;
+            bool hasProxy = proxy != null && proxy.Enabled;
+            string flag = null;
+            string proxyText;
+            if (hasProxy)
+            {
+                flag = !string.IsNullOrWhiteSpace(proxy.LastCountryCode) ? proxy.LastCountryCode : null;
+                string place = !string.IsNullOrWhiteSpace(proxy.LastCity) ? proxy.LastCity
+                    : !string.IsNullOrWhiteSpace(proxy.LastCountry) ? proxy.LastCountry : null;
+                proxyText = proxy.Type.ToUpperInvariant() + (place != null ? " · " + place : " · " + proxy.Host);
+            }
+            else proxyText = "Direct";
+
+            float afterDevice = DrawChip(g, x, lineA, h, right - x, device, os, screen, Theme.TextDim, null);
+            float remaining = right - (afterDevice + Ui.S(8));
+
+            // Measure the proxy chip before committing to it, so a tight card wraps instead of clipping.
+            float needed = ChipWidth(g, hasProxy ? "route" : "globe", proxyText, null, flag);
+            if (needed <= remaining)
+                DrawChip(g, afterDevice + Ui.S(8), lineA, h, remaining, hasProxy ? "route" : "globe",
+                    proxyText, null, hasProxy ? Theme.Accent : Theme.TextFaint, flag);
+            else
+            {
+                DrawChip(g, x, lineB, h, right - x, hasProxy ? "route" : "globe", proxyText, null,
+                    hasProxy ? Theme.Accent : Theme.TextFaint, flag);
+                proxyOnSecondLine = true;
+            }
+        }
+
+        private float ChipWidth(Graphics g, string icon, string text, string trailing, string flagCode)
+        {
+            float padX = Ui.S(9);
+            float ic = Ui.S(13);
+            float flagW = flagCode != null ? Ui.S(15) + Ui.S(6) : 0f;
+            float iconW = icon != null ? ic + Ui.S(6) : 0f;
+            float trailW = string.IsNullOrEmpty(trailing) ? 0f
+                : Ui.S(6) + Ui.Measure(g, trailing, Theme.Caption).Width;
+            return padX * 2 + iconW + flagW + Ui.Measure(g, text ?? "", Theme.Caption).Width + trailW;
+        }
+
+        /// <summary>Draw one chip into at most <paramref name="maxRight"/> px and return its right edge.</summary>
+        private float DrawChip(Graphics g, float x, float y, float h, float maxW, string icon,
+            string text, string trailing, Color tint, string flagCode)
+        {
+            if (maxW < Ui.S(48)) return x;
+            float padX = Ui.S(9);
+            float ic = Ui.S(13);
+            float inner = x + padX;
+
+            float flagW = flagCode != null ? Ui.S(15) + Ui.S(6) : 0f;
+            float iconW = icon != null ? ic + Ui.S(6) : 0f;
+            float trailW = string.IsNullOrEmpty(trailing) ? 0f
+                : Ui.S(6) + Ui.Measure(g, trailing, Theme.Caption).Width;
+            float textBudget = maxW - padX * 2 - iconW - flagW - trailW;
+            string shown = Ui.Clip(g, text ?? "", Theme.Caption, Math.Max(Ui.S(20), textBudget));
+            float textW = Ui.Measure(g, shown, Theme.Caption).Width;
+
+            float w = Math.Min(maxW, padX * 2 + iconW + flagW + textW + trailW);
+            var rect = new RectangleF(x, y, w, h);
+            Ui.Fill(g, rect, Ui.S(6), Theme.Panel2);
+
+            float cy = y + (h - Theme.Caption.GetHeight(g)) / 2f;
+            if (flagCode != null)
+            {
+                float fs = Ui.S(15);
+                Flags.Draw(g, flagCode, new RectangleF(inner, y + (h - fs) / 2f, fs, fs));
+                inner += fs + Ui.S(6);
+            }
+            if (icon != null)
+            {
+                Icons.Draw(g, icon, new RectangleF(inner, y + (h - ic) / 2f, ic, ic), tint);
+                inner += ic + Ui.S(6);
+            }
+            Ui.Text(g, shown, Theme.Caption, Theme.TextDim, inner, cy, textW + Ui.S(2));
+            if (!string.IsNullOrEmpty(trailing))
+                Ui.Text(g, trailing, Theme.Caption, Theme.TextFaint,
+                    inner + textW + Ui.S(6), cy, maxW - (inner + textW + Ui.S(6) - x) - padX);
+            return x + w;
+        }
+
+        private void PaintTags(Graphics g)
+        {
+            var tags = SplitTags(Model.Tags);
+            if (tags.Count == 0 && string.IsNullOrWhiteSpace(Model.Status)) return;
+
+            float y = Ui.S(108);
+            float h = Ui.S(TagH);
+            float x = Ui.S(Pad);
+            float right = Width - Ui.S(Pad);
+
+            if (!string.IsNullOrWhiteSpace(Model.Status))
+            {
+                string s = Model.Status.Trim();
+                float w = Ui.S(9) * 2 + Ui.Measure(g, s, Theme.Micro).Width;
+                w = Math.Min(w, right - x);
+                var rect = new RectangleF(x, y, w, h);
+                Ui.Fill(g, rect, Ui.S(5), Theme.AccentOnBg);
+                Ui.Text(g, s, Theme.Micro, Theme.AccentText, rect.X + Ui.S(9),
+                    rect.Y + (h - Theme.Micro.GetHeight(g)) / 2f, w - Ui.S(18));
+                x = rect.Right + Ui.S(6);
+            }
+
+            int shown = 0;
+            foreach (string t in tags)
+            {
+                float w = Ui.S(8) * 2 + Ui.Measure(g, t, Theme.Micro).Width;
+                if (x + w > right) break;
+                var rect = new RectangleF(x, y, w, h);
+                Ui.Fill(g, rect, Ui.S(5), Theme.Panel2);
+                Ui.Text(g, t, Theme.Micro, Theme.TextDim, rect.X + Ui.S(8),
+                    rect.Y + (h - Theme.Micro.GetHeight(g)) / 2f, w - Ui.S(16));
+                x = rect.Right + Ui.S(6);
+                shown++;
+            }
+            int hidden = tags.Count - shown;
+            if (hidden > 0 && x + Ui.S(30) <= right)
+            {
+                var rect = new RectangleF(x, y, Ui.S(30), h);
+                Ui.Text(g, "+" + hidden, Theme.Micro, Theme.TextFaint, rect.X,
+                    rect.Y + (h - Theme.Micro.GetHeight(g)) / 2f, rect.Width);
+            }
+        }
+
+        private static List<string> SplitTags(string raw)
+        {
+            var list = new List<string>();
+            if (string.IsNullOrWhiteSpace(raw)) return list;
+            foreach (string part in raw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string t = part.Trim();
+                if (t.Length == 0) continue;
+                if (!t.StartsWith("#", StringComparison.Ordinal)) t = "#" + t;
+                list.Add(t);
+            }
+            return list;
+        }
+
+        private void PaintActions(Graphics g)
+        {
+            using (var p = new Pen(Theme.LineSoft))
+            {
+                float dy = Height - Ui.S(14) - Ui.S(BtnH) - Ui.S(10);
+                g.DrawLine(p, Ui.S(Pad), dy, Width - Ui.S(Pad), dy);
+            }
+
             var or = OpenRect;
-            if (_openHover && !Launching)
-                Ui.Fill(g, or, Ui.S(4), Theme.HoverOverlay);
+            bool enabled = !Launching;
+            if (enabled && _openHover) Ui.Fill(g, or, Ui.S(4), Theme.HoverOverlay);
             Ui.Stroke(g, or, Ui.S(4), Theme.ButtonBorder, 1f);
 
-            string openLabel = Launching ? "Starting…" : Running ? "Focus" : "Open";
-            Color openFg = Launching ? Theme.TextFaint : Theme.Text;
+            string openLabel = Launching ? "Starting…" : Running ? "Focus window" : "Open profile";
+            Color openFg = enabled ? Theme.Text : Theme.TextFaint;
             float ic = Ui.S(13);
             float ow = Ui.Measure(g, openLabel, Theme.SmallBold).Width;
-            float content = (Launching ? 0 : ic + Ui.S(6)) + ow;
+            float content = (enabled ? ic + Ui.S(6) : 0) + ow;
             float ox = or.X + (or.Width - content) / 2f;
-            if (!Launching)
+            if (enabled)
             {
                 Icons.Draw(g, Running ? "window" : "play",
                     new RectangleF(ox, or.Y + (or.Height - ic) / 2f, ic, ic), openFg);
                 ox += ic + Ui.S(6);
             }
-            Ui.Text(g, openLabel, Theme.SmallBold, openFg, ox, or.Y + (or.Height - Theme.SmallBold.GetHeight(g)) / 2f);
+            Ui.Text(g, openLabel, Theme.SmallBold, openFg, ox,
+                or.Y + (or.Height - Theme.SmallBold.GetHeight(g)) / 2f);
 
-            if (Focused && ShowFocusCues) Ui.FocusRing(g, r, rad);
-        }
-
-        private float ChipWidth(Graphics g, string text)
-        {
-            return Ui.Measure(g, text, Theme.Caption).Width + Ui.S(32);
-        }
-
-        private void DrawChip(Graphics g, float x, float y, string text, string icon, Color iconColor)
-        {
-            float w = ChipWidth(g, text);
-            float h = Ui.S(22);
-            var rect = new RectangleF(x, y, w, h);
-            Ui.Fill(g, rect, Ui.S(4), Theme.Panel2);
-            float ic = Ui.S(12);
-            Icons.Draw(g, icon, new RectangleF(x + Ui.S(8), y + (h - ic) / 2f, ic, ic), iconColor);
-            Ui.Text(g, text, Theme.Caption, Theme.TextDim, x + Ui.S(24), y + (h - Theme.Caption.GetHeight(g)) / 2f, w - Ui.S(28));
+            if (_kebabHover) Ui.Fill(g, KebabRect, Ui.S(4), Theme.HoverOverlay);
+            float kd = Ui.S(16);
+            Icons.Draw(g, "dots", new RectangleF(KebabRect.X + (KebabRect.Width - kd) / 2f,
+                KebabRect.Y + (KebabRect.Height - kd) / 2f, kd, kd), _kebabHover ? Theme.Text : Theme.TextDim);
         }
     }
 }

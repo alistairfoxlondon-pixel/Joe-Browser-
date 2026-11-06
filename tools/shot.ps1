@@ -14,6 +14,8 @@ param(
     [int]$ResizeH = 0,
     [int]$Click2X = -1,
     [int]$Click2Y = -1,
+    [int]$RightX = -1,
+    [int]$RightY = -1,
     [int]$WheelX = -1,
     [int]$WheelY = -1,
     [int]$Wheel = 0,
@@ -169,6 +171,22 @@ if ($ResizeW -gt 0 -or $ResizeH -gt 0) {
   $ht = if ($ResizeH -gt 0) { $ResizeH } else { $r.Bottom - $r.Top }
   [Win]::MoveWindow($found, $r.Left, $r.Top, $w, $ht, $true) | Out-Null
   Start-Sleep -Milliseconds 500
+}
+
+if ($RightX -ge 0 -and $RightY -ge 0) {
+  $r = New-Object Win+RECT; [Win]::GetWindowRect($found, [ref]$r) | Out-Null
+  $rx = $r.Left + $RightX; $ry = $r.Top + $RightY
+  $pt = New-Object Win+POINT; $pt.X = $rx; $pt.Y = $ry
+  $th = [Win]::WindowFromPoint($pt)
+  if ($th -ne [IntPtr]::Zero) {
+    $lp = New-Object Win+POINT; $lp.X = 0; $lp.Y = 0
+    [Win]::ClientToScreen($th, [ref]$lp) | Out-Null
+    $tl = [IntPtr]([int]((($rx - $lp.X) -band 0xFFFF) -bor (($ry - $lp.Y) -shl 16)))
+    [Win]::PostMessage($th, 0x0204, [IntPtr]1, $tl) | Out-Null
+    [Win]::PostMessage($th, 0x0205, [IntPtr]::Zero, $tl) | Out-Null
+    Write-Host "right clicked hwnd $th"
+    Start-Sleep -Milliseconds 700
+  }
 }
 
 if ($ClickX -ge 0 -and $ClickY -ge 0) {

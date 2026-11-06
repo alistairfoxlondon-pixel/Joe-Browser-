@@ -175,13 +175,35 @@ namespace JoeBrowser
             }
             else
             {
-                _restoreBounds = Bounds;
-                Bounds = Screen.FromControl(this).WorkingArea;
-                _maximized = true;
+                Maximize();
             }
             OnSurfaceChanged();
             Invalidate();
         }
+
+        /// <summary>Fill the working area, remembering the current bounds as the restore size.</summary>
+        public void Maximize()
+        {
+            if (_maximized) return;
+            if (!Bounds.IsEmpty) _restoreBounds = Bounds;
+            Bounds = Screen.FromControl(this).WorkingArea;
+            _maximized = true;
+        }
+
+        /// <summary>Return to the remembered window bounds, or a large default when none exist.</summary>
+        public void RestoreTo(Rectangle bounds)
+        {
+            _restoreBounds = bounds;
+            if (_maximized)
+            {
+                Bounds = bounds;
+                _maximized = false;
+            }
+        }
+
+        /// <summary>The size the window returns to when the maximize button is pressed again.</summary>
+        /// <summary>Bounds the window had before it was filled; WindowState never leaves Normal here.</summary>
+        public Rectangle LastNormalBounds { get { return _restoreBounds; } }
 
         /// <summary>Keeps the window inside the monitor it is on, at any DPI.</summary>
         protected void FitToWorkArea()
@@ -461,6 +483,9 @@ namespace JoeBrowser
                 Point screen = owner.PointToScreen(p);
                 var bounds = Screen.FromControl(owner).Bounds;
                 Size need = menu.GetPreferredSize(new Size(0, 0));
+                // A menu taller than the display cannot be made to fit: let the framework add its
+                // scroll arrows instead of pinning the top edge and clipping the last entries.
+                if (need.Height > bounds.Height - Ui.S(12)) return p;
                 int x = Math.Min(screen.X, bounds.Right - need.Width - 4);
                 int y = screen.Y;
                 if (y + need.Height > bounds.Bottom - 4) y = screen.Y - need.Height - Ui.S(8);
@@ -710,6 +735,7 @@ namespace JoeBrowser
         private string _icon;
         private JBIconButton _trailing;
         private readonly bool _multiline;
+        private readonly Label _cue;
         private int _wheelCarry;
 
         public JBTextBox(bool multiline = false)
@@ -726,10 +752,44 @@ namespace JoeBrowser
             if (multiline) Box.ScrollBars = ScrollBars.None;
             Box.GotFocus += delegate { _focused = true; Invalidate(); };
             Box.LostFocus += delegate { _focused = false; Invalidate(); };
-            Box.TextChanged += delegate { Invalidate(); };
+            Box.TextChanged += delegate { Invalidate(); SyncCue(); };
             Box.KeyDown += BoxKeyDown;
             Controls.Add(Box);
+
+            /* EM_SETCUEBANNER is ignored by multiline edits. A small opaque label sitting
+               above the edit shows the hint without ever becoming part of Box.Text. It must
+               be opaque: a transparent label would ask the parent to repaint its surface
+               colour over the edit, leaving a visible rectangle behind the hint. */
+            if (multiline)
+            {
+                _cue = new Label
+                {
+                    AutoSize = false,
+                    BackColor = Theme.Input,
+                    ForeColor = Theme.TextFaint,
+                    Font = Theme.Body,
+                    TextAlign = ContentAlignment.TopLeft,
+                    Padding = new Padding(2, 1, 0, 0),
+                    Cursor = Cursors.IBeam,
+                    Visible = false
+                };
+                _cue.MouseDown += delegate
+                {
+                    Box.Focus();
+                    Box.SelectionStart = 0;
+                    Box.SelectionLength = 0;
+                };
+                Controls.Add(_cue);
+                _cue.BringToFront();
+            }
             TabStop = false;
+        }
+
+        private void SyncCue()
+        {
+            if (_cue == null) return;
+            _cue.Text = _placeholder;
+            _cue.Visible = Box.Text.Length == 0 && !string.IsNullOrEmpty(_placeholder);
         }
 
         public string Icon
@@ -767,7 +827,7 @@ namespace JoeBrowser
         public string Value
         {
             get { return Box.Text; }
-            set { Box.Text = value ?? ""; }
+            set { Box.Text = value ?? ""; SyncCue(); }
         }
 
         public string Placeholder
@@ -777,7 +837,8 @@ namespace JoeBrowser
             {
                 _placeholder = value ?? "";
                 if (Box.IsHandleCreated)
-                    Native.SendMessage(Box.Handle, Native.EM_SETCUEBANNER, (IntPtr)1, _placeholder);
+                    Native.SendMessage(Box.Handle, Native.EM_SETCUEBANNER, IntPtr.Zero, _placeholder);
+                SyncCue();
             }
         }
 
@@ -806,8 +867,9 @@ namespace JoeBrowser
         {
             base.OnHandleCreated(e);
             if (!string.IsNullOrEmpty(_placeholder))
-                Native.SendMessage(Box.Handle, Native.EM_SETCUEBANNER, (IntPtr)1, _placeholder);
+                Native.SendMessage(Box.Handle, Native.EM_SETCUEBANNER, IntPtr.Zero, _placeholder);
             LayoutBox();
+            SyncCue();
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -844,16 +906,11 @@ namespace JoeBrowser
             if (!string.IsNullOrEmpty(_icon))
             {
                 float s = Ui.S(16);
-                Icons.Draw(g, _icon, new RectangleF(Ui.S(10), (Height - s) / 2f, s, s),
+                // A tall multiline field has to keep its icon on the first text row, not
+                // floating in the vertical middle of the box.
+                float iconY = _multiline ? Ui.S(PadTop) : (Height - s) / 2f;
+                Icons.Draw(g, _icon, new RectangleF(Ui.S(10), iconY, s, s),
                     _focused ? Theme.Text : Theme.TextFaint);
-            }
-
-            // The native cue banner only exists on single line edits, so a tall field draws its own.
-            if (_multiline && Box.Text.Length == 0 && !string.IsNullOrEmpty(_placeholder))
-            {
-                float px = Ui.S(PadLeft) + (string.IsNullOrEmpty(_icon) ? 0 : Ui.S(22));
-                Ui.Text(g, _placeholder, Theme.Body, Theme.TextFaint, px, Ui.S(PadTop),
-                    Width - px - Ui.S(PadRight) - Ui.S(8));
             }
 
             if (_multiline) PaintScroll(g);
@@ -925,6 +982,8 @@ namespace JoeBrowser
             int w = Math.Max(10, Width - l - rr);
             int h = Math.Max(12, Height - t - Ui.S(PadTop));
             Box.SetBounds(l, t, w, h);
+            if (_cue != null)
+                _cue.SetBounds(l, t, Math.Max(10, w), Theme.Body.Height + Ui.S(4));
             if (_trailing != null) _trailing.SetBounds(Width - Ui.S(PadRight) - Ui.S(26), (Height - Ui.S(26)) / 2, Ui.S(26), Ui.S(26));
         }
 
@@ -933,6 +992,12 @@ namespace JoeBrowser
             Box.BackColor = Theme.Input;
             Box.ForeColor = Theme.Text;
             Box.Font = Theme.Body;
+            if (_cue != null)
+            {
+                _cue.BackColor = Theme.Input;
+                _cue.ForeColor = Theme.TextFaint;
+                _cue.Font = Theme.Body;
+            }
             Invalidate();
         }
     }
@@ -941,6 +1006,8 @@ namespace JoeBrowser
     {
         public readonly List<string> Items = new List<string>();
         private int _selected = -1;
+        private int _pageStart;
+        private bool _pagingNav;
         private bool _hover, _open;
         private ContextMenuStrip _menu;
         private string _icon;
@@ -948,7 +1015,19 @@ namespace JoeBrowser
         public event EventHandler SelectedIndexChanged;
 
         /// <summary>Optional per item country code, drawn as a circular chip.</summary>
-        public Func<int, string> Badge;
+        public Func<int, string> Badge { get; set; }
+
+        /// <summary>Optional readable label per item; the stored Value stays the raw key.</summary>
+        public Func<int, string> Display { get; set; }
+
+        private string LabelAt(int i)
+        {
+            if (Display != null)
+            {
+                try { string s = Display(i); if (!string.IsNullOrEmpty(s)) return s; } catch { }
+            }
+            return i >= 0 && i < Items.Count ? Items[i] : "";
+        }
 
         public JBSelect()
         {
@@ -983,6 +1062,7 @@ namespace JoeBrowser
             Items.Clear();
             Items.AddRange(items);
             _selected = (selected >= 0 && selected < Items.Count) ? selected : -1;
+            _pageStart = 0;
             Invalidate();
         }
 
@@ -1034,10 +1114,32 @@ namespace JoeBrowser
             var made = new List<Bitmap>();
             if (chips) _menu.Disposed += delegate { foreach (var b in made) { try { b.Dispose(); } catch { } } };
 
-            for (int i = 0; i < Items.Count; i++)
+            // A 47-zone list is taller than the display. Page it instead of letting Windows
+            // clamp the popup to the top edge, which hides the tail with no way to scroll.
+            int rows = Math.Max(6, Math.Min(20, (Screen.FromControl(this).WorkingArea.Height - Ui.S(120)) / Ui.S(34)));
+            int pageSize = Math.Max(4, rows - 2);
+            bool paged = Items.Count > rows;
+
+            if (!_pagingNav && paged && _selected >= 0 && (_selected < _pageStart || _selected >= _pageStart + pageSize))
+                _pageStart = (_selected / pageSize) * pageSize;
+            _pagingNav = false;
+            if (_pageStart > Items.Count - 1) _pageStart = Math.Max(0, ((Items.Count - 1) / pageSize) * pageSize);
+            if (_pageStart < 0) _pageStart = 0;
+
+            int start = paged ? _pageStart : 0;
+            int end = paged ? Math.Min(Items.Count, start + pageSize) : Items.Count;
+
+            if (paged && start > 0)
+            {
+                var up = new JBMenu.Item("Previous", "chevron-up");
+                up.Click += delegate { _pagingNav = true; _pageStart = Math.Max(0, start - pageSize); ReopenMenu(); };
+                _menu.Items.Add(up);
+            }
+
+            for (int i = start; i < end; i++)
             {
                 int idx = i;
-                var item = new JBMenu.Item(Items[i], null);
+                var item = new JBMenu.Item(LabelAt(i), null);
                 item.Checked = !chips && i == _selected;
                 if (chips)
                 {
@@ -1056,10 +1158,23 @@ namespace JoeBrowser
                 _menu.Items.Add(item);
             }
 
+            if (paged && end < Items.Count)
+            {
+                var more = new JBMenu.Item("More…  (" + (Items.Count - end) + ")", "chevron-down");
+                more.Click += delegate { _pagingNav = true; _pageStart = end; ReopenMenu(); };
+                _menu.Items.Add(more);
+            }
+
             _open = true;
             Invalidate();
             _menu.Closed += delegate { _open = false; Invalidate(); };
             JBMenu.ShowNear(_menu, this, new Point(0, Height + Ui.S(4)));
+        }
+
+        private void ReopenMenu()
+        {
+            // Clicking a page item closes the menu; reopen after the click has unwound.
+            try { BeginInvoke(new Action(ShowMenu)); } catch { }
         }
 
         public void ReStyle() { Font = Theme.Body; Invalidate(); }
@@ -1095,7 +1210,7 @@ namespace JoeBrowser
                 left = Ui.S(10) + Ui.S(22);
             }
 
-            string text = Value;
+            string text = LabelAt(_selected);
             Color fg = string.IsNullOrEmpty(text) ? Theme.TextFaint : Theme.Text;
             Ui.Text(g, text, Font, fg, left, (Height - Font.GetHeight(g)) / 2f, Width - left - Ui.S(36));
 
@@ -1449,19 +1564,21 @@ namespace JoeBrowser
     /// <summary>Responsive card grid: columns are chosen from the available width, cells stretch to fill.</summary>
     internal sealed class JBGrid : Panel, IReStyle
     {
-        public int MinCell = 240;
-        public int CellHeight = 178;
+        public int MinCell = 360;
+        public int CellHeight = 200;
         public int Gap = 16;
 
         public JBGrid()
         {
             BackColor = Theme.Bg;
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         }
 
         public void ReStyle() { BackColor = Theme.Bg; Invalidate(); }
 
         public int Columns { get; private set; }
+        public int Rows { get; private set; }
 
         protected override void OnResize(EventArgs e)
         {
@@ -1481,20 +1598,22 @@ namespace JoeBrowser
             LayoutGrid();
         }
 
+        /// <summary>
+        /// Columns are chosen so each row always spans the full width: a wide window gets more
+        /// cards per row instead of a capped grid with dead space on the right.
+        /// </summary>
         public void LayoutGrid()
         {
             int gap = Ui.S(Gap);
             int min = Ui.S(MinCell);
             int cellH = Ui.S(CellHeight);
-            int avail = Math.Max(min, Width);
+            SuspendLayout();
 
-            // Columns are chosen so the row always spans the full width: a wide window gets
-            // more cards per row, never a wall of dead space to the right of a capped grid.
+            int avail = Math.Max(min, Width);
             int cols = Math.Max(1, (avail + gap) / (min + gap));
             int cellW = (avail - gap * (cols - 1)) / cols;
             Columns = cols;
 
-            SuspendLayout();
             int i = 0;
             foreach (Control c in Controls)
             {
@@ -1503,10 +1622,11 @@ namespace JoeBrowser
                 c.SetBounds(col * (cellW + gap), row * (cellH + gap), cellW, cellH);
                 i++;
             }
-            int rows = Math.Max(1, (int)Math.Ceiling(i / (double)cols));
-            Height = rows * (cellH + gap) + Ui.S(8);
+            Rows = Math.Max(1, (int)Math.Ceiling(i / (double)cols));
+            Height = i > 0 ? Rows * (cellH + gap) + Ui.S(8) : Ui.S(40);
+
             ResumeLayout(false);
-            PerformLayout();
+            Invalidate();
         }
     }
 
@@ -1633,6 +1753,10 @@ namespace JoeBrowser
     {
         private bool _checked, _hover;
 
+        /// <summary>Localisable caption for each state.</summary>
+        public string NightText = "Night Mode";
+        public string DayText = "Day Mode";
+
         public event EventHandler CheckedChanged;
 
         public JBThemeSwitch()
@@ -1683,7 +1807,7 @@ namespace JoeBrowser
 
             float s = Ui.S(22);
             Icons.Draw(g, _checked ? "moon" : "sun", new RectangleF(Ui.S(15), (Height - s) / 2f, s, s), Theme.Text);
-            Ui.Text(g, _checked ? "Night Mode" : "Day Mode", Theme.Body, Theme.Text,
+            Ui.Text(g, _checked ? NightText : DayText, Theme.Body, Theme.Text,
                 Ui.S(47), (Height - Theme.Body.GetHeight(g)) / 2f, Width - Ui.S(58));
 
             if (Focused && ShowFocusCues) Ui.FocusRing(g, r, Ui.S(4));
@@ -1695,14 +1819,20 @@ namespace JoeBrowser
     {
         private bool _hover;
 
+        /// <summary>Y offsets of the hairlines that separate rows inside the card.</summary>
+        public float[] Dividers;
+
+        /// <summary>Full-bleed containers such as settings sections must not light up as one block.</summary>
+        public bool Hoverable = true;
+
         public JBPanel()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
             BackColor = Theme.Panel;
         }
 
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseEnter(EventArgs e) { if (Hoverable) { _hover = true; Invalidate(); } base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { if (!_hover) { base.OnMouseLeave(e); return; } _hover = false; Invalidate(); base.OnMouseLeave(e); }
 
         protected override void OnPaintBackground(PaintEventArgs e)
         {
@@ -1712,6 +1842,13 @@ namespace JoeBrowser
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             Ui.Fill(g, r, Theme.RLarge, _hover ? Color.FromArgb(255, Theme.PanelHover) : Theme.Panel);
             Ui.Stroke(g, r, Theme.RLarge, Theme.Line, 1f);
+            if (Dividers == null) return;
+            using (var pen = new Pen(Theme.Line))
+                for (int i = 0; i < Dividers.Length; i++)
+                {
+                    float dy = (float)Math.Round(Dividers[i]) + 0.5f;
+                    g.DrawLine(pen, Ui.S(18), dy, Width - Ui.S(19), dy);
+                }
         }
 
         public void ReStyle() { BackColor = Theme.Panel; Invalidate(); }

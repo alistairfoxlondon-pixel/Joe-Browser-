@@ -15,6 +15,10 @@ namespace JoeBrowser
         public static string ChromiumDir { get { return Path.Combine(Browsers, "chromium"); } }
         public static string ChromiumExe { get { return Path.Combine(ChromiumDir, "chrome-win", "chrome.exe"); } }
         public static string SettingsFile { get { return Path.Combine(Root, "settings.json"); } }
+        /// <summary>Original unpacked extensions, written by Joe Browser itself.</summary>
+        public static string Extensions { get { return Path.Combine(Root, "extensions"); } }
+        public static string Trash { get { return Path.Combine(Root, "trash"); } }
+        public static string Exports { get { return Path.Combine(Root, "exports"); } }
 
         private static string ResolveRoot()
         {
@@ -34,6 +38,9 @@ namespace JoeBrowser
             Directory.CreateDirectory(Profiles);
             Directory.CreateDirectory(Data);
             Directory.CreateDirectory(Logs);
+            Directory.CreateDirectory(Extensions);
+            Directory.CreateDirectory(Trash);
+            Directory.CreateDirectory(Exports);
         }
     }
 }

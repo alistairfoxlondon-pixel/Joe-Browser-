@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
+using System.Linq;
 
 namespace JoeBrowser
 {
@@ -31,6 +32,13 @@ namespace JoeBrowser
         private readonly HashSet<string> _stamped = new HashSet<string>();
         private string _primarySession;
         private bool _navigated;
+        private readonly object _scriptState = new object();
+        /// <summary>Identifiers of injected documents, so a live re-apply replaces instead of stacking.</summary>
+        private readonly Dictionary<string, string> _fpScripts = new Dictionary<string, string>();
+        private readonly Dictionary<string, string> _toolScripts = new Dictionary<string, string>();
+        /// <summary>Chromium refuses a second locale override; remembered so we can clear it first.</summary>
+        private readonly Dictionary<string, string> _locales = new Dictionary<string, string>();
+        private bool _extensionsLoaded;
 
         public event Action<BrowserSession> Closed;
 
@@ -67,7 +75,7 @@ namespace JoeBrowser
         [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
-        public static async Task<BrowserSession> LaunchAsync(Profile profile, string defaultStartUrl, string defaultBrowserPath)
+        public static async Task<BrowserSession> LaunchAsync(Profile profile, string defaultStartUrl, string defaultBrowserPath, AppSettings settings = null)
         {
             var s = new BrowserSession { Profile = profile };
 
@@ -122,10 +130,22 @@ namespace JoeBrowser
             int port = GetFreePort();
             s.DebugPort = port;
 
-            int winW = Math.Min(fp.ScreenW > 0 ? fp.ScreenW - 120 : 1280, 1600);
-            int winH = Math.Min(fp.ScreenH > 0 ? fp.ScreenH - 140 : 900, 1000);
-            if (winW < 900) winW = 900;
-            if (winH < 620) winH = 620;
+            int winW, winH;
+            int viewH = FingerprintFactory.MobileViewHeight(fp);
+            if (viewH > 0)
+            {
+                // A phone profile has to open like a phone. A desktop-sized window next to a
+                // 393x852 emulation leaves a dead gutter and contradicts screen.width.
+                winW = Math.Max(fp.ScreenW > 0 ? fp.ScreenW : 393, 360);
+                winH = viewH + 128;
+            }
+            else
+            {
+                winW = Math.Min(fp.ScreenW > 0 ? fp.ScreenW - 120 : 1280, 1600);
+                winH = Math.Min(fp.ScreenH > 0 ? fp.ScreenH - 140 : 900, 1000);
+                if (winW < 900) winW = 900;
+                if (winH < 620) winH = 620;
+            }
 
             var args = new List<string>();
             args.Add("--user-data-dir=\"" + dataDir + "\"");
@@ -159,6 +179,21 @@ namespace JoeBrowser
                 args.Add("--ignore-gpu-blocklist");
             }
             ApplyWebRtcFlags(args, fp);
+
+            /* Original unpacked extensions. Chrome 137+ hides --load-extension behind a
+               feature flag on branded builds, so disable that flag and always inject the
+               same first-party tools through CDP as a guaranteed fallback. */
+            bool masterExtensions = settings == null || settings.EnableExtensions;
+            bool customExtensions = settings == null || settings.EnableCustomExtensions;
+            var folders = ExtensionManager.EnabledFolders(profile.Tools, masterExtensions, customExtensions);
+            if (folders.Count > 0)
+            {
+                s._extensionsLoaded = true;
+                args.Add("--disable-features=DisableLoadExtensionCommandLineSwitch");
+                var paths = string.Join(",", folders.Select(p => p.Replace("\\", "/")).ToArray());
+                args.Add("--disable-extensions-except=\"" + paths + "\"");
+                args.Add("--load-extension=\"" + paths + "\"");
+            }
             args.Add("about:blank");
 
             var psi = new ProcessStartInfo
@@ -224,6 +259,15 @@ namespace JoeBrowser
                 {
                     if (!string.IsNullOrEmpty(sessionId)) _stamped.Remove(sessionId);
                     if (!string.IsNullOrEmpty(targetId)) _stamped.Remove(targetId);
+                }
+                if (!string.IsNullOrEmpty(sessionId))
+                {
+                    lock (_scriptState)
+                    {
+                        _fpScripts.Remove(sessionId);
+                        _toolScripts.Remove(sessionId);
+                        _locales.Remove(sessionId);
+                    }
                 }
             }
         }
@@ -325,8 +369,9 @@ namespace JoeBrowser
         }
 
         /// <summary>
-        /// Firefox has no debugging pipe, so everything it can honour lives in prefs.js.
-        /// Proxy, locale, language and user agent are covered; WebGL and timezone are not.
+        /// Firefox has no debugging pipe, so everything it can honour lives in prefs.js:
+        /// proxy, locale and language. WebGL, timezone, screen and platform cannot be restamped
+        /// there, so a non-Windows device target is declined rather than half-applied.
         /// </summary>
         private void LaunchFirefox(FingerprintConfig fp, string dataDir, string startUrl)
         {
@@ -386,8 +431,18 @@ namespace JoeBrowser
                 sb.AppendLine("user_pref(\"intl.locale.requested\", \"" + Escape(lang) + "\");");
                 sb.AppendLine("user_pref(\"intl.accept_languages\", \"" + Escape(fp.AcceptLanguage ?? lang) + "\");");
 
-                if (!string.IsNullOrWhiteSpace(fp.UserAgent) && !IsSamePlatform(fp))
-                    sb.AppendLine("user_pref(\"general.useragent.override\", \"" + Escape(fp.UserAgent) + "\");");
+                if (!fp.AutoUserAgent && !string.IsNullOrWhiteSpace(fp.UserAgentOverride))
+                {
+                    /* A hand-typed UA is the user's call, so honour it. An automatic one is not:
+                       Firefox prefs can restamp the header but not navigator.platform, screen,
+                       WebGL or timezone, so a foreign or Chrome-shaped UA would contradict the
+                       engine and read as a fake. The real Firefox UA is the only coherent one. */
+                    sb.AppendLine("user_pref(\"general.useragent.override\", \"" + Escape(fp.UserAgentOverride) + "\");");
+                }
+                else if (!FingerprintFactory.IsWindowsTarget(fp.Os))
+                {
+                    Log.Info("Firefox profile targets " + fp.Os + "; keeping the host user agent (Firefox cannot mask platform, screen or WebGL)");
+                }
 
                 File.WriteAllText(Path.Combine(dir, "prefs.js"), sb.ToString(), new UTF8Encoding(false));
             }
@@ -400,11 +455,6 @@ namespace JoeBrowser
         private string startUrlSafe()
         {
             return string.IsNullOrEmpty(_startUrl) ? "about:blank" : _startUrl;
-        }
-
-        private static bool IsSamePlatform(FingerprintConfig fp)
-        {
-            return string.IsNullOrEmpty(fp.Os) || fp.Os.StartsWith("Windows", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string Escape(string s)
@@ -460,11 +510,23 @@ namespace JoeBrowser
             }
             if (!string.IsNullOrEmpty(lang))
             {
-                await TrySend("Emulation.setLocaleOverride", new Dictionary<string, object> { { "locale", lang } }, session);
-                var headers = new Dictionary<string, object>
+                /* Chromium keeps a single locale override per emulation agent, and tabs in the
+                   same renderer share that agent. A second tab therefore reports "Another
+                   locale override is already in effect" even though the override it wants is
+                   already active. That is a successful no-op, not a failure: the Accept-Language
+                   header, --lang switch and injected navigator.languages still cover that tab.
+                   Only clear when this very session is switching to a different locale. */
+                string previous;
+                bool had;
+                lock (_scriptState) had = _locales.TryGetValue(session ?? "", out previous);
+                if (!had || !string.Equals(previous, lang, StringComparison.OrdinalIgnoreCase))
                 {
-                    { "Accept-Language", acceptLanguage }
-                };
+                    if (had)
+                        await TrySend("Emulation.setLocaleOverride", new Dictionary<string, object>(), session);
+                    await SetLocaleAsync(lang, session);
+                    lock (_scriptState) _locales[session ?? ""] = lang;
+                }
+                var headers = new Dictionary<string, object> { { "Accept-Language", acceptLanguage } };
                 await TrySend("Network.setExtraHTTPHeaders", new Dictionary<string, object> { { "headers", headers } }, session);
             }
 
@@ -487,6 +549,7 @@ namespace JoeBrowser
             }
 
             bool mobile = fp.DeviceType != null && fp.DeviceType != "desktop";
+            int viewH = FingerprintFactory.MobileViewHeight(fp);
             if (!string.IsNullOrEmpty(fp.UserAgent))
             {
                 // The header has to move with the scripted navigator even when the profile claims
@@ -509,7 +572,7 @@ namespace JoeBrowser
                 await TrySend("Emulation.setDeviceMetricsOverride", new Dictionary<string, object>
                 {
                     { "width", fp.ScreenW > 0 ? fp.ScreenW : 390 },
-                    { "height", fp.ScreenH > 0 ? fp.ScreenH : 844 },
+                    { "height", viewH > 0 ? viewH : (fp.ScreenH > 0 ? fp.ScreenH : 844) },
                     { "deviceScaleFactor", fp.PixelRatio > 0 ? fp.PixelRatio : 3 },
                     { "mobile", true }
                 }, session);
@@ -529,12 +592,48 @@ namespace JoeBrowser
                 ? new[] { lang, baseLang }
                 : new[] { lang };
 
+            /* Remove the previous injections before adding replacements. Without this a
+               live edit leaves several copies of the noise script running in one page,
+               which is both slower and a fingerprint of its own. */
+            string key = session ?? "";
+            string oldFp, oldTool;
+            lock (_scriptState)
+            {
+                _fpScripts.TryGetValue(key, out oldFp);
+                _toolScripts.TryGetValue(key, out oldTool);
+            }
+            if (!string.IsNullOrEmpty(oldFp))
+                await TrySend("Page.removeScriptToEvaluateOnNewDocument", new Dictionary<string, object> { { "identifier", oldFp } }, session);
+            if (!string.IsNullOrEmpty(oldTool))
+                await TrySend("Page.removeScriptToEvaluateOnNewDocument", new Dictionary<string, object> { { "identifier", oldTool } }, session);
+
             string script = FingerprintScript.Build(fp, fp.UserAgent, fp.Platform, lang, languages);
-            await TrySend("Page.addScriptToEvaluateOnNewDocument", new Dictionary<string, object>
+            var fpRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", new Dictionary<string, object>
             {
                 { "source", script },
                 { "runImmediately", true }
             }, session);
+            string fpId = fpRes != null ? Str(fpRes, "identifier") : "";
+
+            /* First-party tools: human paste, proxy rotation guard and right-click guard.
+               Injected through CDP so they work even on builds that ignore --load-extension. */
+            var tools = Profile != null ? Profile.Tools : null;
+            if (tools == null) tools = new ToolConfig();
+            var liveProxy = Profile != null ? Profile.Proxy : null;
+            string toolScript = ExtensionManager.BuildToolScript(tools, Profile != null ? Profile.Name : "",
+                liveProxy != null && liveProxy.Enabled);
+            var toolRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", new Dictionary<string, object>
+            {
+                { "source", toolScript },
+                { "runImmediately", true }
+            }, session);
+            string toolId = toolRes != null ? Str(toolRes, "identifier") : "";
+
+            lock (_scriptState)
+            {
+                if (!string.IsNullOrEmpty(fpId)) _fpScripts[key] = fpId;
+                if (!string.IsNullOrEmpty(toolId)) _toolScripts[key] = toolId;
+            }
 
             if (!string.IsNullOrEmpty(navigateTo))
                 await TrySend("Page.navigate", new Dictionary<string, object> { { "url", navigateTo } }, session);
@@ -649,8 +748,11 @@ namespace JoeBrowser
 
             if (fullListOut.Count == 0)
             {
-                if (greaseBrand != null)
-                    fullListOut.Add(new Dictionary<string, object> { { "brand", greaseBrand }, { "version", greaseVersion ?? "8" } });
+                fullListOut.Add(new Dictionary<string, object>
+                {
+                    { "brand", greaseBrand ?? "Not_A Brand" },
+                    { "version", greaseBrand != null ? (greaseVersion ?? "8.0.0.0") : "8.0.0.0" }
+                });
                 fullListOut.Add(new Dictionary<string, object> { { "brand", "Chromium" }, { "version", full } });
                 fullListOut.Add(new Dictionary<string, object> { { "brand", brandName }, { "version", full } });
             }
@@ -664,11 +766,18 @@ namespace JoeBrowser
             bool samePlatform = string.Equals(realPlatform, platform, StringComparison.OrdinalIgnoreCase);
 
             string platformVersion = samePlatform ? Str(real, "platformVersion") : "";
+            /* The hint build has to be the same Android the user agent carries, or the two
+               disagree in the same request that ships both. */
+            string[] device = FingerprintFactory.DeviceIdentity(fp);
+            string deviceVersion = device != null && device.Length > 1 ? device[1] : "";
+            string deviceModel = device != null && device.Length > 0 ? device[0] : "";
+            if (android && deviceVersion.Length > 0) platformVersion = deviceVersion + ".0.0";
             if (string.IsNullOrEmpty(platformVersion))
             {
-                if (platform == "macOS") platformVersion = "14.5.0";
-                else if (android) platformVersion = "14.0.0";
-                else if (platform == "Linux") platformVersion = "6.5.0";
+                if (platform == "macOS") platformVersion = "15.1.0";
+                else if (android) platformVersion = "16.0.0";
+                else if (platform == "Linux") platformVersion = "6.11.0";
+                else if (FingerprintFactory.IsWindows11(fp.Os)) platformVersion = "15.0.0";
                 else platformVersion = "10.0.0";
             }
 
@@ -677,8 +786,9 @@ namespace JoeBrowser
             string bitness = samePlatform ? Str(real, "bitness") : (android ? "" : "64");
             if (string.IsNullOrEmpty(bitness)) bitness = android ? "" : "64";
             string model = samePlatform ? Str(real, "model") : "";
-            if (string.IsNullOrEmpty(model) && android)
-                model = (fp.DeviceType ?? "").Equals("tablet", StringComparison.OrdinalIgnoreCase) ? "SM-X710" : "SM-S918B";
+            /* The hint model is the same handset the user agent names, and empty when the viewport
+               belongs to no table entry - which is what the unified Android UA reports too. */
+            if (android) model = deviceModel;
 
             object wow64 = samePlatform && real != null && HasTrue(real, "wow64");
 
@@ -711,6 +821,114 @@ namespace JoeBrowser
             try { await _cdp.SendAsync(method, parameters, session, 15000).ConfigureAwait(false); }
             catch (Exception ex) { Log.Error("CDP " + method + " failed", ex); }
         }
+
+        /// <summary>
+        /// Applies the locale override, treating Chromium's "already in effect" answer as the
+        /// success it is (another tab in the same renderer already set this exact locale).
+        /// </summary>
+        private async Task SetLocaleAsync(string lang, string session)
+        {
+            try
+            {
+                await _cdp.SendAsync("Emulation.setLocaleOverride",
+                    new Dictionary<string, object> { { "locale", lang } }, session, 15000).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                string message = (ex.InnerException != null ? ex.InnerException.Message + " " : "") + ex.Message;
+                if (message.IndexOf("Another locale override is already in effect", StringComparison.OrdinalIgnoreCase) < 0 &&
+                    message.IndexOf("already in effect", StringComparison.OrdinalIgnoreCase) < 0)
+                    Log.Error("CDP Emulation.setLocaleOverride failed", ex);
+            }
+        }
+
+        private async Task<Dictionary<string, object>> TrySendResult(string method, Dictionary<string, object> parameters, string session)
+        {
+            try { return await _cdp.SendAsync(method, parameters, session, 15000).ConfigureAwait(false); }
+            catch (Exception ex) { Log.Error("CDP " + method + " failed", ex); return null; }
+        }
+
+        /// <summary>Exports every cookie of this browser context as a portable JSON array.</summary>
+        public async Task<string> ExportCookiesAsync()
+        {
+            if (_cdp == null) throw new InvalidOperationException("Open this profile first.");
+            var res = await _cdp.SendAsync("Storage.getCookies", null, null, 15000).ConfigureAwait(false);
+            object raw;
+            var cookies = res != null && res.TryGetValue("cookies", out raw) ? raw as object[] : null;
+            if (cookies == null) cookies = new object[0];
+            return new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(cookies);
+        }
+
+        /// <summary>
+        /// Imports a JSON cookie array (or an object with a "cookies" key). Unknown fields are
+        /// stripped because Storage.setCookies rejects anything outside its schema.
+        /// </summary>
+        public async Task<int> ImportCookiesAsync(string json)
+        {
+            if (_cdp == null) throw new InvalidOperationException("Open this profile first.");
+            if (string.IsNullOrWhiteSpace(json)) throw new InvalidOperationException("The file is empty.");
+            object parsed;
+            try { parsed = new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.DeserializeObject(json); }
+            catch (Exception ex) { throw new InvalidOperationException("Not a valid cookie JSON file.", ex); }
+
+            var root = parsed as Dictionary<string, object>;
+            object arrObj = parsed;
+            if (root != null)
+            {
+                object inner;
+                if (!root.TryGetValue("cookies", out inner)) throw new InvalidOperationException("The file has no \"cookies\" array.");
+                arrObj = inner;
+            }
+            var arr = arrObj as object[];
+            if (arr == null) throw new InvalidOperationException("Expected a JSON array of cookies.");
+
+            var clean = new List<object>();
+            foreach (object o in arr)
+            {
+                var c = o as Dictionary<string, object>;
+                if (c == null) continue;
+                object nv;
+                string name = c.TryGetValue("name", out nv) ? Convert.ToString(nv) : "";
+                object dv;
+                string domain = c.TryGetValue("domain", out dv) ? Convert.ToString(dv) : "";
+                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(domain)) continue;
+                var outc = new Dictionary<string, object> { { "name", name }, { "domain", domain } };
+                CopyField(c, outc, "value", "");
+                CopyField(c, outc, "path", "/");
+                CopyField(c, outc, "expires", -1.0);
+                CopyField(c, outc, "httpOnly", false);
+                CopyField(c, outc, "secure", false);
+                object ss;
+                if (c.TryGetValue("sameSite", out ss) && ss != null)
+                {
+                    string v = Convert.ToString(ss);
+                    if (v == "Strict" || v == "Lax" || v == "None") outc["sameSite"] = v;
+                }
+                object src;
+                if (c.TryGetValue("sourceScheme", out src) && src != null) outc["sourceScheme"] = Convert.ToString(src);
+                object prio;
+                if (c.TryGetValue("priority", out prio) && prio != null) outc["priority"] = Convert.ToString(prio);
+                clean.Add(outc);
+            }
+            if (clean.Count == 0) throw new InvalidOperationException("No usable cookies found in the file.");
+
+            var result = await _cdp.SendAsync("Storage.setCookies",
+                new Dictionary<string, object> { { "cookies", clean.ToArray() } }, null, 20000).ConfigureAwait(false);
+            if (result == null) throw new InvalidOperationException("The browser rejected the cookies.");
+            return clean.Count;
+        }
+
+        private static void CopyField(Dictionary<string, object> src, Dictionary<string, object> dst, string key, object fallback)
+        {
+            object v;
+            if (src.TryGetValue(key, out v) && v != null)
+            {
+                if (v is double || v is int || v is long || v is bool || v is string) { dst[key] = v; return; }
+            }
+            dst[key] = fallback;
+        }
+
+        public bool ExtensionsLoaded { get { return _extensionsLoaded; } }
 
         private static async Task<string> WaitForEndpointAsync(int port, Process proc, int timeoutMs)
         {

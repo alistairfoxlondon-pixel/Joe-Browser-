@@ -108,7 +108,7 @@ namespace JoeBrowser
                 }
                 else
                 {
-                    byte[] rewritten = RewriteForOrigin(head, absolute);
+                    byte[] rewritten = RewriteForOrigin(head, absolute, PlainAuthHeader());
                     await us.WriteAsync(rewritten, 0, rewritten.Length).ConfigureAwait(false);
                     if (all.Length > headerEnd + 4)
                     {
@@ -326,19 +326,42 @@ namespace JoeBrowser
             return int.TryParse(value.Substring(idx + 1), out port) && port > 0;
         }
 
-        private static byte[] RewriteForOrigin(string head, Uri uri)
+        /// <summary>
+        /// CONNECT carries credentials in the tunnel handshake, but an absolute-form plain-HTTP
+        /// request has to carry them itself. Without the header an authenticated upstream answers
+        /// 407, which the relay would forward to the browser as a proxy login prompt.
+        /// </summary>
+        private string PlainAuthHeader()
+        {
+            var proxy = Upstream();
+            if (proxy == null || !proxy.Enabled || string.IsNullOrEmpty(proxy.User)) return null;
+            if ((proxy.Type ?? "").Equals("socks5", StringComparison.OrdinalIgnoreCase)) return null;
+            string token = Convert.ToBase64String(Encoding.UTF8.GetBytes(proxy.User + ":" + (proxy.Password ?? "")));
+            return "Proxy-Authorization: Basic " + token;
+        }
+
+        private static byte[] RewriteForOrigin(string head, Uri uri, string auth)
         {
             string[] lines = head.Split(new[] { "\r\n" }, StringSplitOptions.None);
             var sb = new StringBuilder();
             if (lines.Length > 0) sb.Append(lines[0].Replace(uri.Scheme + "://" + uri.Host + (uri.IsDefaultPort ? "" : ":" + uri.Port), "")).Append("\r\n");
+            bool dropClientAuth = auth == null;
             for (int i = 1; i < lines.Length; i++)
             {
                 string l = lines[i];
                 if (l.Length == 0) continue;
                 if (l.StartsWith("Proxy-Connection:", StringComparison.OrdinalIgnoreCase)) continue;
                 if (l.StartsWith("Connection:", StringComparison.OrdinalIgnoreCase)) continue;
+                if (l.StartsWith("Proxy-Authorization:", StringComparison.OrdinalIgnoreCase))
+                {
+                    /* The relay owns the upstream credential; a stale one from the page must not
+                       win and authenticate to the proxy as the wrong account. */
+                    if (dropClientAuth) sb.Append(l).Append("\r\n");
+                    continue;
+                }
                 sb.Append(l).Append("\r\n");
             }
+            if (auth != null) sb.Append(auth).Append("\r\n");
             sb.Append("Connection: close\r\n\r\n");
             return Encoding.ASCII.GetBytes(sb.ToString());
         }

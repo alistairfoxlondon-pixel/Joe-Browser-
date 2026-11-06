@@ -35,6 +35,11 @@ namespace JoeBrowser
             cfg["mobile"] = fp.DeviceType != null && fp.DeviceType != "desktop";
             cfg["safari"] = FingerprintFactory.IsIos(fp.Os);
             cfg["webrtc"] = (fp.WebRtcMode ?? (fp.WebRtcProtect ? "proxy" : "off")).ToLowerInvariant();
+            cfg["brand"] = fp.Brand ?? "";
+            cfg["os"] = fp.Os ?? "";
+            cfg["accept"] = fp.AcceptLanguage ?? language ?? "en-US";
+            cfg["tz"] = fp.Timezone ?? "";
+            cfg["geo"] = fp.GeoMode ?? "proxy";
 
             string json = new JavaScriptSerializer().Serialize(cfg);
             return Template.Replace("__CFG__", json);
@@ -135,7 +140,9 @@ namespace JoeBrowser
      throw, which no browser does. */
   liveGetter(NP, 'languages', function () { return F.languages.slice(); });
   getter(NP, 'hardwareConcurrency', F.cores);
-  getter(NP, 'deviceMemory', F.memory);
+  /* navigator.deviceMemory is a Chromium-only API. Shipping it next to a Safari or Firefox UA is
+     a contradiction the profile creates itself, and it is the first thing a checker reads. */
+  if (!isSafari && F.brand !== 'Firefox') getter(NP, 'deviceMemory', F.memory);
   getter(NP, 'maxTouchPoints', F.touch);
   getter(NP, 'webdriver', false);
   getter(NP, 'doNotTrack', F.dnt);
@@ -159,11 +166,61 @@ namespace JoeBrowser
          with an undefined getter leaves 'userAgentData' in navigator === true on an iPhone. */
       try { delete Navigator.prototype.userAgentData; } catch (e) {}
       try { delete window.chrome; } catch (e) {}
+      /* deviceMemory is a Chromium API too, so the host browser's own value has to go as well. */
+      try { delete NP.deviceMemory; } catch (e) {}
     }
     if (F.mobile) {
       getter(NP, 'plugins', emptyList('PluginArray'));
       getter(NP, 'mimeTypes', emptyList('MimeTypeArray'));
       Object.defineProperty(window, 'ondeviceorientation', { value: null, configurable: true });
+    }
+  } catch (e) {}
+
+  /* ---- Client hints, engine and plugin tell-tales ---- */
+  try {
+    var uad = navigator.userAgentData;
+    var uadPlatform = F.platform === 'Win32' ? 'Windows'
+      : (F.platform === 'MacIntel' ? 'macOS'
+      : (F.platform === 'Linux x86_64' ? 'Linux'
+      : (F.platform === 'iPhone' || F.platform === 'iPad' ? 'iOS' : 'Android')));
+    if (uad && !isSafari) {
+      var UD = Object.getPrototypeOf(uad);
+      getter(UD, 'platform', uadPlatform);
+      getter(UD, 'mobile', F.mobile);
+      var origHigh = UD.getHighEntropyValues;
+      if (typeof origHigh === 'function') {
+        method(UD, 'getHighEntropyValues', function getHighEntropyValues(hints) {
+          return origHigh.call(this, hints).then(function (h) {
+            try {
+              h.platform = uadPlatform;
+              h.mobile = F.mobile;
+              if (!F.mobile) h.model = '';
+              if (F.brand === 'Edge' && !h.platformVersion) h.platformVersion = '15.0.0';
+            } catch (e) {}
+            return h;
+          });
+        }, 1);
+      }
+    }
+    if (F.brand === 'Firefox') {
+      /* Chromium-only surfaces would out the engine behind a Firefox UA. */
+      try { delete window.chrome; } catch (e) {}
+      try { delete NP.deviceMemory; } catch (e) {}
+      try { delete NP.userAgentData; } catch (e) {}
+    }
+    if (!isSafari) getter(NP, 'pdfViewerEnabled', true);
+    if (isSafari) getter(NP, 'standalone', false);
+  } catch (e) {}
+
+  /* ---- Intl / timezone coherence (CDP sets the same value; this is the JS fallback) ---- */
+  try {
+    if (F.tz && typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+      var origResolved = Intl.DateTimeFormat.prototype.resolvedOptions;
+      method(Intl.DateTimeFormat.prototype, 'resolvedOptions', function resolvedOptions() {
+        var o = origResolved.call(this);
+        try { Object.defineProperty(o, 'timeZone', { value: F.tz, configurable: true, enumerable: true }); } catch (e) {}
+        return o;
+      }, 0);
     }
   } catch (e) {}
 
@@ -181,6 +238,49 @@ namespace JoeBrowser
     getter(NP, 'connection', conn);
   } catch (e) {}
 
+  /* ---- Permissions, notifications and media devices ---- */
+  try {
+    var perms = navigator.permissions;
+    if (perms) {
+      var PP = Object.getPrototypeOf(perms);
+      var origQuery = PP.query;
+      if (typeof origQuery === 'function') {
+        method(PP, 'query', function query(desc) {
+          var name = '';
+          try { name = String(desc && desc.name || ''); } catch (e) {}
+          return origQuery.call(this, desc).then(function (st) {
+            try {
+              if (name === 'geolocation' && F.geo === 'block')
+                Object.defineProperty(st, 'state', { value: 'denied', configurable: true });
+            } catch (e) {}
+            return st;
+          });
+        }, 1);
+      }
+    }
+    if (typeof Notification !== 'undefined') getter(Notification, 'permission', 'default');
+  } catch (e) {}
+
+  /* Labels and stable ids are hidden until a permission is granted; normalising them removes
+     a direct read of the host's audio hardware without changing the API's shape. */
+  try {
+    var md0 = navigator.mediaDevices;
+    if (md0 && md0.enumerateDevices) {
+      var origEnumAll = md0.enumerateDevices;
+      method(md0, 'enumerateDevices', function enumerateDevices() {
+        return origEnumAll.call(md0).then(function (list) {
+          try {
+            return Array.prototype.map.call(list, function (d) {
+              try { Object.defineProperty(d, 'label', { value: '', configurable: true }); } catch (e) {}
+              try { Object.defineProperty(d, 'deviceId', { value: '', configurable: true }); } catch (e) {}
+              return d;
+            });
+          } catch (e) { return list; }
+        });
+      }, 0);
+    }
+  } catch (e) {}
+
   /* ---- Screen and viewport ---- */
   var SP = (typeof Screen !== 'undefined' && Screen.prototype) ? Screen.prototype : null;
   getter(SP, 'width', F.sw);
@@ -190,6 +290,17 @@ namespace JoeBrowser
   getter(SP, 'colorDepth', F.cd);
   getter(SP, 'pixelDepth', F.cd);
   getter(SP, 'isExtended', false);
+
+  try {
+    getter(SP, 'availLeft', 0);
+    getter(SP, 'availTop', 0);
+    var so = screen.orientation;
+    if (so) {
+      var SOP = Object.getPrototypeOf(so);
+      getter(SOP, 'type', F.mobile ? 'portrait-primary' : 'landscape-primary');
+      getter(SOP, 'angle', 0);
+    }
+  } catch (e) {}
 
   /* A DPR getter is half a fix: (min-resolution: Ndppx) media queries still answer with the
      host's real density, which contradicts window.devicePixelRatio. */
@@ -241,8 +352,12 @@ namespace JoeBrowser
   /* ---- WebGL ---- */
   try {
     var glParams = {};
-    glParams[37445] = F.glVendor;
-    glParams[37446] = F.glRenderer;
+    /* WebKit on iOS never ships WEBGL_debug_renderer_info, so the unmasked pair reads back as
+       null there. Answering it under a Safari UA is a self-inflicted contradiction. */
+    if (!isSafari) {
+      glParams[37445] = F.glVendor;
+      glParams[37446] = F.glRenderer;
+    }
     glParams[7936] = F.glVendor;
     glParams[7937] = F.glRenderer;
     var glNames = ['WebGLRenderingContext', 'WebGL2RenderingContext'];
@@ -252,9 +367,21 @@ namespace JoeBrowser
       (function (proto) {
         var orig = proto.getParameter;
         method(proto, 'getParameter', function getParameter(pname) {
-          try { if (Object.prototype.hasOwnProperty.call(glParams, pname)) return glParams[pname]; } catch (e) {}
+          try {
+            if (isSafari && (pname === 37445 || pname === 37446)) return null;
+            if (Object.prototype.hasOwnProperty.call(glParams, pname)) return glParams[pname];
+          } catch (e) {}
           return orig.call(this, pname);
         }, 1);
+        var origExt = proto.getExtension;
+        if (isSafari && typeof origExt === 'function') {
+          /* Answering the extension with an object and its constants with null is a
+             contradiction of a different kind: WebKit simply does not hand it out. */
+          method(proto, 'getExtension', function getExtension(name) {
+            try { if (String(name).toLowerCase() === 'webgl_debug_renderer_info') return null; } catch (e) {}
+            return origExt.call(this, name);
+          }, 1);
+        }
       })(G.prototype);
     }
   } catch (e) {}
@@ -390,8 +517,60 @@ namespace JoeBrowser
           try { for (var i = 0; i < array.length; i += 100) array[i] += (noise(i) - 0.5) * 1e-4; } catch (e) {}
         }, 1);
       }
+      if (typeof AudioContext !== 'undefined') {
+        var BAP = Object.getPrototypeOf(AudioContext.prototype);
+        /* A real device runs at 44.1 or 48 kHz; the host's exact rate is a stable hardware id. */
+        if (BAP) getter(BAP, 'sampleRate', 48000);
+      }
     } catch (e) {}
   }
+
+  /* ---- Speech synthesis ---- */
+  try {
+    if (typeof speechSynthesis !== 'undefined') {
+      var base0 = String(F.language || 'en-US').split('-')[0];
+      var table = {
+        en: [['Microsoft David - English (United States)', 'en-US', true], ['Microsoft Zira - English (United States)', 'en-US', true], ['Google US English', 'en-US', false]],
+        de: [['Microsoft Katja - German (Germany)', 'de-DE', true], ['Microsoft Stefan - German (Germany)', 'de-DE', true], ['Google Deutsch', 'de-DE', false]],
+        fr: [['Microsoft Hortense - French (France)', 'fr-FR', true], ['Microsoft Paul - French (France)', 'fr-FR', true], ['Google français', 'fr-FR', false]],
+        es: [['Microsoft Helena - Spanish (Spain)', 'es-ES', true], ['Microsoft Pablo - Spanish (Spain)', 'es-ES', true], ['Google español', 'es-ES', false]],
+        pt: [['Microsoft Maria - Portuguese (Brazil)', 'pt-BR', true], ['Microsoft Daniel - Portuguese (Brazil)', 'pt-BR', true], ['Google português do Brasil', 'pt-BR', false]],
+        it: [['Microsoft Elsa - Italian (Italy)', 'it-IT', true], ['Microsoft Cosimo - Italian (Italy)', 'it-IT', true], ['Google italiano', 'it-IT', false]],
+        nl: [['Microsoft Colette - Dutch (Netherlands)', 'nl-NL', true], ['Microsoft Maarten - Dutch (Netherlands)', 'nl-NL', true]],
+        pl: [['Microsoft Paulina - Polish (Poland)', 'pl-PL', true], ['Microsoft Marek - Polish (Poland)', 'pl-PL', true]],
+        sv: [['Microsoft Hedvig - Swedish (Sweden)', 'sv-SE', true], ['Microsoft Bengt - Swedish (Sweden)', 'sv-SE', true]],
+        da: [['Microsoft Helle - Danish (Denmark)', 'da-DK', true], ['Microsoft Mads - Danish (Denmark)', 'da-DK', true]],
+        nb: [['Microsoft Hedda - Norwegian (Norway)', 'nb-NO', true], ['Microsoft Magnus - Norwegian (Norway)', 'nb-NO', true]],
+        fi: [['Microsoft Heidi - Finnish (Finland)', 'fi-FI', true], ['Microsoft Mikko - Finnish (Finland)', 'fi-FI', true]],
+        tr: [['Microsoft Tolga - Turkish (Turkey)', 'tr-TR', true], ['Microsoft Filiz - Turkish (Turkey)', 'tr-TR', true]],
+        ru: [['Microsoft Irina - Russian (Russia)', 'ru-RU', true], ['Microsoft Pavel - Russian (Russia)', 'ru-RU', true]],
+        uk: [['Microsoft Polina - Ukrainian (Ukraine)', 'uk-UA', true], ['Microsoft Ostap - Ukrainian (Ukraine)', 'uk-UA', true]],
+        ar: [['Microsoft Hoda - Arabic (Saudi Arabia)', 'ar-SA', true], ['Microsoft Naayf - Arabic (Saudi Arabia)', 'ar-SA', true]],
+        he: [['Microsoft Carmit - Hebrew (Israel)', 'he-IL', true], ['Microsoft Asaf - Hebrew (Israel)', 'he-IL', true]],
+        hi: [['Microsoft Kalpana - Hindi (India)', 'hi-IN', true], ['Microsoft Hemant - Hindi (India)', 'hi-IN', true]],
+        ja: [['Microsoft Ayumi - Japanese (Japan)', 'ja-JP', true], ['Microsoft Ichiro - Japanese (Japan)', 'ja-JP', true], ['Google 日本語', 'ja-JP', false]],
+        ko: [['Microsoft Heami - Korean (Korea)', 'ko-KR', true], ['Microsoft Injoon - Korean (Korea)', 'ko-KR', true]],
+        zh: [['Microsoft Huihui - Chinese (Simplified, PRC)', 'zh-CN', true], ['Microsoft Kangkang - Chinese (Simplified, PRC)', 'zh-CN', true]],
+        id: [['Microsoft Andika - Indonesian (Indonesia)', 'id-ID', true], ['Microsoft Gadis - Indonesian (Indonesia)', 'id-ID', true]],
+        th: [['Microsoft Pattara - Thai (Thailand)', 'th-TH', true], ['Microsoft Somsak - Thai (Thailand)', 'th-TH', true]],
+        vi: [['Microsoft Linh - Vietnamese (Vietnam)', 'vi-VN', true], ['Microsoft An - Vietnamese (Vietnam)', 'vi-VN', true]],
+        ms: [['Microsoft Siti - Malay (Malaysia)', 'ms-MY', true]]
+      };
+      var rows = table[base0] || table.en;
+      var V = window.SpeechSynthesisVoice;
+      var list = [];
+      for (var vi = 0; vi < rows.length; vi++) {
+        var o = V ? Object.create(V.prototype) : {};
+        getter(o, 'name', rows[vi][0]);
+        getter(o, 'voiceURI', rows[vi][0]);
+        getter(o, 'lang', rows[vi][1] || F.language);
+        getter(o, 'localService', rows[vi][2]);
+        getter(o, 'default', vi === 0);
+        list.push(o);
+      }
+      method(speechSynthesis, 'getVoices', function getVoices() { return list.slice(); }, 0);
+    }
+  } catch (e) {}
 
   /* ---- Font metrics ---- */
   if (F.fonts && C2) {

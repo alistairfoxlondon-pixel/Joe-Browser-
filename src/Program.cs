@@ -45,6 +45,10 @@ namespace JoeBrowser
             try
             {
                 AppPaths.EnsureAll();
+                /* Self-repair the original built-in extensions on every start, so an app
+                   update never leaves stale manifests or scripts behind. Writes only files
+                   whose content actually changed. */
+                ExtensionManager.EnsureAll();
                 Application.Run(new MainForm());
             }
             catch (Exception ex)

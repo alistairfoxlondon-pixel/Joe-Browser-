@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.Windows.Forms;
@@ -11,6 +12,7 @@ namespace JoeBrowser
         private readonly Profile _profile;
         private readonly FingerprintConfig _fp;
         private readonly ProxyConfig _proxy;
+        private readonly ToolConfig _tools;
         private readonly bool _isNew;
         private readonly int _initialTab;
         private bool _systemTarget;
@@ -26,13 +28,18 @@ namespace JoeBrowser
 
         private JBLabel _title, _err;
         private JBSegment _tabs, _proxySeg;
-        private Panel _tabGeneral, _tabFp, _tabPriv, _tabProxy;
-        private JBScrollHost _hostGeneral, _hostFp, _hostPriv, _hostProxy;
+        private Panel _tabGeneral, _tabFp, _tabPriv, _tabProxy, _tabTools;
+        private JBScrollHost _hostGeneral, _hostFp, _hostPriv, _hostProxy, _hostTools;
         private JBTextBox _name, _startUrl, _notes, _browserPath, _host, _port, _user, _pass, _ua, _lat, _lng;
-        private JBSelect _screen, _tz, _lang, _gpu, _os, _cores, _ram, _browserKind, _webrtcSel, _geoSel;
+        private JBTextBox _group, _tags, _status, _customExt;
+        private JBSelect _screen, _tz, _gpu, _os, _cores, _ram, _browserKind, _webrtcSel, _geoSel, _savedProxy;
+        private JBLangPicker _lang;
         private JBToggle _canvas, _audio, _fonts, _dnt, _battery, _autoMatch, _autoUa;
-        private JBButton _regen, _browse, _testBtn, _save, _cancel, _getBrowser;
+        private JBButton _regen, _browse, _testBtn, _save, _cancel, _getBrowser, _openExtFolder;
+        private JBToggle _toolHumanPaste, _toolProxyWatch, _toolRightClick, _toolAllowShift;
+        private JBSelect _toolSpeed, _toolInterval;
         private JBLabel _browserNote;
+        private JBLabel _fpWarn;
         private JBIconButton _close, _reveal;
         private JBPanel _proxyCard;
         private JBLabel _proxyResult;
@@ -41,9 +48,11 @@ namespace JoeBrowser
         private List<string> _kindKeys = new List<string>();
 
         private JBLabel _lblName, _lblStart, _lblKind, _lblPath, _lblNotes;
+        private JBLabel _lblGroup, _lblTags, _lblStatus;
         private JBLabel _lblOs, _lblScreen, _lblTz, _lblLang, _lblGpu, _lblCores, _lblRam;
         private JBLabel _lblUa, _lblWebrtc, _lblGeo, _lblLat, _lblLng;
-        private JBLabel _lblType, _lblHost, _lblPort, _lblUser, _lblPass;
+        private JBLabel _lblType, _lblHost, _lblPort, _lblUser, _lblPass, _lblSaved;
+        private JBLabel _lblExt, _lblSpeed, _lblInterval, _lblCustomExt, _lblExtHint;
 
         public EditorForm(Profile profile, bool isNew, AppSettings settings, int initialTab = 0)
         {
@@ -53,7 +62,8 @@ namespace JoeBrowser
             _profile = profile.Copy(false);
             _fp = _profile.Fp.Copy();
             _proxy = _profile.Proxy.Copy();
-            _initialTab = (initialTab < 0 || initialTab > 3) ? 0 : initialTab;
+            _tools = _profile.Tools == null ? new ToolConfig() : _profile.Tools.Copy();
+            _initialTab = (initialTab < 0 || initialTab > 4) ? 0 : initialTab;
 
             if (_fp.Seed == 0)
             {
@@ -148,7 +158,7 @@ namespace JoeBrowser
             Controls.Add(_close);
 
             _tabs = new JBSegment();
-            _tabs.SetItems(new[] { "General", "Fingerprint", "Privacy", "Proxy" }, _initialTab);
+            _tabs.SetItems(new[] { "General", "Fingerprint", "Privacy", "Proxy", "Tools" }, _initialTab);
             _tabs.SelectedIndexChanged += delegate { SwitchTab(_tabs.SelectedIndex); };
             Controls.Add(_tabs);
 
@@ -156,19 +166,23 @@ namespace JoeBrowser
             _tabFp = MakeTab();
             _tabPriv = MakeTab();
             _tabProxy = MakeTab();
+            _tabTools = MakeTab();
             _hostGeneral = new JBScrollHost(_tabGeneral);
             _hostFp = new JBScrollHost(_tabFp);
             _hostPriv = new JBScrollHost(_tabPriv);
             _hostProxy = new JBScrollHost(_tabProxy);
+            _hostTools = new JBScrollHost(_tabTools);
             Controls.Add(_hostGeneral);
             Controls.Add(_hostFp);
             Controls.Add(_hostPriv);
             Controls.Add(_hostProxy);
+            Controls.Add(_hostTools);
 
             BuildGeneral();
             BuildFingerprint();
             BuildPrivacy();
             BuildProxy();
+            BuildTools();
 
             RefreshFingerprintUi();
 
@@ -238,6 +252,13 @@ namespace JoeBrowser
             _browse.Click += delegate { BrowseBrowser(); };
             _tabGeneral.Controls.Add(_browse);
 
+            _lblGroup = Lbl(_tabGeneral, "GROUP / FOLDER");
+            _group = Txt(_tabGeneral, _profile.Group, "e.g. Clients / EU store", "folder", false, 40);
+            _lblTags = Lbl(_tabGeneral, "TAGS (COMMA SEPARATED)");
+            _tags = Txt(_tabGeneral, _profile.Tags, "work, ads, verified", "flag", false, 40);
+            _lblStatus = Lbl(_tabGeneral, "STATUS");
+            _status = Txt(_tabGeneral, _profile.Status, "Account status or owner", "info", false, 40);
+
             _lblNotes = Lbl(_tabGeneral, "NOTES");
             _notes = Txt(_tabGeneral, _profile.Notes, "Notes", null, true, 64);
 
@@ -258,6 +279,9 @@ namespace JoeBrowser
             _name.EnterPressed += OnEnterKey;
             _startUrl.EnterPressed += OnEnterKey;
             _browserPath.EnterPressed += OnEnterKey;
+            _group.EnterPressed += OnEnterKey;
+            _tags.EnterPressed += OnEnterKey;
+            _status.EnterPressed += OnEnterKey;
         }
 
         private void OnEnterKey(object sender, KeyEventArgs e)
@@ -405,12 +429,10 @@ namespace JoeBrowser
             };
 
             _lblLang = Lbl(_tabFp, "LANGUAGE");
-            _lang = Pick(_tabFp, null);
-            _lang.Badge = delegate (int i)
-            {
-                if (i < 0 || i >= _lang.Items.Count) return null;
-                return FingerprintFactory.CountryForLanguage(_lang.Items[i]);
-            };
+            /* Circular country flags + full language names. The locale code is only a storage
+               key; it is never the visible label, and the popup can be searched by name. */
+            _lang = new JBLangPicker();
+            _tabFp.Controls.Add(_lang);
             _lang.SelectedIndexChanged += delegate
             {
                 if (_suppress) return;
@@ -437,6 +459,28 @@ namespace JoeBrowser
                 SetError("");
             };
             _tabFp.Controls.Add(_regen);
+
+            _fpWarn = new JBLabel(LabelRole.Faint, "");
+            _fpWarn.TextAlign = ContentAlignment.MiddleLeft;
+            _tabFp.Controls.Add(_fpWarn);
+        }
+
+        /// <summary>
+        /// Firefox has no debugging pipe: only the UA header and locale can be restamped there, so a
+        /// foreign device target would leak through navigator.platform, screen and WebGL.
+        /// </summary>
+        private void UpdateFirefoxWarn(int x, int y, int w)
+        {
+            if (_fpWarn == null) return;
+            string key = CurrentKindKey();
+            var info = BrowserLocator.Detect(key == "custom" ? "auto" : key, _browserPath.Value);
+            bool firefox = info != null && info.IsFirefox;
+            bool foreign = !FingerprintFactory.IsWindowsTarget(_fp.Os);
+            bool show = firefox && foreign;
+            _fpWarn.Visible = show;
+            if (!show) return;
+            _fpWarn.Text = "Firefox cannot mask screen, WebGL or timezone - use Chrome, Edge or Brave for " + _fp.Os + ".";
+            _fpWarn.SetBounds(x, y, w, Ui.S(26));
         }
 
         private void BuildPrivacy()
@@ -494,6 +538,26 @@ namespace JoeBrowser
             return list;
         }
 
+        /// <summary>
+        /// Turns stored locale keys into readable rows: a full language name, the region as a
+        /// quiet subtitle, and a circular country flag. No bare "en / de / ru" labels anywhere.
+        /// </summary>
+        private static List<LangItem> LangItems(IEnumerable<string> codes)
+        {
+            var list = new List<LangItem>();
+            foreach (string code in codes)
+            {
+                if (string.IsNullOrWhiteSpace(code)) continue;
+                string full = FingerprintFactory.LanguageName(code.Trim());
+                int p = full.IndexOf(" (", StringComparison.Ordinal);
+                string title = p > 0 ? full.Substring(0, p) : full;
+                string region = p > 0 ? full.Substring(p + 2).TrimEnd(')', ' ') : "";
+                list.Add(new LangItem(code.Trim(), FingerprintFactory.CountryForLanguage(code.Trim()),
+                    string.IsNullOrEmpty(title) ? code.Trim() : title, region));
+            }
+            return list;
+        }
+
         private static string KeyOf(string[][] options, int index, string fallback)
         {
             return index >= 0 && index < options.Length ? options[index][0] : fallback;
@@ -533,6 +597,39 @@ namespace JoeBrowser
 
         private void BuildProxy()
         {
+            /* Proxies saved in the Proxy Library are pickable here, so credentials are typed once. */
+            var vault = ProxyVault.Load();
+            var names = new List<string>();
+            names.Add(vault.Count == 0 ? "No saved proxies yet" : "Enter manually");
+            foreach (var entry in vault)
+                names.Add(string.IsNullOrWhiteSpace(entry.Name) ? entry.Connection : entry.Name + "  ·  " + entry.Connection);
+            _lblSaved = Lbl(_tabProxy, "SAVED PROXIES");
+            _savedProxy = Pick(_tabProxy, "proxy");
+            _savedProxy.SetItems(names, 0);
+            _savedProxy.SelectedIndexChanged += delegate
+            {
+                int i = _savedProxy.SelectedIndex - 1;
+                if (i < 0 || i >= vault.Count) return;
+                var cfg = vault[i].Config;
+                if (cfg == null) return;
+                _proxy.Type = cfg.Type ?? "none";
+                _proxy.Host = cfg.Host ?? "";
+                _proxy.Port = cfg.Port;
+                _proxy.User = cfg.User ?? "";
+                _proxy.Password = cfg.Password ?? "";
+                _proxy.LastIp = cfg.LastIp ?? "";
+                _proxy.LastCountry = cfg.LastCountry ?? "";
+                _proxy.LastCountryCode = cfg.LastCountryCode ?? "";
+                _proxy.LastCity = cfg.LastCity ?? "";
+                _proxy.LastTimezone = cfg.LastTimezone ?? "";
+                _proxySeg.SelectedIndex = _proxy.Type == "http" ? 1 : _proxy.Type == "https" ? 2 : _proxy.Type == "socks5" ? 3 : 0;
+                _host.Value = _proxy.Host;
+                _port.Value = _proxy.Port > 0 ? _proxy.Port.ToString() : "";
+                _user.Value = _proxy.User;
+                _pass.Value = _proxy.Password;
+                SetProxyResult(0, "Saved proxy loaded. Test the connection if you like.");
+            };
+
             _lblType = Lbl(_tabProxy, "PROXY TYPE");
             _proxySeg = new JBSegment();
             _proxySeg.SetItems(new[] { "None", "HTTP", "HTTPS", "SOCKS5" }, 0);
@@ -573,6 +670,77 @@ namespace JoeBrowser
             _port.EnterPressed += OnEnterKey;
             _user.EnterPressed += OnEnterKey;
             _pass.EnterPressed += OnEnterKey;
+        }
+
+        private static readonly string[] SpeedKeys = { "relaxed", "natural", "fast", "instant" };
+        private static readonly string[] SpeedLabels =
+        {
+            "Relaxed - 90 to 240 ms per key",
+            "Natural - 38 to 135 ms per key",
+            "Fast - 18 to 60 ms per key",
+            "Instant - no delay"
+        };
+        private static readonly int[] IntervalValues = { 30, 60, 120, 300, 600 };
+        private static readonly string[] IntervalLabels =
+        {
+            "Every 30 seconds", "Every minute", "Every 2 minutes", "Every 5 minutes", "Every 10 minutes"
+        };
+
+        /// <summary>
+        /// The three original Joe Browser tools plus a place to add unpacked extensions the
+        /// user built. Every switch is per profile, so one identity can be strict and another lax.
+        /// </summary>
+        private void BuildTools()
+        {
+            _lblExt = Lbl(_tabTools, "BUILT-IN APP TOOLS");
+
+            _toolHumanPaste = new JBToggle { Text = "Paste as human", Checked = _tools.HumanPaste };
+            _toolProxyWatch = new JBToggle { Text = "Proxy IP change & offline alerts", Checked = _tools.ProxyWatch };
+            _toolRightClick = new JBToggle { Text = "Enable right click & copy", Checked = _tools.EnableRightClick };
+            _toolAllowShift = new JBToggle { Text = "Also unlock text selection", Checked = _tools.UnlockSelection };
+            _tabTools.Controls.Add(_toolHumanPaste);
+            _tabTools.Controls.Add(_toolProxyWatch);
+            _tabTools.Controls.Add(_toolRightClick);
+            _tabTools.Controls.Add(_toolAllowShift);
+
+            _lblSpeed = Lbl(_tabTools, "TYPING SPEED");
+            _toolSpeed = Pick(_tabTools, "speed");
+            int speedIdx = Array.IndexOf(SpeedKeys, _tools.HumanPasteSpeed ?? "natural");
+            _toolSpeed.SetItems(SpeedLabels, speedIdx < 0 ? 1 : speedIdx);
+
+            _lblInterval = Lbl(_tabTools, "CHECK INTERVAL");
+            _toolInterval = Pick(_tabTools, "clock");
+            int intervalIdx = Array.IndexOf(IntervalValues, _tools.ProxyWatchInterval);
+            _toolInterval.SetItems(IntervalLabels, intervalIdx < 0 ? 1 : intervalIdx);
+
+            _lblCustomExt = Lbl(_tabTools, "EXTRA EXTENSION FOLDERS");
+            _customExt = Txt(_tabTools, _tools.CustomExtensions, "C:\\extensions\\my-extension", null, true, 76);
+
+            _lblExtHint = new JBLabel(LabelRole.Faint,
+                "Built into the app: these tools are injected directly into the browser, so no extension install is needed. Extra folders are optional unpacked extensions.");
+            _lblExtHint.Wrap = true;
+            _lblExtHint.TextAlign = ContentAlignment.TopLeft;
+            _tabTools.Controls.Add(_lblExtHint);
+
+            _openExtFolder = new JBButton { Kind = BtnKind.Soft, Icon = "folder", Text = "Open extensions folder" };
+            _openExtFolder.Click += delegate
+            {
+                try
+                {
+                    ExtensionManager.EnsureAll();
+                    Process.Start(new ProcessStartInfo("explorer.exe", "\"" + AppPaths.Extensions + "\"")
+                    { UseShellExecute = true });
+                }
+                catch (Exception ex) { SetError(ex.Message); }
+            };
+            _tabTools.Controls.Add(_openExtFolder);
+
+            _toolAllowShift.Visible = _tools.EnableRightClick;
+            _toolRightClick.CheckedChanged += delegate
+            {
+                _toolAllowShift.Visible = _toolRightClick.Checked;
+                LayoutAll();
+            };
         }
 
         private void ToggleReveal()
@@ -649,7 +817,7 @@ namespace JoeBrowser
 
                 var langItems = new List<string>(FingerprintFactory.Languages);
                 if (!string.IsNullOrEmpty(_fp.Language) && !langItems.Contains(_fp.Language)) langItems.Insert(0, _fp.Language);
-                _lang.SetItems(langItems, langItems.IndexOf(_fp.Language));
+                _lang.SetItems(LangItems(langItems), _fp.Language);
 
                 _gpus = FingerprintFactory.GpusFor(_fp.Os);
                 var gpuItems = new List<string>();
@@ -712,6 +880,11 @@ namespace JoeBrowser
             _hostFp.Visible = index == 1;
             _hostPriv.Visible = index == 2;
             _hostProxy.Visible = index == 3;
+            _hostTools.Visible = index == 4;
+            /* A double-buffered host that becomes visible again can otherwise keep the
+               previous tab's pixels for one frame. Force a full repaint of its children. */
+            JBScrollHost[] hosts = { _hostGeneral, _hostFp, _hostPriv, _hostProxy, _hostTools };
+            foreach (JBScrollHost h in hosts) h.Invalidate(true);
             if (index == 0) _name.Box.Select();
             Invalidate();
         }
@@ -735,7 +908,7 @@ namespace JoeBrowser
 
             _close.SetBounds(w - pad - Ui.S(32), Ui.S(16), Ui.S(32), Ui.S(32));
             _title.SetBounds(pad, Ui.S(16), Math.Max(Ui.S(120), w - pad * 2 - Ui.S(48)), Ui.S(32));
-            _tabs.SetBounds(pad, Ui.S(58), Math.Min(Ui.S(430), w - pad * 2), Ui.S(38));
+            _tabs.SetBounds(pad, Ui.S(58), Math.Min(Ui.S(560), w - pad * 2), Ui.S(38));
 
             int top = Ui.S(108);
             int bodyH = Math.Max(Ui.S(140), h - top - Ui.S(70));
@@ -745,11 +918,13 @@ namespace JoeBrowser
             _hostFp.SetBounds(pad, top, bodyW, bodyH);
             _hostPriv.SetBounds(pad, top, bodyW, bodyH);
             _hostProxy.SetBounds(pad, top, bodyW, bodyH);
+            _hostTools.SetBounds(pad, top, bodyW, bodyH);
 
             LayoutGeneral(_tabGeneral, _hostGeneral, _hostGeneral.ContentWidth);
             LayoutFingerprint(_tabFp, _hostFp, _hostFp.ContentWidth);
             LayoutPrivacy(_tabPriv, _hostPriv, _hostPriv.ContentWidth);
             LayoutProxy(_tabProxy, _hostProxy, _hostProxy.ContentWidth);
+            LayoutTools(_tabTools, _hostTools, _hostTools.ContentWidth);
 
             LayoutFooter();
             ResumeLayout(false);
@@ -814,6 +989,10 @@ namespace JoeBrowser
                 y += Ui.S(34) + Ui.S(6);
             }
 
+            y = Row(_lblGroup, _group, _lblTags, _tags, y, cw, wide, lh, lg, rg, Ui.S(12), fh, fh);
+            _lblStatus.SetBounds(0, y, cw, lh); y += lh + lg;
+            _status.SetBounds(0, y, cw, fh); y += fh + rg;
+
             _lblNotes.SetBounds(0, y, cw, lh); y += lh + lg;
             _notes.SetBounds(0, y, cw, Ui.S(72));
 
@@ -861,6 +1040,8 @@ namespace JoeBrowser
 
             _regen.SetBounds(0, y, _regen.PreferredWidth(Ui.S(160)), Ui.S(33));
             y += Ui.S(33) + Ui.S(10);
+            UpdateFirefoxWarn(0, y, cw);
+            if (_fpWarn.Visible) y += Ui.S(26) + Ui.S(6);
 
             FinishPage(page, host, cw, y);
         }
@@ -900,6 +1081,9 @@ namespace JoeBrowser
             bool two = cw >= Ui.S(520);
 
             int y = Ui.S(4);
+            _lblSaved.SetBounds(0, y, cw, lh); y += lh + lg;
+            _savedProxy.SetBounds(0, y, cw, fh); y += fh + rg;
+
             _lblType.SetBounds(0, y, cw, lh); y += lh + lg;
             _proxySeg.SetBounds(0, y, Math.Min(cw, Ui.S(420)), Ui.S(38));
             y += Ui.S(38) + rg;
@@ -913,6 +1097,43 @@ namespace JoeBrowser
             _proxyCard.SetBounds(0, y, cw, Ui.S(52));
             _proxyResult.SetBounds(Ui.S(36), Ui.S(6), Math.Max(Ui.S(60), cw - Ui.S(48)), Ui.S(40));
             y += Ui.S(52) + Ui.S(12);
+
+            FinishPage(page, host, cw, y);
+        }
+
+        private void LayoutTools(Panel page, JBScrollHost host, int cw)
+        {
+            int lh = Ui.S(18), fh = Ui.S(33), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
+            bool two = cw >= Ui.S(560);
+            int y = Ui.S(4);
+
+            _lblExt.SetBounds(0, y, cw, lh); y += lh + lg;
+
+            int cols = two ? 2 : 1;
+            int gap = Ui.S(10), th = Ui.S(28);
+            int colW = two ? (cw - gap) / 2 : cw;
+            Control[] toggles = { _toolHumanPaste, _toolProxyWatch, _toolRightClick, _toolAllowShift };
+            int placed = 0;
+            foreach (Control t in toggles)
+            {
+                /* Do not test Control.Visible here. OnLoad lays out the editor after
+                   SwitchTab has hidden every tab except General, and WinForms reports a
+                   child as invisible whenever its parent is hidden. That made all four
+                   toggles keep their default (0,0) bounds and paint over the section
+                   label. Only the Shift override is intentionally hidden. */
+                if (t == _toolAllowShift && !_toolRightClick.Checked) continue;
+                t.SetBounds((placed % cols) * (colW + gap), y + (placed / cols) * (th + Ui.S(6)), colW, th);
+                placed++;
+            }
+            y += ((placed + cols - 1) / cols) * (th + Ui.S(6)) + Ui.S(8);
+
+            y = Row(_lblSpeed, _toolSpeed, _lblInterval, _toolInterval, y, cw, two, lh, lg, rg, cg, fh, fh);
+
+            _lblCustomExt.SetBounds(0, y, cw, lh); y += lh + lg;
+            _customExt.SetBounds(0, y, cw, Ui.S(76)); y += Ui.S(76) + Ui.S(6);
+            _lblExtHint.SetBounds(0, y, cw, Ui.S(34)); y += Ui.S(34) + Ui.S(10);
+            int bw = _openExtFolder.PreferredWidth(Ui.S(200));
+            _openExtFolder.SetBounds(0, y, bw, fh); y += fh + Ui.S(12);
 
             FinishPage(page, host, cw, y);
         }
@@ -1048,6 +1269,9 @@ namespace JoeBrowser
             SetError("");
             _profile.Name = name;
             _profile.Notes = _notes.Value.Trim();
+            _profile.Group = _group.Value.Trim();
+            _profile.Tags = _tags.Value.Trim();
+            _profile.Status = _status.Value.Trim();
             _profile.StartUrl = start;
 
             string custom = _browserPath.Value.Trim();
@@ -1088,6 +1312,17 @@ namespace JoeBrowser
             _proxy.User = _user.Value.Trim();
             _proxy.Password = _pass.Value;
             _profile.Proxy = _proxy;
+
+            _tools.HumanPaste = _toolHumanPaste.Checked;
+            int si = _toolSpeed.SelectedIndex;
+            _tools.HumanPasteSpeed = SpeedKeys[si < 0 || si >= SpeedKeys.Length ? 1 : si];
+            _tools.ProxyWatch = _toolProxyWatch.Checked;
+            int ii = _toolInterval.SelectedIndex;
+            _tools.ProxyWatchInterval = IntervalValues[ii < 0 || ii >= IntervalValues.Length ? 1 : ii];
+            _tools.EnableRightClick = _toolRightClick.Checked;
+            _tools.UnlockSelection = _toolAllowShift.Checked;
+            _tools.CustomExtensions = _customExt.Value.Trim();
+            _profile.Tools = _tools;
 
             Result = _profile;
             DialogResult = DialogResult.OK;

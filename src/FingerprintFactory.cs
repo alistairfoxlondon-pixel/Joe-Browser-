@@ -112,57 +112,113 @@ namespace JoeBrowser
             {"Windows 10", new double[][]{ new double[]{1366d,768,1}, new double[]{1920,1080,1}, new double[]{1600,900,1}, new double[]{2560,1440,1}, new double[]{1440,900,1}, new double[]{1280,720,1} }},
             {"macOS", new double[][]{ new double[]{1512d,982,2}, new double[]{1728,1117,2}, new double[]{1440,900,2}, new double[]{2560,1440,2}, new double[]{2304,1296,2} }},
             {"Linux", new double[][]{ new double[]{1920d,1080,1}, new double[]{1366,768,1}, new double[]{2560,1440,1}, new double[]{1600,900,1}, new double[]{3840,2160,1} }},
-            {"Android", new double[][]{ new double[]{412d,915,2.625}, new double[]{384,854,2.75}, new double[]{393,873,2.75}, new double[]{411,731,2.6}, new double[]{360,800,2} }},
-            {"iPhone", new double[][]{ new double[]{390d,844,3}, new double[]{393,852,3}, new double[]{430,932,3}, new double[]{375,812,3}, new double[]{428,926,3} }},
-            {"iPad", new double[][]{ new double[]{1024d,1366,2}, new double[]{820,1180,2}, new double[]{1080,1194,2}, new double[]{1194,834,2} }}
+            {"Android", new double[][]{ new double[]{411d,915,2.625}, new double[]{427,952,3}, new double[]{411,891,3.5}, new double[]{393,851,2.75}, new double[]{360,780,3}, new double[]{411,869,3.5} }},
+            {"iPhone", new double[][]{ new double[]{393d,852,3}, new double[]{390,844,3}, new double[]{430,932,3}, new double[]{420,912,3}, new double[]{375,812,3} }},
+            {"iPad", new double[][]{ new double[]{820d,1180,2}, new double[]{1024,1366,2}, new double[]{1194,834,2}, new double[]{744,1133,2} }}
         };
 
+        /// <summary>
+        /// Phone model, Android build and the GPU that model really ships, keyed by the same "WxH"
+        /// the Screens table uses. A 2025 flagship viewport must not carry a 2017 model token, and
+        /// the WebGL renderer has to be the silicon that handset actually has: an S10 answering a
+        /// Mali-G68, or a Pixel 9 answering an Adreno, is a device that was never built.
+        /// </summary>
+        private static readonly Dictionary<string, string[]> AndroidDevices = new Dictionary<string, string[]>
+        {
+            {"411x915", new[]{"Pixel 9", "16", "Google Inc. (ARM)", "ANGLE (ARM, Mali-G715, OpenGL ES 3.2)"}},
+            {"427x952", new[]{"Pixel 9 Pro XL", "16", "Google Inc. (ARM)", "ANGLE (ARM, Mali-G715, OpenGL ES 3.2)"}},
+            {"411x891", new[]{"SM-S931B", "16", "Google Inc. (Qualcomm)", "ANGLE (Qualcomm, Adreno (TM) 830, OpenGL ES 3.2)"}},
+            {"393x851", new[]{"SM-S908B", "15", "Google Inc. (Qualcomm)", "ANGLE (Qualcomm, Adreno (TM) 730, OpenGL ES 3.2)"}},
+            {"360x780",  new[]{"SM-A155F", "15", "Google Inc. (ARM)", "ANGLE (ARM, Mali-G57, OpenGL ES 3.2)"}},
+            {"411x869",  new[]{"SM-G973F", "12", "Google Inc. (ARM)", "ANGLE (ARM, Mali-G76, OpenGL ES 3.2)"}}
+        };
+
+        /// <summary>iPhone / iPad model plus the iOS version token for the Safari user agent.</summary>
+        private static readonly Dictionary<string, string[]> IosDevices = new Dictionary<string, string[]>
+        {
+            {"393x852",   new[]{"iPhone 16", "26_1", "26.1"}},
+            {"390x844",   new[]{"iPhone 15", "26_1", "26.1"}},
+            {"430x932",   new[]{"iPhone 16 Pro Max", "26_1", "26.1"}},
+            {"420x912",   new[]{"iPhone 17 Pro", "26_2", "26.2"}},
+            {"375x812",   new[]{"iPhone 13 mini", "26_1", "26.1"}},
+            {"820x1180",  new[]{"iPad Air 11", "26_1", "26.1"}},
+            {"1024x1366", new[]{"iPad Pro 13", "26_1", "26.1"}},
+            {"1194x834",  new[]{"iPad Pro 11", "26_1", "26.1"}},
+            {"744x1133",  new[]{"iPad mini 7", "26_1", "26.1"}}
+        };
+
+        /// <summary>Tablet model token for an Android profile on a large viewport.</summary>
+        private static readonly Dictionary<string, string[]> AndroidTablets = new Dictionary<string, string[]>
+        {
+            {"600x960", new[]{"SM-X510", "15", "Google Inc. (ARM)", "ANGLE (ARM, Mali-G68, OpenGL ES 3.2)"}},
+            {"800x1280", new[]{"SM-X810", "16", "Google Inc. (Qualcomm)", "ANGLE (Qualcomm, Adreno (TM) 830, OpenGL ES 3.2)"}},
+            {"900x1440", new[]{"SM-X920", "16", "Google Inc. (Qualcomm)", "ANGLE (Qualcomm, Adreno (TM) 830, OpenGL ES 3.2)"}}
+        };
+
+        /// <summary>
+        /// ANGLE strings ordered newest-first, so the index doubles as the device tier: entry 0 is
+        /// what a current high-end machine reports and the tail is what older hardware still shows.
+        /// Regenerate picks from the top of the list and derives cores and memory from that tier.
+        /// </summary>
         private static readonly Dictionary<string, string[][]> Gpus = new Dictionary<string, string[][]>
         {
             {"Windows", new[]{
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5090 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5080 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5070 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5070 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5060 Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
-                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
-                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
-                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)"},
-                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 3050 Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)"},
-                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 6700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 9070 XT Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 7900 XTX Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 7800 XT Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon 890M (Ryzen 9000 Series) Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon Graphics (Raphael) Direct3D11 vs_5_0 ps_5_0, D3D11)"},
-                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) Arc(TM) B580 Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) Arc(TM) A770 Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) UHD Graphics 770 Direct3D11 vs_5_0 ps_5_0, D3D11)"}
             }},
             {"macOS", new[]{
-                new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)"},
-                new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)"},
+                new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)"},
+                new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)"},
+                new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)"},
                 new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)"},
                 new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)"},
-                // Intel Macs use the same Metal renderer string shape, just with the Intel chip name.
+                new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)"},
+                new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)"},
+                // Intel Macs use the same Metal renderer shape, just with the Intel chip name.
                 new[]{"Google Inc. (Intel)","ANGLE (Intel, ANGLE Metal Renderer: Intel(R) Iris(TM) Plus Graphics 655, Unspecified Version)"},
-                new[]{"Google Inc. (Intel)","ANGLE (Intel, ANGLE Metal Renderer: Intel(R) UHD Graphics 630, Unspecified Version)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, ANGLE Metal Renderer: AMD Radeon Pro 5500M, Unspecified Version)"}
             }},
             {"Linux", new[]{
-                new[]{"Google Inc. (Intel)","ANGLE (Intel, Mesa Intel(R) UHD Graphics 620 (KBL GT2), OpenGL 4.6)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 SUPER (0x00002705), OpenGL 4.6)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002503), OpenGL 4.6)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 7900 XT (gfx1101, LLVM 19.1.1, DRM 3.59, 6.11.0-19-generic), OpenGL 4.6)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 6600 (NAVI23, LLVM 19.1.1, DRM 3.59, 6.11.0-19-generic), OpenGL 4.6)"},
+                new[]{"Google Inc. (Intel)","ANGLE (Intel, Mesa Intel(R) Arc(TM) A770 Graphics (ADLM GT2), OpenGL 4.6)"},
                 new[]{"Google Inc. (Intel)","ANGLE (Intel, Mesa Intel(R) Xe Graphics (TGL GT2), OpenGL 4.6)"},
-                new[]{"Google Inc. (Intel)","ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (CFL GT2), OpenGL 4.6)"},
-                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 580 Series (POLARIS10, DRM 3.42.0, 5.15.0-91-generic, LLVM 15.0.7), OpenGL 4.6)"},
-                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 6600 (NAVI23, DRM 3.49.0, 6.5.0-14-generic, LLVM 17.0.6), OpenGL 4.6)"},
-                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti (0x00001C03), OpenGL 4.6)"}
+                new[]{"Google Inc. (Intel)","ANGLE (Intel, Mesa Intel(R) UHD Graphics 620 (KBL GT2), OpenGL 4.6)"}
             }},
             {"Android", new[]{
-                new[]{"Google Inc. (Adreno)","ANGLE (Adreno, Adreno (TM) 640, OpenGL ES 3.2)"},
-                new[]{"Google Inc. (Adreno)","ANGLE (Adreno, Adreno (TM) 660, OpenGL ES 3.2)"},
-                new[]{"Google Inc. (Adreno)","ANGLE (Adreno, Adreno (TM) 730, OpenGL ES 3.2)"},
-                new[]{"Google Inc. (Adreno)","ANGLE (Adreno, Adreno (TM) 740, OpenGL ES 3.2)"},
-                new[]{"Google Inc. (ARM-Mali)","ANGLE (ARM, Mali-G57 MC2, OpenGL ES 3.2)"},
-                new[]{"Google Inc. (ARM-Mali)","ANGLE (ARM, Mali-G78, OpenGL ES 3.2)"},
-                new[]{"Google Inc. (ARM-Mali)","ANGLE (ARM, Mali-G68, OpenGL ES 3.2)"}
+                new[]{"Google Inc. (Qualcomm)","ANGLE (Qualcomm, Adreno (TM) 830, OpenGL ES 3.2)"},
+                new[]{"Google Inc. (ARM)","ANGLE (ARM, Immortalis-G720, OpenGL ES 3.2)"},
+                new[]{"Google Inc. (ARM)","ANGLE (ARM, Mali-G720, OpenGL ES 3.2)"},
+                new[]{"Google Inc. (Qualcomm)","ANGLE (Qualcomm, Adreno (TM) 750, OpenGL ES 3.2)"},
+                new[]{"Google Inc. (ARM)","ANGLE (ARM, Mali-G715, OpenGL ES 3.2)"},
+                new[]{"Google Inc. (Qualcomm)","ANGLE (Qualcomm, Adreno (TM) 730, OpenGL ES 3.2)"},
+                new[]{"Google Inc. (ARM)","ANGLE (ARM, Mali-G57, OpenGL ES 3.2)"},
+                new[]{"Google Inc. (ARM)","ANGLE (ARM, Mali-G76, OpenGL ES 3.2)"}
             }},
+            // Safari and Chrome on iOS both come out of the same Metal driver and report no ANGLE
+            // layer at all: the vendor is Apple and the renderer is the bare "Apple GPU" string.
             {"iOS", new[]{
-                new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple A15 GPU, Unspecified Version)"},
-                new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple A17 Pro, Unspecified Version)"},
-                new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple GPU, Unspecified Version)"}
+                /* WebKit on iOS exposes no ANGLE layer at all: gl.VENDOR is "Apple Inc." and the
+                   renderer is the generic "Apple GPU" on every iPhone and iPad, so one entry is
+                   the only honest value and there is nothing to tier. */
+                new[]{"Apple Inc.","Apple GPU"}
             }}
         };
 
@@ -211,6 +267,7 @@ namespace JoeBrowser
         public static bool IsAndroid(string os) { return os != null && os.StartsWith("Android", StringComparison.OrdinalIgnoreCase); }
         public static bool IsIos(string os) { return os != null && (os.StartsWith("iPhone", StringComparison.OrdinalIgnoreCase) || os.StartsWith("iPad", StringComparison.OrdinalIgnoreCase)); }
         public static bool IsMobileOs(string os) { return IsAndroid(os) || IsIos(os); }
+        public static bool IsWindowsTarget(string os) { return string.IsNullOrEmpty(os) || os.StartsWith("Windows", StringComparison.OrdinalIgnoreCase); }
 
         public static string DeviceTypeFor(string os)
         {
@@ -316,12 +373,56 @@ namespace JoeBrowser
 
             string gpuKey = IsMac(os) ? "macOS" : (IsLinux(os) ? "Linux" : (IsAndroid(os) ? "Android" : (IsIos(os) ? "iOS" : "Windows")));
             var gpus = Gpus[gpuKey];
-            var pair = gpus[r.Next(gpus.Length)];
+            int tier = PickTier(gpus.Length, r);
+            /* An Android handset carries its own silicon, so the model chosen for the viewport
+               wins over the roll; the pool index of that GPU then sets the device class. */
+            string[] device = DeviceIdentity(fp);
+            var pair = device.Length >= 4 && !string.IsNullOrEmpty(device[3])
+                ? new[] { device[2], device[3] }
+                : gpus[tier];
+            if (pair != gpus[tier])
+            {
+                for (int i = 0; i < gpus.Length; i++)
+                    if (gpus[i][1] == pair[1]) { tier = i; break; }
+            }
             fp.WebGlVendor = pair[0];
             fp.WebGlRenderer = pair[1];
 
-            int[] cores = IsMobileOs(os) ? new[] { 4, 6, 8, 8 } : new[] { 4, 8, 8, 12, 16 };
-            int[] mem = IsMobileOs(os) ? new[] { 4, 4, 8 } : new[] { 4, 8, 8 };
+            // Cores and memory have to describe the same machine class as the GPU. A 24-core
+            // desktop behind an integrated UHD 620, or 4 GB on an M4 Max, is a contradiction
+            // that a single hardware-concurrency check exposes.
+            bool high = tier < (int)Math.Ceiling(gpus.Length / 3.0);
+            bool low = tier >= (int)Math.Ceiling(gpus.Length * 2.0 / 3.0);
+            int[] cores, mem;
+            /* navigator.deviceMemory only ever answers a power of two, capped at 8 by every
+               Chromium, so 6 or 12 GB is a value no real browser can produce. */
+            if (IsIos(os))
+            {
+                /* Every A-series chip is 6-wide, an iPad Air is 8 and an iPad Pro M4 is 10; the
+                   tier roll would invent 4-core iPhones and 16-core iPads Apple never shipped. */
+                string model = device.Length > 0 ? device[0] : "";
+                if (model.StartsWith("iPad Pro", StringComparison.OrdinalIgnoreCase)) cores = new[] { 10, 10, 8 };
+                else if (model.StartsWith("iPad Air", StringComparison.OrdinalIgnoreCase)) cores = new[] { 8, 8 };
+                else cores = new[] { 6, 6 };
+                mem = new[] { 8 };
+            }
+            else if (IsAndroid(os))
+            {
+                // Every Android SoC a Chrome build ships on is octa-core, at every price point.
+                cores = new[] { 8, 8 };
+                mem = low ? new[] { 4 } : new[] { 8 };
+            }
+            else if (IsMobileOs(os))
+            {
+                cores = high ? new[] { 8, 8 } : (low ? new[] { 4, 6 } : new[] { 6, 8 });
+                mem = low ? new[] { 4 } : new[] { 8 };
+            }
+            else
+            {
+                cores = high ? new[] { 16, 16, 24 } : (low ? new[] { 4, 6, 8 } : new[] { 8, 12, 16 });
+                // navigator.deviceMemory is capped at 8 by every Chromium, whatever the machine has.
+                mem = low ? new[] { 4 } : new[] { 8 };
+            }
             fp.Cores = cores[r.Next(cores.Length)];
             fp.Memory = mem[r.Next(mem.Length)];
 
@@ -344,30 +445,76 @@ namespace JoeBrowser
             fp.Brand = "";
         }
 
-        /// <summary>Proxy IP wins, then this machine's own IP, then a coherent random choice.</summary>
+        /// <summary>
+        /// Newest hardware is the most common answer, so the index is biased toward the head of the
+        /// pool: two uniforms multiplied collapse the distribution toward zero without ever
+        /// excluding the older entries a real fleet still contains.
+        /// </summary>
+        private static int PickTier(int count, Random r)
+        {
+            if (count <= 1) return 0;
+            int bias = (int)(r.NextDouble() * r.NextDouble() * count);
+            return bias < count ? bias : count - 1;
+        }
+
+        /// <summary>
+        /// {model, osVersion} for the viewport the profile advertises. The screen size is what a
+        /// real device reports, so it is also what ties the model token in the user agent and the
+        /// model in the client hints to the same phone or tablet.
+        /// </summary>
+        public static string[] DeviceIdentity(FingerprintConfig fp)
+        {
+            string[] none = { "", "" };
+            if (fp == null || string.IsNullOrEmpty(fp.Os)) return none;
+            string key = fp.ScreenW + "x" + fp.ScreenH;
+            Dictionary<string, string[]> table;
+            if (IsIos(fp.Os)) table = IosDevices;
+            else if ((fp.DeviceType ?? "").Equals("tablet", StringComparison.OrdinalIgnoreCase)) table = AndroidTablets;
+            else if (IsAndroid(fp.Os)) table = AndroidDevices;
+            else return none;
+            string[] found;
+            return table.TryGetValue(key, out found) ? found : none;
+        }
+
+        /// <summary>
+        /// The public IP a site actually sees wins. That is the proxy IP when one is set, and the
+        /// machine's own detected IP on a direct connection. The clock, the language and the
+        /// Accept-Language header must all describe the same country or a single request can
+        /// expose the mismatch.
+        /// </summary>
         public static void ApplyLocale(FingerprintConfig fp, ProxyConfig proxy, Random r)
         {
-            if (proxy != null && proxy.Enabled && fp.AutoMatchProxy && !string.IsNullOrEmpty(proxy.LastTimezone))
-            {
-                fp.Timezone = proxy.LastTimezone;
-                fp.Language = LanguageForTimezone(proxy.LastTimezone);
-                fp.AcceptLanguage = AcceptLanguageFor(fp.Language);
-                return;
-            }
-            if (proxy != null && proxy.Enabled && fp.AutoMatchProxy && !string.IsNullOrEmpty(proxy.LastCountryCode))
+            if (proxy != null && fp.AutoMatchProxy)
             {
                 string[] loc;
-                if (CountryLocale.TryGetValue(proxy.LastCountryCode, out loc))
+                if (!string.IsNullOrEmpty(proxy.LastCountryCode) &&
+                    (proxy.Enabled || !string.IsNullOrEmpty(proxy.LastIp)) &&
+                    CountryLocale.TryGetValue(proxy.LastCountryCode, out loc))
                 {
                     fp.Timezone = loc[0];
                     fp.Language = loc[1];
                     fp.AcceptLanguage = AcceptLanguageFor(fp.Language);
                     return;
                 }
+                if (proxy.Enabled && !string.IsNullOrEmpty(proxy.LastTimezone))
+                {
+                    fp.Timezone = proxy.LastTimezone;
+                    fp.Language = LanguageForTimezone(proxy.LastTimezone);
+                    fp.AcceptLanguage = AcceptLanguageFor(fp.Language);
+                    return;
+                }
             }
+
+            /* No usable IP lookup: mirror the machine, but never advertise a culture from a
+               different country than its own clock (en-US over Europe/London, ru-RU over
+               Europe/Berlin). Those pairings are the easiest kind of incoherence to detect. */
             fp.Timezone = SystemTimezone();
-            fp.Language = SystemLanguage();
-            if (Array.IndexOf(Languages, fp.Language) < 0) fp.Language = LanguageForTimezone(fp.Timezone);
+            string natural = LanguageForTimezone(fp.Timezone);
+            string local = SystemLanguage();
+            if (Array.IndexOf(Languages, local) < 0 ||
+                !string.Equals(CountryForLanguage(local), CountryForLanguage(natural), StringComparison.OrdinalIgnoreCase))
+                local = natural;
+            fp.Language = local;
             fp.AcceptLanguage = AcceptLanguageFor(fp.Language);
         }
 
@@ -398,6 +545,11 @@ namespace JoeBrowser
             return os != null && os.StartsWith("Windows", StringComparison.OrdinalIgnoreCase);
         }
 
+        public static bool IsWindows11(string os)
+        {
+            return os != null && os.StartsWith("Windows 11", StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>Pairs a resolution with the chrome and pixel density that device really has.</summary>
         public static void ApplyScreen(FingerprintConfig fp, string os, double[] screen)
         {
@@ -407,9 +559,26 @@ namespace JoeBrowser
             fp.AvailH = IsMobileOs(os) ? fp.ScreenH : fp.ScreenH - (IsMac(os) ? 25 : (IsLinux(os) ? 27 : 40));
             fp.PixelRatio = screen.Length > 2 && screen[2] > 0
                 ? screen[2]
-                : (IsMac(os) ? 2 : (IsIos(os) ? 3 : (IsAndroid(os) ? 2.625 : 1)));
+                : (IsMac(os) ? 2 : (IsIos(os)
+                    ? (os.StartsWith("iPad", StringComparison.OrdinalIgnoreCase) ? 2 : 3)
+                    : (IsAndroid(os) ? 2.625 : 1)));
             fp.TouchPoints = IsMobileOs(os) ? 5 : 0;
             fp.DeviceType = DeviceTypeFor(os);
+        }
+
+        /// <summary>
+        /// Height the emulated page really shows. On a phone the address and tool bars are part of
+        /// the screen, so window.innerHeight is always smaller than screen.height; a profile that
+        /// reports the two as equal describes a device that does not exist.
+        /// </summary>
+        public static int MobileViewHeight(FingerprintConfig fp)
+        {
+            if (fp == null || fp.ScreenH <= 0 || !IsMobileOs(fp.Os)) return 0;
+            bool pad = fp.DeviceType == "tablet";
+            int bars = IsIos(fp.Os) ? (pad ? 92 : 124) : (pad ? 96 : 120);
+            int h = fp.ScreenH - bars;
+            int floor = (int)Math.Round(fp.ScreenH * 0.7);
+            return h < floor ? floor : h;
         }
 
         public static List<double[]> ScreensFor(string os)
@@ -490,6 +659,36 @@ namespace JoeBrowser
             return language.Substring(dash + 1).ToUpperInvariant();
         }
 
+        /// <summary>Readable locale name for the pickers and profile tiles, e.g. "German (Germany)".</summary>
+        public static string LanguageName(string code)
+        {
+            if (string.IsNullOrWhiteSpace(code)) return "";
+            try
+            {
+                var ci = CultureInfo.GetCultureInfo(code.Trim());
+                string name = ci.EnglishName;
+                if (!string.IsNullOrEmpty(name) && !name.Equals(code, StringComparison.OrdinalIgnoreCase)) return name;
+            }
+            catch { }
+            return code;
+        }
+
+        /// <summary>Short label for tight spaces, e.g. "German".</summary>
+        public static string ShortLanguageName(string code)
+        {
+            string full = LanguageName(code);
+            int p = full.IndexOf(" (", StringComparison.Ordinal);
+            return p > 0 ? full.Substring(0, p) : full;
+        }
+
+        /// <summary>Readable city/zone name, e.g. "Europe/Berlin" -> "Berlin".</summary>
+        public static string TimezoneName(string tz)
+        {
+            if (string.IsNullOrWhiteSpace(tz)) return "";
+            int i = tz.LastIndexOf('/');
+            return (i >= 0 ? tz.Substring(i + 1) : tz).Replace('_', ' ');
+        }
+
         public static string LanguageForTimezone(string tz)
         {
             if (string.IsNullOrEmpty(tz)) return "en-US";
@@ -560,10 +759,16 @@ namespace JoeBrowser
 
             if (IsIos(fp.Os))
             {
-                // iOS browsers are all WebKit: match the Safari string, not a Chrome one.
+                // iOS browsers are all WebKit: match the Safari string, not a Chrome one. The model
+                // and the OS build come from the advertised viewport, so the UA, the screen and the
+                // pixel density all describe the same device.
                 bool pad = fp.Os.StartsWith("iPad", StringComparison.OrdinalIgnoreCase);
-                fp.UserAgent = "Mozilla/5.0 (" + (pad ? "iPad; CPU OS 17_5 like Mac OS X" : "iPhone; CPU iPhone OS 17_5 like Mac OS X") +
-                    ") AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+                string[] dev = DeviceIdentity(fp);
+                string token = dev.Length > 1 && dev[1].Length > 0 ? dev[1] : "26_1";
+                string ver = dev.Length > 2 && dev[2].Length > 0 ? dev[2] : "26.1";
+                string head = pad ? "iPad; CPU OS " + token : "iPhone; CPU iPhone OS " + token;
+                fp.UserAgent = "Mozilla/5.0 (" + head + " like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/" +
+                    ver + " Mobile/15E148 Safari/604.1";
                 fp.Platform = pad ? "iPad" : "iPhone";
                 fp.Brand = "Safari";
                 return;
@@ -571,14 +776,21 @@ namespace JoeBrowser
 
             if (firefox)
             {
-                string platToken;
-                if (IsMac(fp.Os)) platToken = "Macintosh; Intel Mac OS X 10.15";
-                else if (IsLinux(fp.Os)) platToken = "X11; Linux x86_64";
-                else if (IsAndroid(fp.Os)) platToken = "Android 10; Mobile";
-                else platToken = "Windows NT 10.0; Win64; x64";
+                string platToken, navPlatformFf;
+                if (IsMac(fp.Os)) { platToken = "Macintosh; Intel Mac OS X 10.15"; navPlatformFf = "MacIntel"; }
+                else if (IsLinux(fp.Os)) { platToken = "X11; Linux x86_64"; navPlatformFf = "Linux x86_64"; }
+                else if (IsAndroid(fp.Os))
+                {
+                    string[] dev = DeviceIdentity(fp);
+                    platToken = "Android " + (dev.Length > 1 && dev[1].Length > 0 ? dev[1] : "16") + "; " +
+                        (device == "tablet" ? "Tablet" : "Mobile");
+                    // Firefox on Android reports its own platform token, never a desktop one.
+                    navPlatformFf = "Android";
+                }
+                else { platToken = "Windows NT 10.0; Win64; x64"; navPlatformFf = "Win32"; }
                 int fmajor = browser != null && browser.MajorVersion > 0 ? browser.MajorVersion : 128;
                 fp.UserAgent = "Mozilla/5.0 (" + platToken + "; rv:" + fmajor + ".0) Gecko/20100101 Firefox/" + fmajor + ".0";
-                fp.Platform = IsMac(fp.Os) ? "MacIntel" : (IsLinux(fp.Os) ? "Linux x86_64" : "Win32");
+                fp.Platform = navPlatformFf;
                 fp.Brand = "Firefox";
                 return;
             }
@@ -588,7 +800,14 @@ namespace JoeBrowser
             else if (IsLinux(fp.Os)) { platToken2 = "X11; Linux x86_64"; navPlatform = "Linux x86_64"; }
             else if (IsAndroid(fp.Os))
             {
-                platToken2 = device == "tablet" ? "Linux; Android 14; SM-X710" : "Linux; Android 14; SM-S918B";
+                /* Android Chrome puts the real model and OS build in the UA, so both come from the
+                   viewport the profile advertises. A viewport no handset uses gets the unified
+                   "Android 10; K" string Chrome actually still ships, rather than a flagship model
+                   attached to a screen that model never had. */
+                string[] dev = DeviceIdentity(fp);
+                if (dev.Length > 1 && dev[1].Length > 0 && dev[0].Length > 0)
+                    platToken2 = "Linux; Android " + dev[1] + "; " + dev[0];
+                else platToken2 = "Linux; Android 10; K";
                 navPlatform = "Linux armv8l";
             }
             else { platToken2 = "Windows NT 10.0; Win64; x64"; navPlatform = "Win32"; }
@@ -609,17 +828,40 @@ namespace JoeBrowser
         /// </summary>
         public static string FullChromiumVersion(BrowserInfo browser, int major)
         {
+            if (major <= 0) major = 131;
             string v = browser != null ? browser.Version : null;
             if (!string.IsNullOrEmpty(v))
             {
-                string[] parts = v.Split('.');
-                if (parts.Length == 4)
+                string[] parts = v.Trim().Split('.');
+                int head;
+                if (parts.Length == 4 && int.TryParse(parts[0], out head) && head > 0)
                 {
-                    int head;
-                    if (int.TryParse(parts[0], out head) && head > 0) return v;
+                    int buildNo, patchNo;
+                    int.TryParse(parts[2], out buildNo);
+                    int.TryParse(parts[3], out patchNo);
+                    // Continuous Chromium builds can report "159.0.0.0"; real Chromium never
+                    // ships an all-zero build and patch, so synthesise the missing parts.
+                    if (buildNo > 0 && patchNo > 0) return v.Trim();
+                    major = head;
                 }
+                else if (parts.Length == 3 && int.TryParse(parts[0], out head) && head > 0)
+                    return v.Trim() + "." + (40 + StableHash(v) % 160);
             }
-            return major + ".0.0.0";
+            // A real Chromium build is always four numeric parts with non-zero build and patch.
+            // "131.0.0.0" never appears in the wild and is an instant mismatch against client hints.
+            int build = 6000 + StableHash("b" + major) % 1300;
+            int patch = 40 + StableHash("p" + major) % 190;
+            return major + ".0." + build + "." + patch;
+        }
+
+        private static int StableHash(string value)
+        {
+            unchecked
+            {
+                int h = unchecked((int)2166136261u);
+                for (int i = 0; i < value.Length; i++) h = (h ^ value[i]) * 16777619;
+                return h & 0x7fffffff;
+            }
         }
 
         private static void ApplyPlatformFromUa(FingerprintConfig fp)
