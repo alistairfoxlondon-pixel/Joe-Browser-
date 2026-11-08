@@ -416,3 +416,53 @@ is clipped, state that lies, and gestures that silently do nothing.
 * Still requires a Windows run: the keyboard walk (Tab through every page, arrows in the
   tools grid, F4/Space in a select), hovering a toast for 10s, and the wheel over a card
   grid and over an empty state.
+
+---
+
+# Third pass — the surfaces behind the buttons
+
+The second pass fixed the visible chrome. This pass followed each action to what it actually
+does, because the worst UX defect is a screen that confidently states something false.
+
+## Truthfulness
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The Browsers page offered **Download** for a browser already installed | `BrowserLocator.FindAll` dropped any executable whose version resource could not be read, and `BrowsersPage.Rescan` turned a thrown detection into an empty list | unreadable version keeps the entry; a failed probe marks the engine *unknown* ("Could not check — re-scan") instead of *missing*, and the row's button re-scans |
+| "Not installed" for an engine whose detection never ran | `Installed` collapsed "absent" and "unknown" into one bool | `EngineInfo.Checked` added; the status line and the action both follow it |
+| The Start page accepted `https://` with no host and saved it | validation only prefixed a scheme | the URL is parsed and rejected at the point it was typed, and the field then shows what was stored |
+| A failed download left a progress window that ignored its own X | the cancel token was only wired to the Esc key | closing the window cancels too, and every close on the success path is guarded |
+| Cancelling a download could crash on the second close | `dlg.Close()` on an already-disposed form inside an awaited continuation | `CloseQuietly` |
+| The network check could throw if the probe outlived the window | continuation used the disposed form | disposed/handle guard after the await |
+| Pressing **Close** at the end of setup re-ran the whole install | the Close handler was added on top of the Install handler, which was never removed | one handler, a `_done` flag; and the install now runs off the UI thread so setup never says "not responding" |
+
+## Keyboard and dialog behaviour
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| No dialog could be completed from the keyboard | `JBTextBox` swallows Enter by design, so `AcceptButton` never fired | `ToolDialog` and `SetupForm` submit from Enter in a single-line field; `ConfirmForm` too |
+| A destructive confirmation was armed the instant it appeared | focus/`Select()` sat on the danger button, and KeyPreview let the opening Enter or Space land on it | the safe button takes focus, and Enter on a danger prompt answers Cancel unless the danger button was deliberately focused |
+| Esc on a dialog threw away everything typed | "has text" was treated as "was edited" | the dialog records the values it opened with; Esc reverts the focused field, a second Esc closes |
+| Two copies of the same commit from one gesture | Enter could reach both the command-key pass and KeyPreview; a double-click on Save ran the validator twice | single-submit guard in `ToolDialog` |
+| The setup window ignored the keyboard | plain `Form` with no accept/cancel wiring | `AcceptButton`/`CancelButton` |
+| The install gate could only be dismissed with the mouse | no default button | Enter installs, Esc still leaves |
+| `Shift+F10` did nothing on a profile card | only the Apps key was handled | `MainForm` routes it to the card menu |
+| Focus landed on the wrong field after switching an editor tab, and the caret was set twice on open | hard-coded focus calls in the constructor | one owner: `SwitchTab`/`OnLoad` focus the first field of the page that is actually visible |
+| The scrollbar sat on top of the last 17 px of every field in a scrolling dialog | `AutoScroll` was not accounted for in the row width | width subtracts the visible vertical scrollbar |
+
+## Text and information
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The shortcut reference listed "Right click" and "On-page alert" as keyboard shortcuts, and the "IN THE BROWSER" heading was buried in the middle of the list | the table was one flat list with a heading smuggled into a third column | grouped table with a single folded view shared by the help dialog and the About page, and only real shortcuts in it |
+| The proxy rows had four unlabelled icon buttons and an invisible row-wide action | the tooltip strings existed but were never attached | one shared tooltip that follows the hovered action, plus a row cursor that changes only over a real target |
+| A tool's compact button still rendered as the ghost kind | the kind was never updated when the proxy menu was routed | routed through the same helper |
+
+## Verification of this pass
+
+* Brace/paren/bracket balance clean across `src/*.cs` after every edit.
+* No duplicate private field declarations (script-checked per file).
+* `ConfirmForm`/`ToolDialog`/`SetupForm`/`InstallGate` `ProcessCmdKey` paths re-read against
+  their own Close/Dispose ordering.
+* Needs a Windows run: cancel a Chromium download mid-way and close the window; install from
+  setup and press Close; open a proxy dropdown and read the tooltips.
