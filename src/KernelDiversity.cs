@@ -26,20 +26,6 @@ namespace JoeBrowser
     /// </summary>
     internal static class KernelDiversity
     {
-        /// <summary>Human label for a pinned build, or the installed-browser sentinel.</summary>
-        public static string Label(Profile p)
-        {
-            if (p == null) return "";
-            return Label(p.KernelEngine, p.KernelVersion);
-        }
-
-        public static string Label(string engine, string version)
-        {
-            if (string.IsNullOrEmpty(engine) || string.IsNullOrEmpty(version)) return "Installed browser";
-            string name = PrettyEngine(engine);
-            return name + " " + version;
-        }
-
         public static string PrettyEngine(string engine)
         {
             if (string.IsNullOrEmpty(engine)) return "";
@@ -265,25 +251,6 @@ namespace JoeBrowser
             target.KernelEngine = best.Engine;
             target.KernelVersion = best.Version;
             return true;
-        }
-
-        /// <summary>
-        /// True when every profile in the list sits on the same build, which is the common case
-        /// after an install with a single kernel. Used by the audit to say so once, instead of
-        /// repeating the same finding per profile.
-        /// </summary>
-        public static bool AllSame(IEnumerable<Profile> profiles)
-        {
-            string first = null;
-            bool any = false;
-            foreach (var p in profiles)
-            {
-                if (p == null) continue;
-                string k = Key(p);
-                if (!any) { first = k; any = true; continue; }
-                if (!string.Equals(first, k, StringComparison.OrdinalIgnoreCase)) return false;
-            }
-            return any;
         }
 
         /// <summary>How many distinct builds the workspace is spread across.</summary>

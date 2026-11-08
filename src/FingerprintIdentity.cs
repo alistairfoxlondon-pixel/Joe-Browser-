@@ -396,13 +396,6 @@ namespace JoeBrowser
             return result;
         }
 
-        /// <summary>True when two profiles would be reported as the same machine by a detector.</summary>
-        public static bool TooSimilar(Profile a, Profile b)
-        {
-            var c = Compare(a, b);
-            return c.Relation == Relation.Identical || c.Relation == Relation.Linked;
-        }
-
         /// <summary>
         /// Same answer as <see cref="WorstMatch(Profile, IEnumerable{Profile})"/>, over surface maps
         /// the caller has already built. The uniqueness loop calls this up to twelve times per new
@@ -550,37 +543,6 @@ namespace JoeBrowser
             if (best != null) CopyInto(best, fp);
             clash = bestClash;
             return 12;
-        }
-
-        /// <summary>
-        /// Makes an already stored workspace unique: walks the profiles in creation order and
-        /// re-rolls any profile that collides with one already accepted. Used by the repair action
-        /// and after a bulk import, so the guarantee holds for profiles that predate it.
-        /// Returns the number of profiles that had to be re-rolled.
-        /// </summary>
-        public static int RepairAll(IList<Profile> all, Func<Profile, ProxyConfig> proxyFor)
-        {
-            if (all == null || all.Count == 0) return 0;
-            var accepted = new List<Profile>();
-            int repaired = 0;
-
-            foreach (var p in all)
-            {
-                if (p == null) continue;
-                if (p.Fp == null) p.Fp = new FingerprintConfig();
-
-                Comparison clash;
-                var worst = WorstMatch(p, accepted);
-                if (worst != null && (worst.Relation == Relation.Identical || worst.Relation == Relation.Linked ||
-                                      worst.Relation == Relation.Related))
-                {
-                    ProxyConfig proxy = proxyFor != null ? proxyFor(p) : null;
-                    MakeUnique(p.Fp, p.Fp.Os, proxy, accepted, out clash);
-                    repaired++;
-                }
-                accepted.Add(p);
-            }
-            return repaired;
         }
 
         /// <summary>

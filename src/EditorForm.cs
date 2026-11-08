@@ -1544,6 +1544,9 @@ namespace JoeBrowser
             if (start.Length > 0 && !start.StartsWith("http://") && !start.StartsWith("https://") && !start.StartsWith("about:"))
                 start = "https://" + start;
 
+            /* A clash accepted in the editor is a decision, not an oversight: the user was told
+               what the profile shares and chose to keep it. That is exactly the case the list's
+               header counter exists to make visible afterwards, so nothing is blocked here. */
             string uaText = _ua.Value.Trim();
             if (!_autoUa.Checked && uaText.Length == 0)
             {
