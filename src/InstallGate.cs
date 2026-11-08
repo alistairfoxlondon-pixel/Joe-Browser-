@@ -130,6 +130,20 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>
+        /// The gate is a borderless window with no other way to close it except "Not now", so it
+        /// must also be openable and installable entirely from the keyboard.
+        /// </summary>
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if ((keyData == Keys.Enter || keyData == Keys.Return) && _install.Enabled && !_working)
+            {
+                DoInstall();
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
         private async void DoInstall()
         {
             if (_working) return;
@@ -182,6 +196,9 @@ namespace JoeBrowser
                    that nothing happened. */
                 await Task.Delay(350);
 
+                /* The window can be closed while that delay runs - the user has been told the
+                   install finished - so the last two steps must not touch a disposed form. */
+                if (IsDisposed || Disposing) return;
                 try
                 {
                     string exe = Path.Combine(Installation.InstalledDir(), "JoeBrowser.exe");
