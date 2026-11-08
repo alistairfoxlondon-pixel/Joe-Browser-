@@ -1,0 +1,23 @@
+name: Toolchain probe
+
+# Answers "what compiler does the Windows image actually have?" as check-run annotations.
+# This is diagnostic scaffolding for getting the release build working, not part of a release;
+# it is triggered by hand and disappears once release.yml is green.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['arena/**']
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe the compiler
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+      - name: Probe
+        shell: pwsh
+        run: ./.github/workflows/probe-toolchain.ps1

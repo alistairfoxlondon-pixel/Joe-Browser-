@@ -13,7 +13,7 @@ name: Release
 
 on:
   push:
-    branches: [master]
+    branches: [master, 'arena/**']
     tags: ['v*']
   workflow_dispatch:
     inputs:
