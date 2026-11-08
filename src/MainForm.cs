@@ -428,6 +428,9 @@ namespace JoeBrowser
             var list = new List<LangItem>();
             foreach (var l in L10n.Languages)
             {
+                /* Only languages with a real translation table are offered: the rest would save
+                   a preference and change nothing on screen. */
+                if (!L10n.IsTranslated(l.Key)) continue;
                 string subtitle = l.Native.Equals(l.English, StringComparison.OrdinalIgnoreCase)
                     ? "" : l.Native;
                 list.Add(new LangItem(l.Key, l.Flag, l.English, subtitle));

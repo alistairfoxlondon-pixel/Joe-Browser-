@@ -57,6 +57,19 @@ namespace JoeBrowser
             if (h != null) { try { h(); } catch { } }
         }
 
+        /// <summary>
+        /// True when this language actually has a translation table. The picker used to offer
+        /// three languages (Hindi, Indonesian, Vietnamese) that had no strings at all: choosing
+        /// one closed the picker, saved the preference and left every label in English with no
+        /// explanation. Offering only what is translated is the honest list.
+        /// </summary>
+        public static bool IsTranslated(string key)
+        {
+            // Reading _tables here is fine from any call site: it is initialised by the static
+            // constructor before any public member can run, wherever it is declared.
+            return !string.IsNullOrEmpty(key) && _tables.ContainsKey(key);
+        }
+
         public static bool IsKnown(string key)
         {
             foreach (var l in Languages) if (l.Key == key) return true;
