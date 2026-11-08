@@ -92,6 +92,8 @@ namespace JoeBrowser
         public static Color ButtonBg { get { return P.ButtonBg; } }
         public static Color ButtonBorder { get { return P.ButtonBorder; } }
         public static Color Success { get { return P.Success; } }
+        /// <summary>Amber, the same value the warning toast uses, for "attention, not broken".</summary>
+        public static Color Warn { get { return C(0xF2, 0xA8, 0x1B); } }
         public static Color Danger { get { return P.Danger; } }
 
         /// <summary>Danger filled surfaces put black text on the pale dark-theme red.</summary>

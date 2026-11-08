@@ -2714,6 +2714,9 @@ namespace JoeBrowser
             _cards.Clear();
             _grid.Controls.Clear();
 
+            /* Worked out once per rebuild rather than per card: the ordering that decides which
+               profiles a lapsed plan still covers is a sort of the whole list. */
+            var locked = Entitlements.LockedProfiles(_profiles);
             foreach (var p in _profiles)
             {
                 string id = p.Id;
@@ -2722,6 +2725,7 @@ namespace JoeBrowser
                     Model = p,
                     Running = _sessions.ContainsKey(id),
                     Launching = _launching.Contains(id),
+                    Locked = locked.Contains(id),
                     AccessibleName = p.Name,
                     AccessibleRole = AccessibleRole.PushButton
                 };
@@ -3377,6 +3381,14 @@ namespace JoeBrowser
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
 
+            /* A lapsed plan leaves the profiles on disk but refuses to open the ones it no
+               longer covers. The offer is the upgrade, and the data is still there afterwards. */
+            if (Entitlements.LockedProfiles(_profiles).Contains(id))
+            {
+                OfferUpgrade("This profile is outside the free plan. Renew to open it again.");
+                return;
+            }
+
             BrowserSession existing;
             if (_sessions.TryGetValue(id, out existing))
             {
@@ -3552,6 +3564,7 @@ namespace JoeBrowser
                 {
                     c.Running = _sessions.ContainsKey(id);
                     c.Launching = _launching.Contains(id);
+                    c.Locked = Entitlements.LockedProfiles(_profiles).Contains(id);
                     c.Invalidate();
                 }
                 Invalidate();

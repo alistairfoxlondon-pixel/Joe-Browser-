@@ -16,6 +16,10 @@ namespace JoeBrowser
         public bool Running;
         public bool Launching;
         public bool Picked;
+        /* Set when the plan no longer covers this profile: over the free cap after a paid plan
+           lapsed, or never covered at all. The card says so and the launch is refused with the
+           upgrade offer instead of opening a browser the plan does not allow. */
+        public bool Locked;
 
         public event EventHandler OpenRequested;
         public event EventHandler EditRequested;
@@ -282,8 +286,9 @@ namespace JoeBrowser
 
             float tx = LogoRect.Right + Ui.S(12);
             float nameRight = Width - Ui.S(Pad);
-            string status = Running ? "Running" : Launching ? "Starting…" : "Stopped";
-            Color statusColor = Running ? Theme.Success : Launching ? Theme.Accent : Theme.TextFaint;
+            string status = Running ? "Running" : Launching ? "Starting…" : Locked ? "Plan expired" : "Stopped";
+            Color statusColor = Running ? Theme.Success : Launching ? Theme.Accent :
+                                Locked ? Theme.Warn : Theme.TextFaint;
 
             // The pill is sized from the measured label so the word is never ellipsised.
             float dot = Ui.S(7);
@@ -546,7 +551,8 @@ namespace JoeBrowser
             if (enabled && _openHover) Ui.Fill(g, or, Ui.S(4), Theme.HoverOverlay);
             Ui.Stroke(g, or, Ui.S(4), Theme.ButtonBorder, 1f);
 
-            string openLabel = Launching ? "Starting…" : Running ? "Focus window" : "Open profile";
+            string openLabel = Launching ? "Starting…" : Running ? "Focus window" :
+                               Locked ? "Renew to open" : "Open profile";
             Color openFg = enabled ? Theme.Text : Theme.TextFaint;
             float ic = Ui.S(13);
             float ow = Ui.Measure(g, openLabel, Theme.SmallBold).Width;
@@ -554,7 +560,7 @@ namespace JoeBrowser
             float ox = or.X + (or.Width - content) / 2f;
             if (enabled)
             {
-                Icons.Draw(g, Running ? "window" : "play",
+                Icons.Draw(g, Running ? "window" : Locked ? "lock" : "play",
                     new RectangleF(ox, or.Y + (or.Height - ic) / 2f, ic, ic), openFg);
                 ox += ic + Ui.S(6);
             }

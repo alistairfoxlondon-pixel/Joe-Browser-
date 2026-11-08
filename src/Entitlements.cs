@@ -35,6 +35,29 @@ namespace JoeBrowser
             return left < 0 ? 0 : left;
         }
 
+        /// <summary>
+        /// Which profiles the plan no longer covers. When a paid plan lapses, the profiles beyond
+        /// the free cap stay on disk and keep their data but cannot be opened until the plan is
+        /// renewed; the ones nearest the top of the grid keep working so a lapsed user is never
+        /// locked out of everything they had. Returns the ids, so the caller does not have to
+        /// re-derive the same ordering in two places.
+        /// </summary>
+        public static System.Collections.Generic.HashSet<string> LockedProfiles(
+            System.Collections.Generic.IList<Profile> profiles)
+        {
+            var locked = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+            if (profiles == null) return locked;
+            int keep = ProfileLimit;
+            if (keep == int.MaxValue || profiles.Count <= keep) return locked;
+            /* Lapsed users keep their three most recently used profiles rather than the three
+               that happen to be first in the JSON, because the ones they use are the ones that
+               matter when they renew. */
+            var order = new System.Collections.Generic.List<Profile>(profiles);
+            order.Sort(delegate(Profile a, Profile b) { return b.LastOpened.CompareTo(a.LastOpened); });
+            for (int i = keep; i < order.Count; i++) locked.Add(order[i].Id);
+            return locked;
+        }
+
         /// <summary>How many more browsers may be open at once.</summary>
         public static int ConcurrentSlotsLeft(int running)
         {

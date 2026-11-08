@@ -194,6 +194,11 @@ namespace JoeBrowser
             try { if (File.Exists(file)) File.Delete(file); }
             catch (Exception ex) { Log.Error("Cannot delete profile file", ex); }
 
+            /* A deleted profile takes its recorded pages with it. The idle trimmer expires
+               profiles on its own, so this also has to be the path that cleans up after it. */
+            try { HistoryStore.Forget(p.Id); }
+            catch (Exception ex) { Log.Error("Cannot delete profile history", ex); }
+
             try
             {
                 string dir = Path.Combine(AppPaths.Data, p.Id);
