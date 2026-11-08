@@ -67,6 +67,7 @@ namespace JoeBrowser
         private JBLabel _setBrowserInfo, _setStoragePath;
         private JBTextBox _setBrowserPath, _setStartUrl, _setDefaultGroup;
         private JBButton _setBrowse, _setDetect, _setOpenData, _setDownload, _setClearCache, _setReport;
+        private JBLabel _setKernelInfo;
         private JBLabel _setAccountWho;
         private JBTextBox _setGoogleId;
         private JBTextBox _setGoogleSecret;
@@ -1499,7 +1500,15 @@ namespace JoeBrowser
             Row(engine, "set.row.detected", null, _setBrowserInfo);
             Row(engine, "set.row.path", new[] { Ui.S(520), Ui.S(76), Ui.S(86) }, _setBrowserPath, _setBrowse, _setDetect);
 
+            /* Kernel spread: how many different browser builds this workspace actually runs on.
+               A number that stays at 1 is the honest signal that every profile is on one binary,
+               and it is the one fact a user needs before trusting the fingerprint features. */
+            _setKernelInfo = new JBLabel(LabelRole.Body, "");
+            _setKernelInfo.Wrap = true;
+            _setKernelInfo.TextAlign = ContentAlignment.MiddleLeft;
+
             var workspace = Card("set.workspace");
+            Row(workspace, "set.row.kernels", null, _setKernelInfo);
             Row(workspace, "set.row.start", new[] { Ui.S(560) }, _setStartUrl);
             Row(workspace, "set.row.group", new[] { Ui.S(300) }, _setDefaultGroup);
             Row(workspace, "set.row.lang", new[] { Ui.S(280) }, _setLang);
@@ -2096,6 +2105,11 @@ namespace JoeBrowser
                     sub = _filter.Length > 0
                         ? shown + " of " + _profiles.Count + " profiles"
                         : _profiles.Count + (_profiles.Count == 1 ? " profile" : " profiles");
+                    /* The header is the one place a user always sees. If two profiles share a
+                       signature, saying so here is the difference between a workspace that looks
+                       fine and one that is fine. */
+                    if (_collisionGroups > 0 && _filter.Length == 0)
+                        sub += "  \u00b7  " + _collisionProfiles + " share a fingerprint";
                     break;
                 case 1: title = L10n.T("header.proxies"); sub = L10n.T("sub.proxies"); break;
                 case 2: title = L10n.T("header.extensions"); sub = L10n.T("sub.extensions"); break;
@@ -2239,6 +2253,22 @@ namespace JoeBrowser
             catch { }
         }
 
+        /// <summary>
+        /// The one line that says whether this workspace is spread across builds or sitting on a
+        /// single binary. Recomputed on every visit because installing a kernel changes it.
+        /// </summary>
+        private void RefreshKernelInfo()
+        {
+            if (_setKernelInfo == null) return;
+            int builds = KernelDiversity.Available().Count;
+            int used = KernelDiversity.DistinctCount(_profiles);
+            if (builds <= 1)
+                _setKernelInfo.Text = "1 build installed \u00b7 every profile shares it. Add another kernel on the Browsers page.";
+            else
+                _setKernelInfo.Text = builds + " builds installed \u00b7 " + used +
+                    (used == 1 ? " in use" : " in use") + ". New profiles take a build the workspace has not used.";
+        }
+
         private void LayoutSettings()
         {
             if (_settingsColumn == null || _setCards.Count == 0) return;
@@ -2246,23 +2276,30 @@ namespace JoeBrowser
             // Windows UI pages run edge to edge; a centered column only wasted the viewport.
             int colW = Math.Max(Ui.S(320), hostW - Ui.S(8));
             int headH = Ui.S(44), rowH = Ui.S(54), pad = Ui.S(18), gap = Ui.S(16);
+            /* One row runs to two lines of text - the browser-build summary - and a wrapped label
+               in a 54px row would be clipped by the divider under it. */
+            int tallRowH = Ui.S(68);
 
             _settingsColumn.SetBounds(0, 0, Math.Max(colW, hostW), _settingsColumn.Height);
 
             int y = Ui.S(4);
             foreach (var card in _setCards)
             {
-                int h = headH + card.Rows.Count * rowH + Ui.S(10);
+                int rowsH = 0;
+                foreach (var r in card.Rows) rowsH += RowHeight(r, rowH, tallRowH);
+                int h = headH + rowsH + Ui.S(10);
                 card.Panel.SetBounds(0, y, colW, h);
                 var lbl = card.Panel.Tag as JBLabel;
                 if (lbl != null) lbl.SetBounds(pad, Ui.S(14), colW - pad * 2, Ui.S(18));
 
                 var divs = new float[Math.Max(0, card.Rows.Count - 1)];
+                int rowY = headH;
                 for (int i = 0; i < card.Rows.Count; i++)
                 {
-                    int rowY = headH + i * rowH;
                     if (i > 0) divs[i - 1] = rowY;
-                    LayoutSetRow(card.Rows[i], colW, rowY, rowH, pad);
+                    int rh = RowHeight(card.Rows[i], rowH, tallRowH);
+                    LayoutSetRow(card.Rows[i], colW, rowY, rh, pad);
+                    rowY += rh;
                 }
                 card.Panel.Dividers = divs;
                 card.Panel.Invalidate();
@@ -2272,6 +2309,18 @@ namespace JoeBrowser
             _settingsColumn.Height = y + Ui.S(8);
             _settingsColumn.Width = Math.Max(colW + Ui.S(20), hostW);
             _settingsHost.SyncExtent();
+        }
+
+        /// <summary>Rows that carry a wrapped explanatory value need the extra height.</summary>
+        private int RowHeight(SetRow row, int normal, int tall)
+        {
+            return row.Value != null && Wraps(row.Value) ? tall : normal;
+        }
+
+        private static bool Wraps(Control c)
+        {
+            var l = c as JBLabel;
+            return l != null && !l.AutoEllipsis;
         }
 
         private void LayoutSetRow(SetRow row, int colW, int rowY, int rowH, int pad)
@@ -2402,6 +2451,9 @@ namespace JoeBrowser
             _extensionPage.Visible = page == 2;
             _browsersPage.Visible = page == 3;
             _settingsPage.Visible = page == 4;
+            // Refreshed on arrival, not only on resize: installing a kernel on the Browsers page
+            // changes this line, and a stale count would quietly contradict the page next door.
+            if (page == 4) RefreshKernelInfo();
             _toolsPage.Visible = page == 5;
             _aboutPage.Visible = page == 6;
             _upgradePage.Visible = page == 7;
@@ -2502,6 +2554,8 @@ namespace JoeBrowser
                 _cards[id] = card;
             }
 
+            ApplySignatures();
+
             /* Cards are rebuilt from scratch, so any selection that pointed at a profile which
                no longer exists has to go before the filter walks it. This was the crash: a
                picked profile was deleted, ReloadCards dropped its card, and ApplyFilter then
@@ -2510,6 +2564,51 @@ namespace JoeBrowser
             PrunePicks();
             ApplyFilter();
             Invalidate();
+        }
+
+        /// <summary>
+        /// Puts a fingerprint signature on every card, and marks the ones that collide.
+        ///
+        /// Computed here rather than per card because a signature only means something in
+        /// company: the same ten characters on two cards is the visual proof that two profiles
+        /// are one browser, and a card cannot see its siblings. Hashing twelve surfaces per
+        /// profile is a few microseconds, and this runs only when the list is rebuilt.
+        /// </summary>
+        /// <summary>Collision counters from the last reload, for the header subtitle.</summary>
+        private int _collisionGroups, _collisionProfiles;
+
+        private void ApplySignatures()
+        {
+            _collisionGroups = 0;
+            _collisionProfiles = 0;
+            if (_cards.Count == 0) return;
+            var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+            var sigs = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            foreach (var kv in _cards)
+            {
+                var p = kv.Value.Model;
+                if (p == null || p.Fp == null) continue;
+                string sig = FingerprintIdentity.OverallHash(p);
+                sigs[kv.Key] = sig;
+                int n;
+                seen.TryGetValue(sig, out n);
+                seen[sig] = n + 1;
+            }
+
+            foreach (var kv in _cards)
+            {
+                string sig;
+                if (!sigs.TryGetValue(kv.Key, out sig) || sig.Length == 0) continue;
+                int n;
+                seen.TryGetValue(sig, out n);
+                kv.Value.SetSignature(sig, n > 1
+                    ? "Fingerprint " + sig + " is shared by " + n + " profiles. Run Tools \u203a Account audit to separate them."
+                    : "Fingerprint " + sig + " \u00b7 unique in this workspace");
+                kv.Value.Invalidate();
+            }
+
+            foreach (var kv in seen) if (kv.Value > 1) { _collisionGroups++; _collisionProfiles += kv.Value; }
         }
 
         /// <summary>

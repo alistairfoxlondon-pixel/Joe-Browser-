@@ -230,6 +230,7 @@ set.group.hint=e.g. Clients, Work, Testing
 set.workspace=WORKSPACE
 set.row.detected=Detected browser
 set.row.path=Executable path
+set.row.kernels=Browser builds
 set.row.start=Start page
 set.row.group=Default group
 set.row.lang=Interface language

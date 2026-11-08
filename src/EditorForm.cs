@@ -492,7 +492,12 @@ namespace JoeBrowser
             {
                 if (_suppress) return;
                 _systemTarget = false;
-                FingerprintFactory.Regenerate(_fp, ResolveOs(_os.Value), _proxy);
+                /* Changing the target re-rolls the whole identity, and it has to stay unlike the
+                   rest of the workspace while it does: switching to macOS only to land on another
+                   profile's M2 is the kind of silent collision the workspace audit then reports. */
+                FingerprintIdentity.Comparison clash;
+                FingerprintIdentity.MakeUnique(_fp, ResolveOs(_os.Value), _proxy, Others(), out clash);
+                FingerprintFactory.ApplyProxyLocale(_fp, _proxy);
                 _os.Icon = FingerprintFactory.DeviceIcon(_fp.Os);
                 RefreshFingerprintUi();
                 LayoutAll();
@@ -957,7 +962,14 @@ namespace JoeBrowser
                    existed - the whole identity is re-rolled instead of keeping a Windows screen
                    and GPU under a target the picker now calls "System default". */
                 if (_systemTarget && !string.Equals(_fp.Os, FingerprintFactory.SystemOsName(), StringComparison.OrdinalIgnoreCase))
-                    FingerprintFactory.Regenerate(_fp, FingerprintFactory.SystemOsName(), _proxy);
+                {
+                    /* A repair, not a choice: this only runs when the stored target disagrees
+                       with the picker, so it re-rolls coherently and then re-checks the
+                       workspace like any other roll. */
+                    FingerprintIdentity.Comparison repairClash;
+                    FingerprintIdentity.MakeUnique(_fp, FingerprintFactory.SystemOsName(), _proxy,
+                        Others(), out repairClash);
+                }
                 _os.SelectedIndex = osIdx;
                 _os.Icon = FingerprintFactory.DeviceIcon(_fp.Os);
                 if (!string.Equals(FingerprintFactory.OsList[osIdx], _fp.Os, StringComparison.OrdinalIgnoreCase))

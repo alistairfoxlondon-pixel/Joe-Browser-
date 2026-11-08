@@ -71,6 +71,17 @@ namespace JoeBrowser
             if (owner == null || string.IsNullOrEmpty(text)) return;
             _tip.SetToolTip(owner, text);
         }
+
+        /// <summary>
+        /// Removes a hint. Needed when the same control is reused for a different meaning - a
+        /// profile card that no longer collides must stop claiming it does, and a stale tooltip
+        /// is worse than none because it is the one a user reads while deciding what to delete.
+        /// </summary>
+        public static void Clear(Control owner)
+        {
+            if (owner == null) return;
+            _tip.SetToolTip(owner, string.Empty);
+        }
     }
 
     internal static class Native

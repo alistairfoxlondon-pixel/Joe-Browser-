@@ -43,6 +43,20 @@ namespace JoeBrowser
         private bool _hover, _kebabHover, _openHover, _checkHover;
         private ContextMenuStrip _menu;
 
+        /// <summary>
+        /// Short signature of the whole fingerprint, set by the list once it can compare cards.
+        /// It is computed there, not here, because a card cannot know whether its own signature
+        /// also appears on a sibling - and that is the whole point of showing it.
+        /// </summary>
+        private string _sig = "";
+
+        public void SetSignature(string sig, string tooltip)
+        {
+            _sig = string.IsNullOrEmpty(sig) ? "" : sig;
+            if (!string.IsNullOrEmpty(tooltip)) ToolTips.Attach(this, tooltip);
+            else ToolTips.Clear(this);
+        }
+
         public ProfileCard()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
@@ -331,6 +345,20 @@ namespace JoeBrowser
 
             float afterDevice = DrawChip(g, x, lineA, h, right - x, device, os, screen, Theme.TextDim, null);
             float remaining = right - (afterDevice + Ui.S(8));
+
+            /* Signature chip: two profiles with the same ten characters are a collision the user
+               can see across the grid without opening either profile. Dropped rather than
+               truncated when the card is narrow, because a partial hash proves nothing. */
+            if (_sig.Length > 0)
+            {
+                float need = Ui.S(8) + ChipWidth(g, "fingerprint", _sig, null, null);
+                if (need <= remaining)
+                {
+                    afterDevice = DrawChip(g, afterDevice + Ui.S(8), lineA, h, remaining,
+                        "fingerprint", _sig, null, Theme.TextFaint, null);
+                    remaining = right - (afterDevice + Ui.S(8));
+                }
+            }
 
             // Measure the proxy chip before committing to it, so a tight card wraps instead of clipping.
             float needed = ChipWidth(g, hasProxy ? "route" : "globe", proxyText, null, flag);
