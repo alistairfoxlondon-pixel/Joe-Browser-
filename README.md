@@ -1,12 +1,36 @@
-﻿# Joe Browser 1.2.0
+# Joe Browser 1.2.0
 
 > **Joe Browser** — a free, local-first **anti-detect browser** for Windows.
 > Unlimited multi-profile browser management with per-profile proxies,
 > automatic browser-fingerprint spoofing, kernel pinning, and leak testing.
 > No cloud, no accounts, no telemetry — everything runs on your own PC.
 
-A local-first anti-detect browser workspace for Windows, built by **Joe Goldberg**
-(Telegram: [@joegoldberg2025](https://t.me/joegoldberg2025)).
+## ⬇️ Download Joe Browser (EXE, Windows)
+
+**No build, no cloning, no coding needed.** Download the ready-to-run EXE file
+and start using Joe Browser right away:
+
+| Download | Use |
+|---|---|
+| **[⬇ Download JoeBrowserSetup.exe](../../releases/latest/download/JoeBrowserSetup.exe)** (recommended) | Full installer — installs Joe Browser on your PC |
+| **[⬇ Download JoeBrowser.exe](../../releases/latest/download/JoeBrowser.exe)** | Portable — run it directly, no installation |
+
+Requirements: Windows 10/11 · 64-bit · any installed Chromium-based browser or
+Firefox (the Browsers page can install Chrome, Brave, Edge, Chromium for you).
+
+> To get the latest version at any time, go to the
+> [Releases page](../../releases) and download `JoeBrowserSetup.exe`.
+
+## 🚫 No copying, no forking, no clones
+
+Joe Browser is **proprietary software, all rights reserved**. You may use the
+downloaded EXE freely, but you may **not** copy, fork, redistribute, rebrand,
+or use this source code to build your own anti-detect browser. See
+[LICENSE](LICENSE). Anyone who finds a clone of Joe Browser — it is not
+official, the only official distribution is this repository.
+
+A local-first anti-detect browser workspace for Windows, built by
+**Joe Goldberg** (Telegram: [@joegoldberg2025](https://t.me/joegoldberg2025)).
 
 Unlimited profiles, one-click browsing, per-profile proxies, coherent
 auto-generated fingerprints, and an original built-in extension system.
@@ -73,7 +97,7 @@ Everything runs and stays on your own PC.
   no telemetry and no server.
 - **$1 a month, paid in crypto** — no card, no account, no checkout in the middle.
   The app reads the chain itself (see below).
-- **Free and open source** — MIT license. The free plan is a real product, not a trial.
+- **Free to download and use** — grab the EXE from the Releases page. The free plan is a real product, not a trial.
 
 ## Built-in extensions (written by Joe Browser)
 
@@ -331,16 +355,21 @@ outside the browser sandbox may still see the real machine. For the great
 majority of sites it behaves like a distinct device, especially with a matching
 proxy. No anti-detect tool can guarantee a specific detection outcome.
 
-## License
 
-MIT — see [LICENSE](LICENSE). Use responsibly and comply with the law and with
-websites' terms of service.
+## License & Copyright
+
+Joe Browser is proprietary software - **all rights reserved** by Joe Goldberg.
+You may download and use the EXE freely on your own computers, but copying,
+forking, redistributing or creating derivative/competing products from this
+source code is **not permitted**. See [LICENSE](LICENSE). Use responsibly and
+comply with the law and with websites' terms of service.
 
 ## Keywords
 
-Joe Browser, anti-detect browser, multi-profile browser, browser fingerprint spoofing,
-antidetect, fingerprint switcher, browser isolation, per-profile proxy, SOCKS5 proxy
-browser, MMO account manager, adsense/ad account farm browser, Chrome profile manager,
-Chromium portable, kernel pinning, WebRTC leak guard, cookie per profile, Windows
-anti-detect browser, free antidetect, AdsPower alternative, GoLogin alternative,
-Multilogin alternative, Dolphin anty alternative.
+Joe Browser download, download Joe Browser exe, Joe Browser free download,
+anti-detect browser Windows, antidetect browser free, multi-profile browser,
+browser fingerprint spoofing, fingerprint switcher, per-profile proxy,
+SOCKS5 proxy browser, cookie per profile, Chrome profile manager, Chromium
+portable, kernel pinning, WebRTC leak guard, account farming browser,
+AdsPower alternative, GoLogin alternative, Multilogin alternative,
+Dolphin Anty alternative, JoeBrowser.exe, JoeBrowserSetup.exe.
