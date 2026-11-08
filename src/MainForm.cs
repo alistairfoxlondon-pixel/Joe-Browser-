@@ -1205,7 +1205,7 @@ namespace JoeBrowser
                carries its country into the new fingerprint instead of generating a mismatch the
                user has to notice and fix by hand. */
             var p = SeedNewProfile("Profile " + (_profiles.Count + 1).ToString("00"), ProxyVault.Copy(e.Config));
-            using (var dlg = new EditorForm(p, true, _settings, 0, _profiles))
+            using (var dlg = new EditorForm(p, true, _settings, 0, new List<Profile>(_profiles)))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 _store.Save(dlg.Result);
@@ -2741,7 +2741,7 @@ namespace JoeBrowser
                so the chips the user sees are the truth: rolling here and de-duplicating on save
                would show one fingerprint and store another. */
             var p = SeedNewProfile(null, null);
-            using (var dlg = new EditorForm(p, true, _settings, 0, _profiles))
+            using (var dlg = new EditorForm(p, true, _settings, 0, new List<Profile>(_profiles)))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 _store.Save(dlg.Result);
