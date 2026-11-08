@@ -286,6 +286,58 @@ namespace JoeBrowser
             return n;
         }
 
+        /// <summary>
+        /// Round-trips the store against a throwaway profile. Called by --selftest in the release
+        /// build: history is the one part of this app whose failure is completely silent, so
+        /// "it compiles" is not evidence that it works and the build says so explicitly.
+        /// </summary>
+        public static string SelfTest()
+        {
+            const string id = "__selftest__";
+            var problems = new StringBuilder();
+            bool wasEnabled = ForceEnabled;
+            try
+            {
+                DeleteFileFor(id);
+                ForceEnabled = true;
+                Add(id, "self test", "https://example.com/start", "", false);
+                Add(id, "self test", "https://example.com/through?hop=1", "", true);
+                Add(id, "self test", "https://example.com/end", "", false);
+                SetLastTitle(id, "End page");
+
+                var rows = Read(id);
+                if (rows.Count != 3) problems.Append(" count=" + rows.Count);
+                else
+                {
+                    if (rows[0].Url != "https://example.com/end") problems.Append(" newest=" + rows[0].Url);
+                    if (rows[0].Title != "End page") problems.Append(" title=" + rows[0].Title);
+                    if (!rows[1].Hop) problems.Append(" hop flag lost");
+                    if (rows[2].Url != "https://example.com/start") problems.Append(" oldest=" + rows[2].Url);
+                }
+
+                if (Interesting("chrome://settings")) problems.Append(" a browser page was recorded");
+                if (!Interesting("https://example.com/keep")) problems.Append(" a real url was rejected");
+
+                if (ClearAll() < 1) problems.Append(" clear all removed nothing");
+                if (Read(id).Count != 0) problems.Append(" rows survived clear");
+            }
+            catch (Exception ex) { problems.Append(" " + ex.GetType().Name + ": " + ex.Message); }
+            finally
+            {
+                ForceEnabled = wasEnabled;
+                try { DeleteFileFor(id); } catch { }
+            }
+            return problems.ToString();
+        }
+
+        /// <summary>Lets the self test record while the user's own switch may be off.</summary>
+        private static bool ForceEnabled;
+
+        private static void DeleteFileFor(string profileId)
+        {
+            try { string f = FileFor(profileId); if (File.Exists(f)) File.Delete(f); } catch { }
+        }
+
         /// <summary>Removes a profile's history when the profile itself is deleted for good.</summary>
         public static void Forget(string profileId)
         {

@@ -107,7 +107,17 @@ namespace JoeBrowser
                     foreach (var p in profiles)
                     {
                         if (p.Fp == null) { sb.Append(" [a profile has no fingerprint]"); continue; }
-                        if (string.IsNullOrEmpty(p.UserAgent)) sb.Append(" [a profile has no user agent]");
+                        /* The UA is resolved against an installed browser at launch, so it is
+                           empty until then; what has to be there from the start is the machine
+                           the profile claims to be, which is what the site reads. */
+                        FingerprintFactory.ResolveUserAgent(p.Fp, new BrowserInfo
+                        {
+                            Name = "self test",
+                            Version = "131.0.0.0",
+                            MajorVersion = 131,
+                            Path = System.IO.Path.Combine(sandbox, "chrome.exe")
+                        });
+                        if (string.IsNullOrEmpty(p.Fp.UserAgent)) sb.Append(" [a profile has no user agent]");
                         string sig = FingerprintIdentity.OverallHash(p);
                         int n;
                         bySignature.TryGetValue(sig, out n);
