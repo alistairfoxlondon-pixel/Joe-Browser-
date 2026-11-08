@@ -77,9 +77,19 @@ namespace JoeBrowser
             return p != null && !string.IsNullOrEmpty(p.KernelEngine) && !string.IsNullOrEmpty(p.KernelVersion);
         }
 
+        /* A batch of 100 profiles asks for the inventory 100 times, and each ask walks the
+           kernels folder and reads file versions off disk. Cached for the duration of a burst;
+           every mutation path (install, delete) calls Invalidate() so the cache cannot go stale
+           behind the user's back. */
+        private static List<KernelInstall> _cache;
+
+        /// <summary>Drops the cached inventory. Call after installing or removing a build.</summary>
+        public static void Invalidate() { _cache = null; }
+
         /// <summary>Every build this machine can actually launch, newest first within an engine.</summary>
         public static List<KernelInstall> Available()
         {
+            if (_cache != null) return _cache;
             var list = new List<KernelInstall>();
             try
             {
@@ -100,6 +110,7 @@ namespace JoeBrowser
                 }
             }
             catch (Exception ex) { Log.Error("Kernel inventory failed", ex); }
+            _cache = list;
             return list;
         }
 
@@ -141,14 +152,12 @@ namespace JoeBrowser
 
             // Builds already in use, and how often, so the least-used one wins outright.
             var usage = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            var existingKeys = new List<string>();
             if (existing != null)
             {
                 foreach (var p in existing)
                 {
                     if (p == null) continue;
                     string k = Key(p);
-                    existingKeys.Add(k);
                     if (k.Length == 0) continue;
                     int n;
                     usage.TryGetValue(k, out n);
@@ -174,8 +183,9 @@ namespace JoeBrowser
 
             /* Only pin when pinning buys something. A single installed build shared by every
                profile is not diversity, and pinning it would make the profile break the day that
-               build is deleted, so the sentinel stays. */
-            bool addsDiversity = available.Count > 1 || bestUse == 0;
+               build is deleted, so the sentinel stays. The test is on how many builds exist, not
+               on whether this one is unused: one build nobody has picked yet is still one build. */
+            bool addsDiversity = available.Count > 1;
             if (!addsDiversity)
             {
                 reason = "Only one browser build is installed, so this profile uses it. " +
@@ -202,6 +212,9 @@ namespace JoeBrowser
             if (target == null) return false;
             string avoid = Key(source);
 
+            /* The copy starts from the source, so a source on the sentinel is already "the
+               installed browser" - there is nothing to separate it from unless the copy can be
+               pinned to a real build. */
             var available = Available();
             if (available.Count == 0)
             {
@@ -237,13 +250,15 @@ namespace JoeBrowser
 
             if (best == null)
             {
-                /* Every installed build is the source's build. Pinning a different one is
-                   impossible, so the sentinel is the honest answer; the fingerprint still
-                   changed, which is what keeps the pair apart as far as it can be. */
+                /* Every installed build is the source's build - there is one, and it is taken.
+                   Copying the source's pin would leave a copy that is identical down to the
+                   binary, so the sentinel (whatever is installed) is the honest answer: it is
+                   also what a fresh profile gets, and the fingerprint still changed, which is
+                   what keeps the pair apart as far as it can be. */
                 target.KernelEngine = "";
                 target.KernelVersion = "";
-                reason = "This is the only installed browser build, so the copy uses it too. " +
-                         "Install another kernel to give the copy its own build.";
+                reason = "Only the source profile's browser build is installed, so the copy uses " +
+                         "the installed browser. Install another kernel to give the copy its own.";
                 return false;
             }
 
