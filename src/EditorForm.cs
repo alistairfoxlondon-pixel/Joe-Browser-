@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace JoeBrowser
@@ -14,6 +15,10 @@ namespace JoeBrowser
         private readonly ProxyConfig _proxy;
         private readonly ToolConfig _tools;
         private readonly bool _isNew;
+        /// <summary>Profiles already in the workspace, so a new one can be proven distinct
+        /// from all of them rather than merely random. Null in an edit, where the point is to
+        /// keep the identity the user already has.</summary>
+        private readonly List<Profile> _siblings;
         private readonly int _initialTab;
         private bool _systemTarget;
         private readonly AppSettings _settings;
@@ -34,6 +39,7 @@ namespace JoeBrowser
         private JBTextBox _group, _tags, _status, _customExt;
         private JBSelect _screen, _tz, _gpu, _os, _cores, _ram, _browserKind, _webrtcSel, _geoSel, _savedProxy;
         private JBSelect _kernel, _osVer, _fontSet;
+        private JBLabel _kernelHint;
         private JBButton _kernelManage;
         private JBToggle _hwNoise;
         private List<string> _kernelKeys = new List<string>();
@@ -61,8 +67,15 @@ namespace JoeBrowser
         private JBLabel _lblExt, _lblSpeed, _lblInterval, _lblCustomExt, _lblExtHint;
 
         public EditorForm(Profile profile, bool isNew, AppSettings settings, int initialTab = 0)
+            : this(profile, isNew, settings, initialTab, null) { }
+
+        /// <param name="siblings">Profiles already stored. A new profile is re-rolled against
+        /// them, so what the editor shows is already known to be unlike the rest of the
+        /// workspace; an edit passes null and keeps its identity.</param>
+        public EditorForm(Profile profile, bool isNew, AppSettings settings, int initialTab, List<Profile> siblings)
         {
             _isNew = isNew;
+            _siblings = siblings;
             _systemTarget = isNew;
             _settings = settings;
             _profile = profile.Copy(false);
@@ -92,8 +105,9 @@ namespace JoeBrowser
             Build();
             ApplyScale();
             SwitchTab(_initialTab);
-            if (_initialTab == 0) { _name.Box.Select(); _name.Box.Focus(); }
-            else if (_initialTab == 3) { _host.Box.Select(); _host.Box.Focus(); }
+            /* SwitchTab already focuses the first field of the page it shows; focusing a
+               hard-coded field here would override that for the proxy tab, whose first field is
+               not the host box. */
         }
 
         private void ApplyScale()
@@ -110,6 +124,11 @@ namespace JoeBrowser
             base.OnLoad(e);
             CenterToScreen();
             LayoutAll();
+            /* The caret belongs in the first field of the page that is actually showing, and
+               only once the form is on screen - focusing during construction is lost when the
+               window is activated. */
+            Control first = FirstField(_tabs == null ? 0 : _tabs.SelectedIndex);
+            if (first != null) { try { first.Focus(); } catch { } }
             DetectLocaleAsync();
         }
 
@@ -117,7 +136,7 @@ namespace JoeBrowser
         /// Without a proxy the connection this machine already uses sets the clock and the language,
         /// so a fresh profile matches the public IP the sites will see.
         /// </summary>
-        private async void DetectLocaleAsync()
+        private async System.Threading.Tasks.Task DetectLocaleAsyncCore()
         {
             if (_proxy != null && _proxy.Enabled) return;
             if (!_fp.AutoMatchProxy) return;
@@ -135,6 +154,9 @@ namespace JoeBrowser
             }
             catch (Exception ex) { Log.Error("Location lookup failed", ex); }
         }
+
+        /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>
+        private void DetectLocaleAsync() { Guarded.Run("DetectLocaleAsync", this, delegate { return DetectLocaleAsyncCore(); }); }
 
         private void ApplyDetectedLocale()
         {
@@ -286,17 +308,50 @@ namespace JoeBrowser
             _lblKernel = Lbl(_tabGeneral, "ENGINE BUILD");
             _kernel = Pick(_tabGeneral, "layers");
             BuildKernelOptions();
-            _kernel.SelectedIndexChanged += delegate { if (_suppress) return; };
+            _kernel.SelectedIndexChanged += delegate
+            {
+                if (_suppress) return;
+                int i = _kernel.SelectedIndex;
+                string key = i >= 0 && i < _kernelKeys.Count ? _kernelKeys[i] : "";
+                /* Say out loud what the choice does. "Installed browser" and a pinned build look
+                   like two equal options in a dropdown, but one tracks the user's Chrome and the
+                   other freezes an exact version - a difference that only shows up months later. */
+                if (key.Length == 0)
+                {
+                    _kernelHint.Text = _kernelKeys.Count <= 1
+                        ? "Uses whatever browser is installed. Install another kernel to give each profile its own build."
+                        : "Uses whatever browser is installed, and follows its updates.";
+                }
+                else
+                {
+                    int bar = key.IndexOf('|');
+                    string engine = bar > 0 ? key.Substring(0, bar) : key;
+                    string ver = bar > 0 ? key.Substring(bar + 1) : "";
+                    _kernelHint.Text = "Pinned to " + KernelDiversity.PrettyEngine(engine) + " " + ver +
+                        ". This profile keeps that build even after the installed browser updates.";
+                }
+                LayoutAll();
+            };
             _kernelManage = new JBButton { Kind = BtnKind.Soft, Icon = "download", Text = "Kernels" };
             _kernelManage.Click += delegate
             {
                 using (var dlg = new KernelForm()) dlg.ShowDialog(this);
+                /* Installing a build inside that window changes the choice this dropdown offers,
+                   so the inventory is re-read and the list rebuilt - otherwise the build the user
+                   just downloaded is only visible after restarting the app. */
+                KernelDiversity.Invalidate();
                 _suppress = true;
                 BuildKernelOptions();
                 _suppress = false;
                 LayoutAll();
             };
             _tabGeneral.Controls.Add(_kernelManage);
+            _kernelHint = new JBLabel(LabelRole.Faint, "");
+            _kernelHint.TextAlign = ContentAlignment.MiddleLeft;
+            // Wrapped, not ellipsised: this is the only place that explains what pinning a build
+            // costs, so a truncated sentence would be worse than no sentence.
+            _kernelHint.Wrap = true;
+            _tabGeneral.Controls.Add(_kernelHint);
 
             _name.EnterPressed += OnEnterKey;
             _startUrl.EnterPressed += OnEnterKey;
@@ -357,6 +412,15 @@ namespace JoeBrowser
             _suppress = true;
             _kernel.SetItems(labels, sel);
             _suppress = false;
+
+            if (_kernelHint != null)
+            {
+                _kernelHint.Text = sel == 0
+                    ? (_kernelKeys.Count <= 1
+                        ? "Uses whatever browser is installed. Install another kernel to give each profile its own build."
+                        : "Uses whatever browser is installed, and follows its updates.")
+                    : "Pinned to " + labels[sel] + ". This profile keeps that build even after the installed browser updates.";
+            }
         }
 
         private void BrowseBrowser()        {
@@ -385,7 +449,7 @@ namespace JoeBrowser
             _browserNote.Text = BrowserFetcher.Label(key) + " is not installed on this PC";
         }
 
-        private async void FetchBrowser()
+        private async System.Threading.Tasks.Task FetchBrowserCore()
         {
             string key = CurrentKindKey();
             if (!BrowserFetcher.Supports(key) || BrowserFetcher.IsInstalled(key)) return;
@@ -412,6 +476,9 @@ namespace JoeBrowser
             LayoutAll();
         }
 
+        /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>
+        private void FetchBrowser() { Guarded.Run("FetchBrowser", this, delegate { return FetchBrowserCore(); }); }
+
         private static string ShortLine(Exception ex)
         {
             string m = ex.Message ?? "The download failed.";
@@ -429,7 +496,12 @@ namespace JoeBrowser
             {
                 if (_suppress) return;
                 _systemTarget = false;
-                FingerprintFactory.Regenerate(_fp, ResolveOs(_os.Value), _proxy);
+                /* Changing the target re-rolls the whole identity, and it has to stay unlike the
+                   rest of the workspace while it does: switching to macOS only to land on another
+                   profile's M2 is the kind of silent collision the workspace audit then reports. */
+                FingerprintIdentity.Comparison clash;
+                FingerprintIdentity.MakeUnique(_fp, ResolveOs(_os.Value), _proxy, Others(), out clash);
+                FingerprintFactory.ApplyProxyLocale(_fp, _proxy);
                 _os.Icon = FingerprintFactory.DeviceIcon(_fp.Os);
                 RefreshFingerprintUi();
                 LayoutAll();
@@ -506,7 +578,12 @@ namespace JoeBrowser
             _regen.Click += delegate
             {
                 bool manualUa = !_autoUa.Checked;
-                FingerprintFactory.Regenerate(_fp, ResolveOs(_os.Value), _proxy);
+                /* Re-rolled against the workspace, not just re-rolled: the point of the button is
+                   a fingerprint nobody else has, and a plain Regenerate would happily land on
+                   another profile's renderer. */
+                FingerprintIdentity.Comparison clash;
+                FingerprintIdentity.MakeUnique(_fp, ResolveOs(_os.Value), _proxy, Others(), out clash);
+                ClashNote(clash);
                 _fp.AutoUserAgent = !manualUa;
                 RefreshFingerprintUi();
                 _ua.Value = _fp.UserAgentOverride;
@@ -522,7 +599,9 @@ namespace JoeBrowser
                 string[] pool = { "Windows 11", "Windows 10", "macOS", "Linux", "Android", "iPhone", "iPad" };
                 string os = pool[new Random(Guid.NewGuid().GetHashCode()).Next(pool.Length)];
                 _systemTarget = false;
-                FingerprintFactory.Regenerate(_fp, os, _proxy);
+                FingerprintIdentity.Comparison clash;
+                FingerprintIdentity.MakeUnique(_fp, os, _proxy, Others(), out clash);
+                ClashNote(clash);
                 FingerprintFactory.ApplyProxyLocale(_fp, _proxy);
                 RefreshFingerprintUi();
                 _ua.Value = "";
@@ -534,6 +613,35 @@ namespace JoeBrowser
             _fpWarn = new JBLabel(LabelRole.Faint, "");
             _fpWarn.TextAlign = ContentAlignment.MiddleLeft;
             _tabFp.Controls.Add(_fpWarn);
+        }
+
+        /// <summary>
+        /// Every other profile in the workspace. A new profile must differ from all of them; an
+        /// edit must differ from all but itself, and _profile carries the identity being edited,
+        /// so WorstMatch skips it by id.
+        /// </summary>
+        private List<Profile> Others()
+        {
+            if (_siblings != null) return _siblings;
+            var self = new List<Profile>();
+            if (!_isNew && _profile != null) self.Add(_profile);
+            return self;
+        }
+
+        /// <summary>
+        /// Tells the truth after a re-roll. A clean roll clears the note; a roll that could not
+        /// escape a shared strong surface says which one, because "unique" is a claim the app
+        /// should only make when it is true.
+        /// </summary>
+        private void ClashNote(FingerprintIdentity.Comparison clash)
+        {
+            if (clash == null || clash.Relation == FingerprintIdentity.Relation.Distinct ||
+                clash.Relation == FingerprintIdentity.Relation.Remote)
+            {
+                SetError("");
+                return;
+            }
+            SetError(clash.Summary + " with another profile.");
         }
 
         /// <summary>
@@ -858,7 +966,14 @@ namespace JoeBrowser
                    existed - the whole identity is re-rolled instead of keeping a Windows screen
                    and GPU under a target the picker now calls "System default". */
                 if (_systemTarget && !string.Equals(_fp.Os, FingerprintFactory.SystemOsName(), StringComparison.OrdinalIgnoreCase))
-                    FingerprintFactory.Regenerate(_fp, FingerprintFactory.SystemOsName(), _proxy);
+                {
+                    /* A repair, not a choice: this only runs when the stored target disagrees
+                       with the picker, so it re-rolls coherently and then re-checks the
+                       workspace like any other roll. */
+                    FingerprintIdentity.Comparison repairClash;
+                    FingerprintIdentity.MakeUnique(_fp, FingerprintFactory.SystemOsName(), _proxy,
+                        Others(), out repairClash);
+                }
                 _os.SelectedIndex = osIdx;
                 _os.Icon = FingerprintFactory.DeviceIcon(_fp.Os);
                 if (!string.Equals(FingerprintFactory.OsList[osIdx], _fp.Os, StringComparison.OrdinalIgnoreCase))
@@ -1008,8 +1123,30 @@ namespace JoeBrowser
                previous tab's pixels for one frame. Force a full repaint of its children. */
             JBScrollHost[] hosts = { _hostGeneral, _hostFp, _hostPriv, _hostProxy, _hostTools };
             foreach (JBScrollHost h in hosts) h.Invalidate(true);
-            if (index == 0) _name.Box.Select();
+            /* Focus follows the tab. Without this the first control of the newly shown page is
+               never focused, so Tab after switching a tab started from the old page and the
+               keyboard user was dropped back where they came from. */
+            /* Only once the form is on screen: focusing a control during construction is
+               discarded when the window is activated, and would fight OnLoad's choice. */
+            Control first = IsHandleCreated && Visible ? FirstField(index) : null;
+            if (first != null) { try { first.Focus(); } catch { } }
             Invalidate();
+        }
+
+        /// <summary>The first real field of a tab, in the order it appears on screen.</summary>
+        private Control FirstField(int index)
+        {
+            switch (index)
+            {
+                case 0: return _name == null ? null : _name.Box;
+                /* Fingerprint, privacy, proxy and tools all open with a picker, which is a
+                   real tab stop in every one of those pages. */
+                case 1: return _os;
+                case 2: return _webrtcSel;
+                case 3: return _savedProxy;
+                case 4: return _toolSpeed;
+                default: return null;
+            }
         }
 
         private void SetError(string text)
@@ -1062,7 +1199,9 @@ namespace JoeBrowser
             int cancelW = _cancel.PreferredWidth(Ui.S(88));
             _save.SetBounds(w - pad - saveW, h - Ui.S(16) - saveH, saveW, saveH);
             _cancel.SetBounds(_save.Left - Ui.S(8) - cancelW, h - Ui.S(16) - saveH, cancelW, saveH);
-            int errW = Math.Max(Ui.S(80), _cancel.Left - pad * 2 - Ui.S(24));
+            /* The label starts at pad+22 (right of the alert glyph), so its width has to be
+               measured from that x or the last characters sit under the Cancel button. */
+            int errW = Math.Max(Ui.S(120), _cancel.Left - Ui.S(8) - (pad + Ui.S(22)) - Ui.S(4));
             _err.SetBounds(pad + Ui.S(22), h - Ui.S(16) - saveH, errW, saveH);
             _footerY = h - Ui.S(64);
         }
@@ -1108,7 +1247,15 @@ namespace JoeBrowser
             _lblKernel.SetBounds(0, y, cw - manageW - Ui.S(8), lh); y += lh + lg;
             _kernel.SetBounds(0, y, cw - manageW - Ui.S(8), fh);
             _kernelManage.SetBounds(cw - manageW, y, manageW, fh);
-            y += fh + rg;
+            y += fh + Ui.S(4);
+            if (_kernelHint != null)
+            {
+                // Two lines of help at most: the text is a sentence, and a taller box would push
+                // the rest of the page down for a note most profiles never need to read twice.
+                _kernelHint.SetBounds(0, y, cw, Ui.S(34));
+                y += Ui.S(34) + Ui.S(6);
+            }
+            y += rg - Ui.S(6);
 
             if (_getBrowser != null && _getBrowser.Visible)
             {
@@ -1288,7 +1435,7 @@ namespace JoeBrowser
 
         // ---------------------------------------------------------------- proxy test
 
-        private async void TestProxy()
+        private async System.Threading.Tasks.Task TestProxyCore()
         {
             var cfg = new ProxyConfig
             {
@@ -1332,6 +1479,9 @@ namespace JoeBrowser
                 _testBtn.Enabled = true;
             }
         }
+
+        /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>
+        private void TestProxy() { Guarded.Run("TestProxy", this, delegate { return TestProxyCore(); }); }
 
         private void SetProxyResult(int state, string text)
         {
@@ -1379,13 +1529,28 @@ namespace JoeBrowser
             if (type != "none")
             {
                 if (host.Length == 0) { Fail(3, "Proxy host is required."); return; }
-                if (port == 0) { Fail(3, "Proxy port must be between 1 and 65535."); return; }
+                if (port == 0)
+                {
+                    /* Name the value that was typed. "Must be between 1 and 65535" told a user
+                       who entered "4758q" nothing about why it was rejected, and the field is
+                       numeric-looking enough that the typo is easy to miss. */
+                    string typed = (_port.Value ?? "").Trim();
+                    Fail(3, typed.Length == 0
+                        ? "Proxy port is required."
+                        : "\"" + typed + "\" is not a valid port. Use a number from 1 to 65535.");
+                    _port.Box.Focus();
+                    _port.Box.SelectAll();
+                    return;
+                }
             }
 
             string start = _startUrl.Value.Trim();
             if (start.Length > 0 && !start.StartsWith("http://") && !start.StartsWith("https://") && !start.StartsWith("about:"))
                 start = "https://" + start;
 
+            /* A clash accepted in the editor is a decision, not an oversight: the user was told
+               what the profile shares and chose to keep it. That is exactly the case the list's
+               header counter exists to make visible afterwards, so nothing is blocked here. */
             string uaText = _ua.Value.Trim();
             if (!_autoUa.Checked && uaText.Length == 0)
             {
@@ -1479,6 +1644,8 @@ namespace JoeBrowser
             Close();
         }
 
+        private DateTime? _escGuard;
+
         private void Fail(int tab, string message)
         {
             SetError(message);
@@ -1509,8 +1676,19 @@ namespace JoeBrowser
         {
             if (keyData == Keys.Escape)
             {
-                DialogResult = DialogResult.Cancel;
-                Close();
+                /* Esc used to close the editor outright. Five tabs of edits — name, notes,
+                   fingerprint, proxy credentials, tools — were discarded silently, and Esc is
+                   also the natural "undo the value I am typing" key, so this was hit by
+                   accident more often than on purpose. One Esc now asks; a second Esc (or the
+                   Discard button) closes. */
+                if (_escGuard != null && (DateTime.UtcNow - _escGuard.Value).TotalSeconds < 4)
+                {
+                    DialogResult = DialogResult.Cancel;
+                    Close();
+                    return true;
+                }
+                _escGuard = DateTime.UtcNow;
+                SetError("Press Esc again to discard your changes.");
                 return true;
             }
             if (keyData == (Keys.Control | Keys.S))
@@ -1574,12 +1752,69 @@ namespace JoeBrowser
                 return f.ShowDialog(owner) == DialogResult.OK;
         }
 
+        /// <summary>
+        /// One-button notice with the same chrome as every other dialog. MessageBox shows the
+        /// Windows system font in a rectangle that ignores the theme, which is the most obvious
+        /// "this part is not finished" tell in an otherwise custom-drawn app.
+        /// </summary>
+        public static void Tell(IWin32Window owner, string title, string message, string detail = null)
+        {
+            try
+            {
+                using (var f = new ConfirmForm(title, message, detail, "OK", BtnKind.Primary))
+                {
+                    f._cancel.Visible = false;
+                    f.ShowDialog(owner);
+                }
+            }
+            catch { }
+        }
+
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
             FitContent();
-            _ok.Select();
-            _ok.Focus();
+            /* A destructive confirmation must not be armed the moment it appears: a stray Enter
+               or Space - including the one that opens it - used to choose Delete. The safe
+               button takes focus, and Tab reaches the danger action in one step. */
+            if (_ok.Kind == BtnKind.Danger)
+            {
+                _cancel.Select();
+                _cancel.Focus();
+            }
+            else
+            {
+                _ok.Select();
+                _ok.Focus();
+            }
+        }
+
+        /* Enter and Esc are resolved here rather than through AcceptButton/CancelButton: the
+           window is borderless, and a command key would never reach the buttons' own handlers. */
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Escape)
+            {
+                DialogResult = DialogResult.Cancel;
+                Close();
+                return true;
+            }
+            if (keyData == Keys.Enter || keyData == Keys.Return)
+            {
+                /* Enter always means the safe answer. Only an explicitly focused danger button
+                   may be chosen with Enter, so the default action here is Cancel for a
+                   destructive prompt and OK for a notice. */
+                if (_ok.Kind == BtnKind.Danger && !_ok.Focused)
+                {
+                    DialogResult = DialogResult.Cancel;
+                    Close();
+                    return true;
+                }
+                DialogResult = DialogResult.OK;
+                Close();
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         /// <summary>Sizes the dialog around its text so long messages never clip or scroll.</summary>

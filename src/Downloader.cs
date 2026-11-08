@@ -386,7 +386,21 @@ namespace JoeBrowser
             int cw = _cancel.PreferredWidth(Ui.S(88));
             _cancel.SetBounds(ClientSize.Width - Ui.S(24) - cw, ClientSize.Height - Ui.S(24) - Ui.S(33), cw, Ui.S(33));
 
-            KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Escape) { _cts.Cancel(); } };
+            /* Esc cancels, and says so: closing the dialog with the download still running
+               would leave a half-fetched engine on disk with nothing to explain it. */
+            KeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.KeyCode != Keys.Escape || !_cancel.Enabled) return;
+                _cts.Cancel();
+                _status = "Cancelling\u2026";
+                _cancel.Enabled = false;
+                Invalidate();
+            };
+            FormClosing += delegate(object s, FormClosingEventArgs e)
+            {
+                // The window's own close button must also stop the download, not orphan it.
+                if (e.CloseReason == CloseReason.UserClosing) { try { _cts.Cancel(); } catch { } }
+            };
         }
 
         /// <summary>
@@ -421,7 +435,12 @@ namespace JoeBrowser
             Ui.Quality(g);
             int w = ClientSize.Width;
             Ui.Text(g, _title, Theme.BodyBold, Theme.Text, Ui.S(24), Ui.S(20), w - Ui.S(48), "left");
-            Ui.Text(g, _status, Theme.Small, Theme.TextDim, Ui.S(24), Ui.S(46), w - Ui.S(110), "left");
+            /* Long status lines used to be clipped mid-word ("Waiting for Chrome to finish inst…")
+               because the width stopped short of the percentage. The text now ends where the
+               percentage actually begins, minus a gap. */
+            float pctX = w - Ui.S(76);
+            Ui.Text(g, _status, Theme.Small, Theme.TextDim, Ui.S(24), Ui.S(46),
+                Math.Max(Ui.S(80), pctX - Ui.S(24) - Ui.S(10)), "left");
             Ui.Text(g, (int)_pct + "%", Theme.SmallBold, Theme.Text, w - Ui.S(76), Ui.S(46), Ui.S(52), "right");
 
             var barRect = new RectangleF(Ui.S(24), Ui.S(74), w - Ui.S(48), Ui.S(4));

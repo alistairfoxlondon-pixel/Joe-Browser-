@@ -50,11 +50,45 @@ namespace JoeBrowser
 
         public static void Set(string key)
         {
-            if (!IsKnown(key)) key = "en";
+            /* A saved preference may name a language with no table - an older build offered
+               three of them, and a hand-edited settings.json can say anything. Falling back to
+               English is right; leaving a dangling key in Current is what made T() return the
+               raw "nav.profiles" identifiers.
+               It also matters that a failed Set does not raise Changed: every listener would
+               rebuild the whole interface for nothing. */
+            if (!IsTranslated(key)) key = "en";
             if (Current == key) return;
             Current = key;
             var h = Changed;
             if (h != null) { try { h(); } catch { } }
+        }
+
+        /// <summary>
+        /// True when this language actually has a translation table. The picker used to offer
+        /// three languages (Hindi, Indonesian, Vietnamese) that had no strings at all: choosing
+        /// one closed the picker, saved the preference and left every label in English with no
+        /// explanation. Offering only what is translated is the honest list.
+        /// </summary>
+        public static bool IsTranslated(string key)
+        {
+            // Reading _tables here is fine from any call site: it is initialised by the static
+            // constructor before any public member can run, wherever it is declared.
+            return !string.IsNullOrEmpty(key) && _tables.ContainsKey(key);
+        }
+
+        /// <summary>
+        /// Share of the interface this language actually covers, 0-100. Every table is a work in
+        /// progress and untranslated keys fall back to English, so a language that covers a
+        /// third of the app looks broken rather than translated unless the picker says so.
+        /// </summary>
+        public static int Coverage(string key)
+        {
+            if (_english.Count == 0) return 0;
+            Dictionary<string, string> table;
+            if (!_tables.TryGetValue(key ?? "", out table) || table == null) return 0;
+            int have = 0;
+            foreach (string k in _english.Keys) if (table.ContainsKey(k)) have++;
+            return (int)Math.Round(100.0 * have / _english.Count);
         }
 
         public static bool IsKnown(string key)
@@ -196,6 +230,7 @@ set.group.hint=e.g. Clients, Work, Testing
 set.workspace=WORKSPACE
 set.row.detected=Detected browser
 set.row.path=Executable path
+set.row.kernels=Browser builds
 set.row.start=Start page
 set.row.group=Default group
 set.row.lang=Interface language
@@ -205,6 +240,9 @@ set.row.report=Found a problem?
 btn.report=Report it
 tools.report=Report a problem
 tools.report.desc=Message the developer directly on Telegram.
+tools.audit=Account audit
+tools.audit.desc=Find profiles that share a fingerprint, a proxy or a browser build.
+btn.audit=Run audit
 set.row.build=Portable Chromium
 set.account=ACCOUNT & SECURITY
 set.row.signed=Signed in as

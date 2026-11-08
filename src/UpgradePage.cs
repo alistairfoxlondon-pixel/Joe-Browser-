@@ -30,15 +30,36 @@ namespace JoeBrowser
         public CoinChip()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-                     ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+                     ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
             Cursor = Cursors.Hand;
             Ui.Opaque(this);
+            /* The only way to choose a network or a coin. Without a tab stop the whole payment
+               form was unusable from the keyboard. */
+            TabStop = true;
         }
 
         public void ReStyle() { Invalidate(); }
 
         protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
         protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            return keyData == Keys.Enter || keyData == Keys.Space || base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Space)
+            {
+                // Same path as a click, so a chip chosen with the keyboard updates the invoice.
+                OnClick(EventArgs.Empty);
+                e.Handled = true;
+            }
+            base.OnKeyDown(e);
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -49,6 +70,7 @@ namespace JoeBrowser
             Color fill = Selected ? Theme.AccentOnBg : _hover ? Theme.PanelHover : Theme.Card;
             Ui.Fill(g, r, Ui.S(6), fill);
             Ui.Stroke(g, r, Ui.S(6), Selected ? Theme.AccentBorder : Theme.Line, Selected ? 1.4f : 1f);
+            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(6));
 
             float pad = Ui.S(10);
             float box = Ui.S(22);
@@ -204,7 +226,7 @@ namespace JoeBrowser
         private JBLabel _inviteLine;
         private JBButton _copyInvite, _claim;
         private JBLabel _amount, _amountSub, _address, _status, _timer;
-        private JBButton _copy, _check, _restore, _termsLink;
+        private JBButton _copy, _copyAmount, _check, _restore, _termsLink;
         private JBPanel _termsPanel;
         private JBButton _readTerms, _acceptTerms;
         private PictureBox _qr;
@@ -262,11 +284,18 @@ namespace JoeBrowser
             _status.Wrap = true;
 
             _copy = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy address", Radius = 4, Height = Ui.S(33) };
+            /* The amount is the other half of a crypto transfer and it used to have to be read
+               off the screen and retyped: one wrong digit sends the money nowhere. */
+            _copyAmount = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy amount", Radius = 4, Height = Ui.S(33) };
             _check = new JBButton { Kind = BtnKind.Primary, Icon = "refresh", Text = "I have paid", Radius = 4, Height = Ui.S(33) };
             _restore = new JBButton { Kind = BtnKind.Ghost, Text = "Restore a purchase", Radius = 4, Height = Ui.S(33) };
             _termsLink = new JBButton { Kind = BtnKind.Ghost, Text = "Terms", Radius = 4, Height = Ui.S(33) };
 
             _copy.Click += delegate { Raise("copy"); };
+            _copyAmount.Click += delegate { Raise("copyamount"); };
+            /* Clicking the address copies it too - the obvious gesture on a long hex string. */
+            _address.Cursor = Cursors.Hand;
+            _address.Click += delegate { Raise("copy"); };
             _check.Click += delegate { Raise("check"); };
             _restore.Click += delegate { Raise("restore"); };
             _termsLink.Click += delegate { Raise("terms"); };
@@ -304,6 +333,7 @@ namespace JoeBrowser
             _column.Controls.Add(_timer);
             _column.Controls.Add(_status);
             _column.Controls.Add(_copy);
+            _column.Controls.Add(_copyAmount);
             _column.Controls.Add(_check);
             _column.Controls.Add(_restore);
             _column.Controls.Add(_termsLink);
@@ -344,6 +374,7 @@ namespace JoeBrowser
             _address.Visible = pay;
             _timer.Visible = pay;
             _copy.Visible = pay;
+            _copyAmount.Visible = pay;
             _check.Visible = pay;
             _termsLink.Visible = pay;
             _qr.Visible = pay && _qr.Image != null;
@@ -730,13 +761,22 @@ namespace JoeBrowser
 
                     int by = y + Ui.S(120);
                     int w1 = _copy.PreferredWidth(Ui.S(150));
+                    int wa = _copyAmount.PreferredWidth(Ui.S(150));
                     int w2 = _check.PreferredWidth(Ui.S(140));
                     _copy.SetBounds(pad, by, w1, Ui.S(33));
-                    _check.SetBounds(pad + w1 + Ui.S(10), by, w2, Ui.S(33));
+                    _copyAmount.SetBounds(pad + w1 + Ui.S(10), by, wa, Ui.S(33));
+                    /* "I have paid" drops to its own row when the three buttons do not fit, so
+                       it can never be pushed under the QR code on a narrow window. */
+                    int paidX = pad + w1 + wa + Ui.S(20);
+                    if (paidX + w2 <= pad + textW)
+                        _check.SetBounds(paidX, by, w2, Ui.S(33));
+                    else
+                        _check.SetBounds(pad, by + Ui.S(43), w2, Ui.S(33));
 
                     _qr.SetBounds(pad + inner - qr, y, qr, qr);
 
-                    y = by + Ui.S(33) + Ui.S(14);
+                    bool stacked = _check.Top != by;
+                    y = by + (stacked ? Ui.S(76) : Ui.S(33)) + Ui.S(14);
                     _status.SetBounds(pad, y, Math.Min(inner, Ui.S(720)), Ui.S(40));
                     y += Ui.S(44);
                 }

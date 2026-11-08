@@ -125,10 +125,26 @@ namespace JoeBrowser
         /// </summary>
         private static readonly Dictionary<string, double[][]> Screens = new Dictionary<string, double[][]>
         {
-            {"Windows 11", new double[][]{ new double[]{1920d,1080,1}, new double[]{2560,1440,1}, new double[]{1536,864,1.25}, new double[]{1366,768,1}, new double[]{1920,1200,1}, new double[]{1280,720,1} }},
-            {"Windows 10", new double[][]{ new double[]{1366d,768,1}, new double[]{1920,1080,1}, new double[]{1600,900,1}, new double[]{2560,1440,1}, new double[]{1440,900,1}, new double[]{1280,720,1} }},
-            {"macOS", new double[][]{ new double[]{1512d,982,2}, new double[]{1728,1117,2}, new double[]{1440,900,2}, new double[]{2560,1440,2}, new double[]{2304,1296,2} }},
-            {"Linux", new double[][]{ new double[]{1920d,1080,1}, new double[]{1366,768,1}, new double[]{2560,1440,1}, new double[]{1600,900,1}, new double[]{3840,2160,1} }},
+            {"Windows 11", new double[][]{
+                new double[]{1920d,1080,1}, new double[]{2560,1440,1}, new double[]{3840,2160,1.5},
+                new double[]{1536,864,1.25}, new double[]{1366,768,1}, new double[]{1920,1200,1},
+                new double[]{1280,720,1}, new double[]{1600,900,1}, new double[]{1440,900,1},
+                new double[]{2560,1600,1}, new double[]{3440,1440,1}, new double[]{1280,1024,1},
+                new double[]{2880,1800,1.5}, new double[]{1920,1080,1.25}, new double[]{1680,1050,1} }},
+            {"Windows 10", new double[][]{
+                new double[]{1366d,768,1}, new double[]{1920,1080,1}, new double[]{1600,900,1},
+                new double[]{2560,1440,1}, new double[]{1440,900,1}, new double[]{1280,720,1},
+                new double[]{1600,1200,1}, new double[]{1920,1200,1}, new double[]{1280,1024,1},
+                new double[]{1024,768,1}, new double[]{2560,1080,1}, new double[]{3840,2160,1.5} }},
+            {"macOS", new double[][]{
+                new double[]{1512d,982,2}, new double[]{1728,1117,2}, new double[]{1440,900,2},
+                new double[]{2560,1440,2}, new double[]{2304,1296,2}, new double[]{1680,1050,2},
+                new double[]{1920,1080,2}, new double[]{2560,1600,2}, new double[]{3024,1964,2},
+                new double[]{1440,960,2} }},
+            {"Linux", new double[][]{
+                new double[]{1920d,1080,1}, new double[]{1366,768,1}, new double[]{2560,1440,1},
+                new double[]{1600,900,1}, new double[]{3840,2160,1}, new double[]{1280,1024,1},
+                new double[]{1920,1200,1}, new double[]{1680,1050,1} }},
             {"Android", new double[][]{ new double[]{411d,915,2.625}, new double[]{427,952,3}, new double[]{411,891,3.5}, new double[]{393,851,2.75}, new double[]{360,780,3}, new double[]{411,869,3.5} }},
             {"iPhone", new double[][]{ new double[]{393d,852,3}, new double[]{390,844,3}, new double[]{430,932,3}, new double[]{420,912,3}, new double[]{375,812,3} }},
             {"iPad", new double[][]{ new double[]{820d,1180,2}, new double[]{1024,1366,2}, new double[]{1194,834,2}, new double[]{744,1133,2} }}
@@ -184,19 +200,35 @@ namespace JoeBrowser
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5080 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5070 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5070 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5060 Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 9070 XT Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 9070 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 7900 XTX Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 7800 XT Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 7700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 7600 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 6800 XT Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon 890M (Ryzen 9000 Series) Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon 780M (Ryzen 7000 Series) Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon Graphics (Raphael) Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) Arc(TM) B580 Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) Arc(TM) A770 Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) Arc(TM) A380 Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"},
-                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) UHD Graphics 770 Direct3D11 vs_5_0 ps_5_0, D3D11)"}
+                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) UHD Graphics 770 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) HD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)"}
             }},
             {"macOS", new[]{
                 new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)"},
@@ -372,6 +404,21 @@ namespace JoeBrowser
 
         public static void Regenerate(FingerprintConfig fp, string os, ProxyConfig proxy)
         {
+            Regenerate(fp, os, proxy, false);
+        }
+
+        /// <summary>
+        /// Rolls a new fingerprint.
+        ///
+        /// <paramref name="widePool"/> is the escalation used when a workspace is dense enough
+        /// that ordinary rolls keep landing on a GPU another profile already claims: the tier
+        /// bias is dropped so the older half of the pool is as likely as the new half. The
+        /// hardware stays plausible - it is the same list of real cards - but the overlap falls
+        /// sharply, which is what makes "unique in this workspace" achievable at 50 profiles
+        /// instead of only at 5.
+        /// </summary>
+        public static void Regenerate(FingerprintConfig fp, string os, ProxyConfig proxy, bool widePool)
+        {
             if (string.IsNullOrEmpty(os) || os == "System default") os = SystemOsName();
             fp.Seed = NewSeed();
             var r = new Random(fp.Seed);
@@ -390,7 +437,7 @@ namespace JoeBrowser
 
             string gpuKey = IsMac(os) ? "macOS" : (IsLinux(os) ? "Linux" : (IsAndroid(os) ? "Android" : (IsIos(os) ? "iOS" : "Windows")));
             var gpus = Gpus[gpuKey];
-            int tier = PickTier(gpus.Length, r);
+            int tier = widePool ? r.Next(gpus.Length) : PickTier(gpus.Length, r);
             /* An Android handset carries its own silicon, so the model chosen for the viewport
                wins over the roll; the pool index of that GPU then sets the device class. */
             string[] device = DeviceIdentity(fp);
@@ -613,6 +660,177 @@ namespace JoeBrowser
         public static bool IsWindows11(string os)
         {
             return os != null && os.StartsWith("Windows 11", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Repairs a configuration that describes a machine that cannot exist.
+        ///
+        /// Profiles arrive from places that can each produce an impossible combination: an
+        /// imported JSON file written by an older build, a profile edited by hand, and the OS
+        /// picker, which changes the target without re-deriving everything that follows from it.
+        /// A macOS profile answering with a Direct3D renderer, a browser reporting 16 GB of
+        /// deviceMemory (Chromium caps it at 8), or an Android profile with no touch points are
+        /// each one probe away from being flagged.
+        ///
+        /// Every fix here is <em>coherence</em>, never identity: the seed, the canvas payload and
+        /// the renderer choice itself are left alone, so this cannot undo the uniqueness work or
+        /// silently change a fingerprint a user has been relying on. Returns how many fields it
+        /// had to repair, which is what the caller reports.
+        /// </summary>
+        public static int Coerce(FingerprintConfig fp)
+        {
+            if (fp == null) return 0;
+            int repaired = 0;
+
+            string os = fp.Os ?? "";
+            bool mobile = IsMobileOs(os);
+
+            // ---- WebGL has to belong to the platform -------------------------------------
+            var gpuPool = GpusFor(os);
+            if (gpuPool.Count > 0)
+            {
+                /* One pass answers both questions: is this renderer one of ours, and what vendor
+                   does it actually ship with. Every browser reports the two together, so a
+                   renderer with the wrong vendor beside it is as much of a tell as a renderer
+                   from another platform. */
+                int at = -1;
+                for (int i = 0; i < gpuPool.Count; i++)
+                {
+                    if (gpuPool[i] == null || gpuPool[i].Length < 2) continue;
+                    if (string.Equals(gpuPool[i][1], fp.WebGlRenderer, StringComparison.Ordinal)) { at = i; break; }
+                }
+
+                if (at >= 0)
+                {
+                    if (!string.Equals(gpuPool[at][0], fp.WebGlVendor, StringComparison.Ordinal))
+                    {
+                        fp.WebGlVendor = gpuPool[at][0];
+                        repaired++;
+                    }
+                }
+                else
+                {
+                    /* Keep the vendor family when this platform has it - an NVIDIA string on a
+                       Windows profile stays NVIDIA - and otherwise take the pool's head. A real
+                       card of the right platform beats a coherent-looking lie. */
+                    int sameVendor = -1;
+                    for (int i = 0; i < gpuPool.Count; i++)
+                    {
+                        if (gpuPool[i] == null || gpuPool[i].Length < 2) continue;
+                        if (string.Equals(gpuPool[i][0], fp.WebGlVendor, StringComparison.Ordinal)) { sameVendor = i; break; }
+                    }
+                    int pick = sameVendor >= 0 ? sameVendor : 0;
+                    fp.WebGlRenderer = gpuPool[pick][1];
+                    fp.WebGlVendor = gpuPool[pick][0];
+                    repaired++;
+                }
+            }
+            else if (fp.WebGlVendor == null) { fp.WebGlVendor = ""; }
+
+            // ---- deviceMemory is a power of two, capped at 8 -----------------------------
+            if (fp.Memory != 2 && fp.Memory != 4 && fp.Memory != 8)
+            {
+                fp.Memory = fp.Memory >= 8 ? 8 : (fp.Memory >= 4 ? 4 : 2);
+                repaired++;
+            }
+
+            // ---- core counts are real values, and phones are octa-core -------------------
+            bool plausible = false;
+            foreach (int c in CoreOptions) if (c == fp.Cores) { plausible = true; break; }
+            if (!plausible)
+            {
+                // Snap to the nearest offered value rather than forcing a default: a profile that
+                // said 12 cores should become 12, not 8.
+                int best = CoreOptions[0], bestDelta = Math.Abs(fp.Cores - best);
+                foreach (int c in CoreOptions)
+                {
+                    int d = Math.Abs(fp.Cores - c);
+                    if (d < bestDelta) { best = c; bestDelta = d; }
+                }
+                fp.Cores = best;
+                repaired++;
+            }
+            /* Every Android SoC a Chrome build ships on is octa-core. iPhones are 6-wide and
+               iPads 8 or 10, so the iOS values are left alone: forcing them to 8 would describe
+               an A-series chip that does not exist, which is the opposite of the intent here. */
+            if (IsAndroid(os) && fp.Cores != 8) { fp.Cores = 8; repaired++; }
+
+            // ---- touch points follow the device, not the last picker entry ---------------
+            int touch = mobile ? 5 : 0;
+            if (fp.TouchPoints != touch) { fp.TouchPoints = touch; repaired++; }
+
+            // ---- the screen's derived fields have to match the screen -------------------
+            if (fp.ScreenW > 0 && fp.ScreenH > 0 && !IsSystemTarget(os))
+            {
+                /* Deliberately *not* snapping an unusual resolution to the table. The picker
+                   preserves a custom value as its own row on purpose, so replacing it here would
+                   silently overwrite an explicit choice. What is repaired is everything derived
+                   from the screen - density, available height, touch points - and an out-of-table
+                   resolution is reported by the audit instead, where the user can decide. */
+                if (fp.PixelRatio <= 0 || fp.AvailW <= 0 || fp.AvailH <= 0 || fp.AvailW > fp.ScreenW || fp.AvailH > fp.ScreenH)
+                {
+                    int wantW = fp.ScreenW, wantH = fp.ScreenH;
+                    double ratio = fp.PixelRatio;
+                    ApplyScreen(fp, os, new[] { (double)wantW, wantH, ratio > 0 ? ratio : 0 });
+                    repaired++;
+                }
+            }
+
+            // ---- locale has to be internally consistent --------------------------------
+            if (string.IsNullOrEmpty(fp.Timezone))
+            {
+                fp.Timezone = "America/New_York";
+                repaired++;
+            }
+            if (string.IsNullOrEmpty(fp.Language))
+            {
+                fp.Language = LanguageForTimezone(fp.Timezone);
+                repaired++;
+            }
+            if (string.IsNullOrEmpty(fp.AcceptLanguage))
+            {
+                fp.AcceptLanguage = AcceptLanguageFor(fp.Language);
+                repaired++;
+            }
+
+            // ---- WebRTC and geolocation modes have to be values the script understands --
+            if (!IsOneOf(fp.WebRtcMode, "off", "proxy", "public"))
+            {
+                fp.WebRtcMode = fp.WebRtcProtect ? "proxy" : "off";
+                repaired++;
+            }
+            if (!IsOneOf(fp.GeoMode, "proxy", "system", "custom", "block"))
+            {
+                fp.GeoMode = "proxy";
+                repaired++;
+            }
+
+            // ---- device type follows the OS --------------------------------------------
+            string device = DeviceTypeFor(os);
+            if (!string.Equals(fp.DeviceType, device, StringComparison.OrdinalIgnoreCase))
+            {
+                fp.DeviceType = device;
+                repaired++;
+            }
+
+            return repaired;
+        }
+
+        private static bool IsOneOf(string value, string a, string b, string c = null, string d = null)
+        {
+            if (string.IsNullOrEmpty(value)) return false;
+            if (string.Equals(value, a, StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(value, b, StringComparison.OrdinalIgnoreCase)) return true;
+            if (c != null && string.Equals(value, c, StringComparison.OrdinalIgnoreCase)) return true;
+            if (d != null && string.Equals(value, d, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        /// <summary>True when the target means "this machine", whose screen is whatever it is.</summary>
+        private static bool IsSystemTarget(string os)
+        {
+            return string.IsNullOrEmpty(os) || os.Equals("System default", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(os, SystemOsName(), StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>Pairs a resolution with the chrome and pixel density that device really has.</summary>

@@ -20,7 +20,7 @@ namespace JoeBrowser.Setup
     {
         internal const string AppId = "JoeBrowser.Browser.1.2";
         internal const string AppName = "Joe Browser";
-        internal const string Version = "1.2.0";
+        internal const string Version = "1.3.0";
         internal const string Publisher = "Joe Goldberg";
 
         [STAThread]
@@ -86,19 +86,49 @@ namespace JoeBrowser.Setup
                 /* Replace the payload. The previous copy cannot be overwritten while it is
                    running, so a running instance is closed first - the installer is the one
                    place where that is the correct behaviour. */
-                if (File.Exists(exe))
-                {
-                    try { File.SetAttributes(exe, FileAttributes.Normal); } catch { }
-                    try { File.Delete(exe); } catch { }
-                }
+                CloseRunningInstances(exe);
 
+                /* Written beside the target and moved into place. The old code deleted the
+                   installed executable first and then streamed the payload over it: a payload
+                   that could not be read, or a crash mid-copy, left the user with no Joe
+                   Browser at all instead of the previous version. */
+                string staged = exe + ".new";
                 using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream("JoeBrowser.payload.exe"))
                 {
                     if (s == null) throw new InvalidOperationException("The installer payload is missing.");
-                    using (var fs = new FileStream(exe, FileMode.Create, FileAccess.Write, FileShare.None))
+                    if (File.Exists(staged)) File.Delete(staged);
+                    using (var fs = new FileStream(staged, FileMode.Create, FileAccess.Write, FileShare.None))
                         s.CopyTo(fs);
                 }
+                try { File.SetAttributes(staged, FileAttributes.Normal); } catch { }
+
+                for (int attempt = 0; ; attempt++)
+                {
+                    try
+                    {
+                        if (File.Exists(exe))
+                        {
+                            try { File.SetAttributes(exe, FileAttributes.Normal); } catch { }
+                            try { File.Delete(exe); } catch { }
+                        }
+                        File.Move(staged, exe);
+                        break;
+                    }
+                    catch (Exception moveError)
+                    {
+                        if (attempt >= 9)
+                        {
+                            try { File.Delete(staged); } catch { }
+                            throw new IOException("Could not write " + exe + ". " + moveError.Message);
+                        }
+                        System.Threading.Thread.Sleep(300);
+                    }
+                }
                 try { File.SetAttributes(exe, FileAttributes.Normal); } catch { }
+
+                /* The payload carries its fonts inside itself now; this covers a package that
+                   was built with a side-by-side folder as well. */
+                CopyFonts(dir);
 
                 CreateShortcut(Path.Combine(StartMenuDir(), Program.AppName + ".lnk"), exe, dir);
                 if (desktopShortcut)
@@ -119,6 +149,49 @@ namespace JoeBrowser.Setup
                 result.Error = ex.Message;
             }
             return result;
+        }
+
+        /// <summary>
+        /// Asks any running copy to exit before its image is replaced. Without this the
+        /// installer sat on "Delete" retries until it gave up, and the user was told the
+        /// install failed for no reason they could see.
+        /// </summary>
+        private static void CloseRunningInstances(string exe)
+        {
+            try
+            {
+                string name = Path.GetFileNameWithoutExtension(exe);
+                foreach (Process p in Process.GetProcessesByName(name))
+                {
+                    try
+                    {
+                        if (p.Id == Process.GetCurrentProcess().Id) continue;
+                        p.CloseMainWindow();
+                        if (!p.WaitForExit(4000))
+                        {
+                            p.Kill();
+                            p.WaitForExit(2000);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>Copies a side-by-side fonts folder when the package has one.</summary>
+        private static void CopyFonts(string dir)
+        {
+            try
+            {
+                string from = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? "", "fonts");
+                if (!Directory.Exists(from)) return;
+                string to = Path.Combine(dir, "fonts");
+                Directory.CreateDirectory(to);
+                foreach (string f in Directory.GetFiles(from))
+                    File.Copy(f, Path.Combine(to, Path.GetFileName(f)), true);
+            }
+            catch { }
         }
 
         public static void Uninstall(bool silent)
@@ -178,6 +251,13 @@ namespace JoeBrowser.Setup
             BackColor = Bg;
             Font = new Font("Segoe UI", 9f);
             DoubleBuffered = true;
+            /* The manifest declares PerMonitorV2, so the process is DPI aware and WinForms must
+               not rescale this form on top of that - it would double-scale the layout on a
+               125% or 150% display and clip the buttons. AutoScaleMode.None matches JBForm. */
+            AutoScaleMode = AutoScaleMode.None;
+            /* Without this the installer window wore the generic WinForms icon while its own
+               executable carried the real one - the first thing a new user sees looking wrong. */
+            try { Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
             var title = new Label
             {
@@ -259,10 +339,23 @@ namespace JoeBrowser.Setup
             cancel.Click += delegate { Close(); };
 
             Controls.AddRange(new Control[] { title, sub, pathLabel, _path, browse, _desktop, _launch, _progress, _status, _install, cancel });
+
+            /* Enter installs, Esc cancels - without these two the window ignored the keyboard
+               entirely, which reads as an unresponsive installer. */
+            AcceptButton = _install;
+            CancelButton = cancel;
         }
 
-        private void DoInstall()
+        /// <summary>
+        /// True once the install finished. The button changes to "Close" at that point, and
+        /// because the original Click handler was never removed, pressing it ran a second full
+        /// install before closing - so the success path re-installed the app from itself.
+        /// </summary>
+        private bool _done;
+
+        private async void DoInstall()
         {
+            if (_done) { Close(); return; }
             string dir = _path.Text.Trim();
             if (dir.Length == 0)
             {
@@ -299,7 +392,23 @@ namespace JoeBrowser.Setup
             _status.Text = "Installing...";
             Application.DoEvents();
 
-            var result = Installer.Install(dir, _desktop.Checked, _launch.Checked);
+            InstallResult result;
+            try
+            {
+                /* Off the UI thread: the copy plus the shortcut and registry work used to block
+                   the message loop behind a single DoEvents(), so the window showed "not
+                   responding" for the whole install - which on a first run reads as a hang. */
+                bool desk = _desktop.Checked, launch = _launch.Checked;
+                result = await System.Threading.Tasks.Task.Run(new Func<InstallResult>(
+                    delegate { return Installer.Install(dir, desk, launch); }));
+            }
+            catch (Exception ex)
+            {
+                /* Install already catches its own failures; this is the belt-and-braces case
+                   so a surprise never escapes as an unhandled-exception dialog during setup. */
+                result = new InstallResult { Ok = false, Error = ex.Message, Dir = dir };
+            }
+            if (IsDisposed) return;
             _progress.Style = ProgressBarStyle.Continuous;
             _progress.Value = 100;
 
@@ -307,11 +416,12 @@ namespace JoeBrowser.Setup
             {
                 _status.ForeColor = Color.FromArgb(0x57, 0xE8, 0x4A);
                 _status.Text = "Installed to " + result.Dir;
+                /* The button says Close, so it has to work as Close and the form must not close
+                   itself while the user is still reading where things went. */
                 _install.Text = "Close";
+                _install.Enabled = true;
+                _done = true;   // the existing handler now closes instead of reinstalling
                 ExitCode = 0;
-                var timer = new Timer { Interval = 1400 };
-                timer.Tick += delegate { timer.Stop(); timer.Dispose(); Close(); };
-                timer.Start();
             }
             else
             {

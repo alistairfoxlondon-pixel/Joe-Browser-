@@ -71,6 +71,17 @@ namespace JoeBrowser
             if (owner == null || string.IsNullOrEmpty(text)) return;
             _tip.SetToolTip(owner, text);
         }
+
+        /// <summary>
+        /// Removes a hint. Needed when the same control is reused for a different meaning - a
+        /// profile card that no longer collides must stop claiming it does, and a stale tooltip
+        /// is worse than none because it is the one a user reads while deciding what to delete.
+        /// </summary>
+        public static void Clear(Control owner)
+        {
+            if (owner == null) return;
+            _tip.SetToolTip(owner, string.Empty);
+        }
     }
 
     internal static class Native
@@ -87,6 +98,9 @@ namespace JoeBrowser
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
+        public const int WM_SETICON = 0x0080;
+        public const int ICON_SMALL = 0;
+        public const int ICON_BIG = 1;
         public const int EM_SETCUEBANNER = 0x1501;
         public const int EM_LINESCROLL = 0x00B6;
         public const int EM_GETFIRSTVISIBLELINE = 0x00CE;
@@ -185,6 +199,24 @@ namespace JoeBrowser
             Native.RoundedCorners(Handle, Theme.Radius);
             Native.WindowBorderColor(Handle, Theme.Line);
             Native.ImmersiveDarkMode(Handle, Theme.Dark);
+            ApplyWindowIcons();
+        }
+
+        /// <summary>
+        /// WinForms sets one icon and lets Windows shrink it for every surface, so the 16 px
+        /// taskbar button was a resampled 32 px frame - soft, and on some machines washed out
+        /// to almost nothing. Handing the window the exact 16 px and 32 px frames keeps both
+        /// crisp. The icons are the app's own cached instances, so nothing is disposed here.
+        /// </summary>
+        private void ApplyWindowIcons()
+        {
+            try
+            {
+                if (Icon != null) Native.SendMessage(Handle, Native.WM_SETICON, (IntPtr)Native.ICON_BIG, Icon.Handle);
+                Icon small = AppIcon.Small;
+                if (small != null) Native.SendMessage(Handle, Native.WM_SETICON, (IntPtr)Native.ICON_SMALL, small.Handle);
+            }
+            catch { }
         }
 
         public void ToggleMaximize()
@@ -274,6 +306,27 @@ namespace JoeBrowser
         {
             _suppressSurface = true;
             try { a(); } finally { _suppressSurface = false; }
+        }
+
+        /// <summary>
+        /// Tracks whether the user is on the keyboard, so a focus indicator is drawn even on
+        /// systems whose ShowFocusCues flag is stuck false (touch keyboard, tablet posture,
+        /// some remote sessions). See Ui.FocusCues. Every window derives from JBForm, and
+        /// ProcessCmdKey bubbles up from the focused control, so this one hook covers all of
+        /// them without touching each dialog.
+        /// </summary>
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            Ui.NoteKey(keyData);
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            /* Pointer input means the standard Windows behaviour: no focus rectangles until a
+               key is used again. */
+            Ui.KeyboardCuesForced = false;
         }
 
         protected override void WndProc(ref Message m)
@@ -400,17 +453,20 @@ namespace JoeBrowser
             e.TextColor = e.Item.Enabled ? Theme.Text : Theme.TextFaint;
             e.TextFont = e.Item.Font ?? Theme.Body;
 
-            // Items carry a glyph name rather than a bitmap, so draw it beside the label.
+            /* Items carry a glyph name rather than a bitmap. The glyph is drawn here, from the
+               text rectangle, and nowhere else: it used to be painted a second time from
+               OnRenderItemImage at a fixed x, which with no image margin put the icon straight
+               through the first two characters of the label. */
             var item = e.Item as IIconItem;
             if (item != null && item.Icon != null)
             {
                 var g = e.Graphics;
                 Ui.Quality(g);
                 float s = Ui.S(16);
-                float x = e.TextRectangle.Left - s - Ui.S(9);
-                float y = e.Item.Height / 2f - s / 2f;
-                Icons.Draw(g, item.Icon, new RectangleF(x, y, s, s),
-                    !e.Item.Enabled ? Theme.TextFaint : e.Item.Selected ? Theme.Accent : Theme.TextDim, 1.7f);
+                var lane = new RectangleF(e.TextRectangle.Left - s - Ui.S(9), e.Item.Height / 2f - s / 2f, s, s);
+                if (lane.Left >= 0)
+                    Icons.Draw(g, item.Icon, lane,
+                        !e.Item.Enabled ? Theme.TextFaint : e.Item.Selected ? Theme.Accent : Theme.TextDim, 1.7f);
             }
             base.OnRenderItemText(e);
         }
@@ -420,17 +476,17 @@ namespace JoeBrowser
             Ui.Quality(e.Graphics);
             if (e.Image != null)
             {
+                /* The menu turns the framework image lane off by default (glyphs are drawn as
+                   text), so a caller that does supply a bitmap - the country picker's flag chip -
+                   gets no rectangle from the framework and is placed here instead. */
                 var r = e.ImageRectangle;
                 if (r.Width <= 0 || r.Height <= 0)
                     r = new Rectangle(Ui.S(9), (e.Item.Height - e.Image.Height) / 2, e.Image.Width, e.Image.Height);
                 e.Graphics.DrawImage(e.Image, r);
                 return;
             }
-            var item = e.Item as IIconItem;
-            if (item == null || item.Icon == null) return;
-            float s = Ui.S(16);
-            Color c = e.Item.Selected ? Theme.Accent : Theme.TextFaint;
-            Icons.Draw(e.Graphics, item.Icon, new RectangleF(Ui.S(11), e.Item.Height / 2f - s / 2f, s, s), c, 1.7f);
+            /* Glyph icons are painted by OnRenderItemText, in the lane reserved by Item's left
+               padding. Drawing them here as well put two glyphs in two different places. */
         }
 
         protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
@@ -461,7 +517,11 @@ namespace JoeBrowser
                 Icon = icon;
                 Font = Theme.Body;
                 ForeColor = Theme.Text;
-                Padding = new Padding(Ui.S(14), Ui.S(7), Ui.S(18), Ui.S(7));
+                /* Room for the 16 px glyph plus its 9 px gap, so the label never sits on it.
+                   Only items with a glyph need the room; an item with a bitmap gets its own
+                   image margin from the framework. */
+                int left = string.IsNullOrEmpty(icon) ? Ui.S(14) : Ui.S(14 + 16 + 9);
+                Padding = new Padding(left, Ui.S(7), Ui.S(18), Ui.S(7));
                 AutoSize = true;
             }
         }
@@ -473,7 +533,10 @@ namespace JoeBrowser
             m.BackColor = Theme.Panel;
             m.ForeColor = Theme.Text;
             m.Font = Theme.Body;
-            m.ShowImageMargin = true;
+            /* Items carry glyph names, not bitmaps, so the framework's image lane would be an
+               empty gutter on every menu. It is switched on by callers that do insert flag
+               bitmaps into their items (the country picker). */
+            m.ShowImageMargin = false;
             m.ShowCheckMargin = false;
             m.Padding = new Padding(Ui.S(4), Ui.S(6), Ui.S(4), Ui.S(6));
             m.GripStyle = ToolStripGripStyle.Hidden;
@@ -659,7 +722,18 @@ namespace JoeBrowser
                 }
             }
 
-            if (Focused && ShowFocusCues) Ui.FocusRing(g, r, rad);
+            if (Focused && Ui.FocusCues(this))
+            {
+                /* A text-coloured ring drawn on top of a filled accent button is nearly
+                   invisible; the readable equivalent is a ring just OUTSIDE the fill. */
+                if (Kind == BtnKind.Primary)
+                {
+                    var outer = new RectangleF(r.X - Ui.S(2.5f), r.Y - Ui.S(2.5f),
+                        r.Width + Ui.S(5f), r.Height + Ui.S(5f));
+                    Ui.Stroke(g, outer, rad + Ui.S(2.5f), Ui.Blend(Theme.Accent, Theme.Text, 0.35f), Ui.S(1.5f));
+                }
+                else Ui.FocusRing(g, r, rad);
+            }
         }
     }
 
@@ -739,13 +813,12 @@ namespace JoeBrowser
                     }
                     else g.DrawRectangle(pen, sx, sy, s, s);
                 }
-                if (Focused && ShowFocusCues) Ui.FocusRing(g, r, rad);
                 return;
             }
 
             float s2 = Ui.S(IconSize);
             Icons.Draw(g, Icon, new RectangleF((Width - s2) / 2f, (Height - s2) / 2f, s2, s2), ic);
-            if (!Caption && Focused && ShowFocusCues) Ui.FocusRing(g, r, rad);
+            if (!Caption && Ui.FocusCues(this)) Ui.FocusRing(g, r, rad);
         }
     }
 
@@ -810,6 +883,7 @@ namespace JoeBrowser
                 _cue = new Label
                 {
                     AutoSize = false,
+                    AutoEllipsis = true,   // never paint past the right edge of the field
                     BackColor = Theme.Input,
                     ForeColor = Theme.TextFaint,
                     Font = Theme.Body,
@@ -833,8 +907,14 @@ namespace JoeBrowser
         private void SyncCue()
         {
             if (_cue == null) return;
-            _cue.Text = _placeholder;
-            _cue.Visible = Box.Text.Length == 0 && !string.IsNullOrEmpty(_placeholder);
+            /* The hint is drawn on a single, unwrapped label row. Placeholders here are long
+               ("JBR1.JB7K2M4Q.bsc.0x\u2026"), so an unclipped label ran past the right edge of
+               the field and over whatever was beside it. Clip to the field instead. */
+            string first = _placeholder ?? "";
+            int nl = first.IndexOf('\n');
+            if (nl >= 0) first = first.Substring(0, nl);
+            _cue.Text = first;
+            _cue.Visible = Box.Text.Length == 0 && !string.IsNullOrEmpty(first);
         }
 
         public string Icon
@@ -866,6 +946,12 @@ namespace JoeBrowser
             get { return Box.UseSystemPasswordChar; }
             set { Box.UseSystemPasswordChar = value; Invalidate(); }
         }
+
+        /// <summary>
+        /// A multi-line field edits notes, not a value: Enter must insert a newline there. The
+        /// dialogs ask this to decide whether Enter should submit the form instead.
+        /// </summary>
+        public bool Multiline { get { return _multiline; } }
 
         public int PadLeft = 10, PadRight = 10, PadTop = 6;
 
@@ -1013,12 +1099,28 @@ namespace JoeBrowser
         private static float MathHelper01(float v) { return v < 0f ? 0f : (v > 1f ? 1f : v); }
 
         protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hover = false;
+            Invalidate();
+            // Resume the countdown only if the bar is still up and was paused by the hover.
+            if (Visible && !_timer.Enabled)
+            {
+                _timer.Interval = 1800;
+                _timer.Start();
+            }
+            base.OnMouseLeave(e);
+        }
 
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             if (_multiline)
             {
+                /* Scroll the field only while it still has somewhere to go; once it is at the
+                   top or the bottom the gesture belongs to the page behind it. Swallowing every
+                   notch meant the wheel died whenever the pointer happened to be over a notes
+                   box - a very common position - even though the page was scrollable. */
+                int before = FirstVisibleLine();
                 _wheelCarry += e.Delta;
                 int lines = _wheelCarry / 120;
                 if (lines != 0)
@@ -1027,9 +1129,21 @@ namespace JoeBrowser
                     Native.SendMessage(Box.Handle, Native.EM_LINESCROLL, IntPtr.Zero, (IntPtr)lines);
                 }
                 Invalidate();
-                return;
+                if (FirstVisibleLine() != before) return;   // the field moved: it took the gesture
+                _wheelCarry = 0;
             }
             base.OnMouseWheel(e);
+        }
+
+        /// <summary>First visible line of a multiline field, or 0 when it cannot be read.</summary>
+        private int FirstVisibleLine()
+        {
+            try
+            {
+                return (int)Native.SendMessage(Box.Handle, Native.EM_GETFIRSTVISIBLELINE,
+                    IntPtr.Zero, IntPtr.Zero).ToInt64();
+            }
+            catch { return 0; }
         }
 
         protected override void OnResize(EventArgs e)
@@ -1049,7 +1163,10 @@ namespace JoeBrowser
             int h = Math.Max(12, Height - t - Ui.S(PadTop));
             Box.SetBounds(l, t, w, h);
             if (_cue != null)
+            {
                 _cue.SetBounds(l, t, Math.Max(10, w), Theme.Body.Height + Ui.S(4));
+                SyncCue();
+            }
             if (_trailing != null) _trailing.SetBounds(Width - Ui.S(PadRight) - Ui.S(26), (Height - Ui.S(26)) / 2, Ui.S(26), Ui.S(26));
         }
 
@@ -1103,6 +1220,9 @@ namespace JoeBrowser
             Ui.Opaque(this);
             Height = Ui.S(33);
             TabStop = true;
+            /* The popup outlives a close (see CloseMenu), so the control has to be the last
+               owner: replacing it while an old strip is still alive leaked a top-level window. */
+            Disposed += delegate { if (_menu != null) { try { _menu.Dispose(); } catch { } _menu = null; } };
         }
 
         public string Icon { get { return _icon; } set { _icon = value; Invalidate(); } }
@@ -1140,13 +1260,14 @@ namespace JoeBrowser
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button == MouseButtons.Left) { Focus(); ShowMenu(); }
+            if (e.Button == MouseButtons.Left) { Focus(); ShowMenu(); Ui.KeyboardCuesForced = false; }
         }
 
         protected override bool IsInputKey(Keys keyData)
         {
             return keyData == Keys.Space || keyData == Keys.Enter || keyData == Keys.Down ||
-                   keyData == Keys.Up || base.IsInputKey(keyData);
+                   keyData == Keys.Up || keyData == Keys.Home || keyData == Keys.End ||
+                   base.IsInputKey(keyData);
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
@@ -1157,18 +1278,89 @@ namespace JoeBrowser
                 SelectedIndex = Math.Max(0, Math.Min(Items.Count - 1, next));
                 e.Handled = true;
             }
+            else if (e.KeyCode == Keys.Home) { SelectedIndex = Items.Count > 0 ? 0 : -1; e.Handled = true; }
+            else if (e.KeyCode == Keys.End) { SelectedIndex = Items.Count - 1; e.Handled = true; }
             else if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter)
             {
-                ShowMenu();
+                if (_open) CloseMenu();
+                else ShowMenu();
                 e.Handled = true;
             }
             base.OnKeyDown(e);
         }
 
+        /// <summary>
+        /// F4 and Alt+Down are the shortcut every Windows combo box honours; both are command
+        /// keys, so OnKeyDown never saw them.
+        /// </summary>
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.F4 && Items.Count > 0)
+            {
+                if (_open) CloseMenu(); else ShowMenu();
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        /* Type-ahead: in a 47-country list, jumping to "Germany" by pressing G is the whole
+           difference between a usable control and a scroll hunt. */
+        private string _typed = "";
+        private DateTime _typedAt;
+
+        protected override void OnKeyPress(KeyPressEventArgs e)
+        {
+            if (char.IsControl(e.KeyChar) || Items.Count == 0) { base.OnKeyPress(e); return; }
+            if ((DateTime.UtcNow - _typedAt).TotalMilliseconds > 800) _typed = "";
+            _typedAt = DateTime.UtcNow;
+            _typed += char.ToLowerInvariant(e.KeyChar);
+
+            // Prefer a match after the current position so repeated presses cycle the list.
+            int start = (_selected + 1) % Items.Count;
+            int found = -1;
+            for (int n = 0; n < Items.Count; n++)
+            {
+                int i = (start + n) % Items.Count;
+                string label = LabelAt(i) ?? "";
+                if (label.StartsWith(_typed, StringComparison.OrdinalIgnoreCase)) { found = i; break; }
+            }
+            if (found >= 0) SelectedIndex = found;
+            e.Handled = true;
+            base.OnKeyPress(e);
+        }
+
+        /// <summary>
+        /// Closes the popup and releases it. Closing alone is not enough: a strip built for a
+        /// paged list holds flag bitmaps that are disposed on Dispose, so a menu that was only
+        /// Closed leaked its images until the control itself went away.
+        /// </summary>
+        private void CloseMenu()
+        {
+            _open = false;
+            var m = _menu;
+            _menu = null;
+            if (m != null)
+            {
+                /* Close first so the window is off screen, then dispose once the click that
+                   asked for this has unwound. */
+                try { m.Close(); } catch { }
+                try { m.BeginInvoke(new Action(delegate { try { m.Dispose(); } catch { } })); }
+                catch { try { m.Dispose(); } catch { } }
+            }
+            Invalidate();
+        }
+
         private void ShowMenu()
         {
             if (Items.Count == 0) return;
-            if (_menu != null) { _menu.Dispose(); _menu = null; }
+            /* Clicking the control while its popup is up used to dispose the strip that was
+               still on screen and build a second one on the same tick, so the list flickered and
+               could be left ownerless. The open popup owns that gesture: the click closes it. */
+            if (_open) { CloseMenu(); return; }
+            /* A menu closed by the last gesture is disposed on a posted message, so _menu may
+               still be live here. Disposing it again is safe (the flag is already set) and keeps
+               the field from naming a window that no longer exists. */
+            if (_menu != null) { try { _menu.Dispose(); } catch { } _menu = null; }
             _menu = JBMenu.Create();
             _menu.Font = Font;
 
@@ -1182,7 +1374,11 @@ namespace JoeBrowser
 
             // A 47-zone list is taller than the display. Page it instead of letting Windows
             // clamp the popup to the top edge, which hides the tail with no way to scroll.
-            int rows = Math.Max(6, Math.Min(20, (Screen.FromControl(this).WorkingArea.Height - Ui.S(120)) / Ui.S(34)));
+            /* Row height is the menu's own padding plus the text height, not a constant: at
+               150% scaling a hard-coded 34 px fitted more rows than the popup could show, and
+               the surplus was clamped off the bottom with no scrollbar. */
+            int rowH = Math.Max(Ui.S(28), Theme.Body.Height + Ui.S(14));
+            int rows = Math.Max(6, Math.Min(20, (Screen.FromControl(this).WorkingArea.Height - Ui.S(120)) / rowH));
             int pageSize = Math.Max(4, rows - 2);
             bool paged = Items.Count > rows;
 
@@ -1233,8 +1429,9 @@ namespace JoeBrowser
 
             _open = true;
             Invalidate();
-            _menu.Closed += delegate { _open = false; Invalidate(); };
-            JBMenu.ShowNear(_menu, this, new Point(0, Height + Ui.S(4)));
+            var opened = _menu;
+            opened.Closed += delegate { if (ReferenceEquals(_menu, opened)) { _open = false; Invalidate(); } };
+            JBMenu.ShowNear(opened, this, new Point(0, Height + Ui.S(4)));
         }
 
         private void ReopenMenu()
@@ -1285,7 +1482,7 @@ namespace JoeBrowser
                 new RectangleF(Width - c - Ui.S(10), (Height - c) / 2f, c, c),
                 _open || _hover ? Theme.Text : Theme.TextDim);
 
-            if (Focused && ShowFocusCues) Ui.FocusRing(g, r, rad);
+            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, rad);
         }
     }
 
@@ -1347,8 +1544,13 @@ namespace JoeBrowser
             var track = new RectangleF(0.5f, ty, trackW, trackH);
 
             if (_checked) Ui.Fill(g, track, trackH / 2f, Theme.Accent);
-            else if (_hover) Ui.Fill(g, track, trackH / 2f, Theme.HoverOverlay);
-            Ui.Stroke(g, track, trackH / 2f, Focused ? Theme.Accent : Theme.TextDim, 1f);
+            else
+            {
+                if (_hover) Ui.Fill(g, track, trackH / 2f, Theme.HoverOverlay);
+                // Only the off state needs an outline; over the filled track a darker hairline
+                // read as a dirty edge rather than a border.
+                Ui.Stroke(g, track, trackH / 2f, Theme.TextDim, 1f);
+            }
 
             float knobD = Ui.S(13);
             float ky = track.Y + (trackH - knobD) / 2f;
@@ -1359,7 +1561,7 @@ namespace JoeBrowser
             if (!string.IsNullOrEmpty(Text))
                 Ui.Text(g, Text, Font, Enabled ? Theme.Text : Theme.TextFaint, trackW + Ui.S(10), (h - Font.GetHeight(g)) / 2f, Math.Max(0, Width - trackW - Ui.S(10)));
 
-            if (Focused && ShowFocusCues)
+            if (Ui.FocusCues(this))
                 Ui.FocusRing(g, track, trackH / 2f);
         }
     }
@@ -1478,6 +1680,12 @@ namespace JoeBrowser
                         g.FillRectangle(b, cell.X + (cell.Width - tw) / 2f, rule - barH, tw, barH);
                 }
             }
+
+            /* This control is a real tab stop and handled arrow keys, but never showed that it
+               had focus: a keyboard user tabbing through the editor could not tell where they
+               were. */
+            if (Ui.FocusCues(this))
+                Ui.FocusRing(g, new RectangleF(0.5f, 0.5f, Math.Max(1f, Width - 1f), Math.Max(1f, rule - 0.5f)), 0f);
         }
     }
 
@@ -1497,7 +1705,13 @@ namespace JoeBrowser
             _content = content;
             BackColor = Theme.Bg;
             DoubleBuffered = true;
-            TabStop = true;
+            TabStop = false;
+            /* Panel clears ControlStyles.Selectable, so the host can never take focus and its
+               keyboard scrolling could not be reached at all. It is deliberately NOT a tab stop:
+               a focusable container in the tab order makes every field inside it need two Tabs.
+               Instead it takes focus when the pointer enters it - which is what the user is
+               pointing at - and the page itself passes Up/Down to it. */
+            SetStyle(ControlStyles.Selectable, true);
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             content.Parent = this;
             Controls.Add(content);
@@ -1584,7 +1798,8 @@ namespace JoeBrowser
         {
             e.Graphics.Clear(Theme.Bg);
             if (!ShowBar) return;
-            Ui.Quality(e.Graphics);            var hit = ThumbRect();
+            Ui.Quality(e.Graphics);
+            var hit = ThumbRect();
             if (hit.IsEmpty) return;
             // The visible bar is inset inside the grab zone so the two never disagree.
             var bar = new RectangleF(Width - Ui.S(9), hit.Y, Ui.S(5), hit.Height);
@@ -1605,7 +1820,9 @@ namespace JoeBrowser
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            Focus();
+            /* Focus on the surface, but never steal it from a text field the user is typing in:
+               clicking empty page space should not eat the caret. */
+            if (!ContainsFocus) { try { Focus(); } catch { } }
             if (e.Button == MouseButtons.Left && ThumbRect().Contains(e.Location))
             {
                 _dragging = true;
@@ -1647,25 +1864,61 @@ namespace JoeBrowser
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             base.OnMouseWheel(e);
-            ScrollTo(_offset - (e.Delta / 120) * Ui.S(64));
+            Wheel(e.Delta);
         }
 
-        protected override bool IsInputKey(Keys keyData)
+        /// <summary>
+        /// One notch of the wheel. Kept separate so a descendant that handles the wheel itself
+        /// (a multiline field, the grid) can hand the rest of the gesture up to the page.
+        /// </summary>
+        public void Wheel(int delta)
         {
-            return keyData == Keys.Down || keyData == Keys.Up || keyData == Keys.PageDown ||
-                   keyData == Keys.PageUp || keyData == Keys.Home || keyData == Keys.End || base.IsInputKey(keyData);
+            if (delta == 0 || MaxOffset == 0) return;
+            ScrollTo(_offset - (delta / 120) * Ui.S(64));
         }
 
-        protected override void OnKeyDown(KeyEventArgs e)
+        /// <summary>
+        /// Windows delivers WM_MOUSEWHEEL to the focused window, not to the one under the
+        /// pointer, and only forwards it up the parent chain while nothing consumes it. Inside a
+        /// page the focused window is usually a profile card or a chip - a control that neither
+        /// scrolls nor wants the gesture - so the notches that should have moved the page were
+        /// lost on the way down. Claiming the message here, at the host that owns the scrolling,
+        /// catches every descendant that did not take it for itself (a multiline field still
+        /// does, and hands back only what it cannot use).
+        /// </summary>
+        protected override void WndProc(ref Message m)
         {
-            int step = Ui.S(64);
-            if (e.KeyCode == Keys.Down) ScrollTo(_offset + step);
-            else if (e.KeyCode == Keys.Up) ScrollTo(_offset - step);
-            else if (e.KeyCode == Keys.PageDown) ScrollTo(_offset + Height - step);
-            else if (e.KeyCode == Keys.PageUp) ScrollTo(_offset - Height + step);
-            else if (e.KeyCode == Keys.Home) ScrollTo(0);
-            else if (e.KeyCode == Keys.End) ScrollTo(MaxOffset);
-            base.OnKeyDown(e);
+            const int WM_MOUSEWHEEL = 0x020A;
+            if (m.Msg == WM_MOUSEWHEEL)
+            {
+                int delta = (short)(((long)m.WParam.ToInt64() >> 16) & 0xFFFF);
+                if (delta != 0 && MaxOffset > 0) { Wheel(delta); return; }
+            }
+            base.WndProc(ref m);
+        }
+
+        /// <summary>
+        /// Home, End and the page keys are command keys for WinForms, not input keys: for a
+        /// Panel they are resolved by the dialog-key pass BEFORE OnKeyDown ever runs, so the
+        /// old OnKeyDown handler never saw them and only the arrows worked - and even those
+        /// only once the panel had focus, which no amount of tabbing reliably gave it. All of
+        /// them are routed here instead, from the message loop, which is the only place that
+        /// can claim the whole set.
+        /// </summary>
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            switch (keyData)
+            {
+                case Keys.Down: ScrollTo(_offset + Ui.S(64)); return true;
+                case Keys.Up: ScrollTo(_offset - Ui.S(64)); return true;
+                case Keys.PageDown: ScrollTo(_offset + Height - Ui.S(64)); return true;
+                case Keys.PageUp: ScrollTo(_offset - Height + Ui.S(64)); return true;
+                case Keys.Home: ScrollTo(0); return true;
+                case Keys.End: ScrollTo(MaxOffset); return true;
+                case Keys.Control | Keys.Home: ScrollTo(0); return true;
+                case Keys.Control | Keys.End: ScrollTo(MaxOffset); return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         public void ReStyle() { BackColor = Theme.Bg; Invalidate(); }
@@ -1712,7 +1965,21 @@ namespace JoeBrowser
         /// Columns are chosen so each row always spans the full width: a wide window gets more
         /// cards per row instead of a capped grid with dead space on the right.
         /// </summary>
+        private bool _layingOut;
+
         public void LayoutGrid()
+        {
+            /* Setting Height below raises OnResize, which calls straight back in here. The
+               second pass computes the same numbers, so it is harmless today - but it re-enters
+               this method in the middle of the control loop, and the guard makes that
+               impossible rather than merely unlikely. */
+            if (_layingOut) return;
+            _layingOut = true;
+            try { LayoutGridCore(); }
+            finally { _layingOut = false; }
+        }
+
+        private void LayoutGridCore()
         {
             int gap = Ui.S(Gap);
             int min = Ui.S(MinCell);
@@ -1756,7 +2023,14 @@ namespace JoeBrowser
             Cursor = Cursors.Hand;
             Font = Theme.Body;
             _timer.Interval = 3400;
-            _timer.Tick += delegate { Hide(); };
+            _timer.Tick += delegate
+            {
+                /* A long warning takes more than three seconds to read, and the pointer resting
+                   on the bar is the user saying "I am reading this". The countdown restarts when
+                   they move away instead of deleting the message under their eyes. */
+                if (_hover) { _timer.Stop(); return; }
+                Hide();
+            };
         }
 
         /// <summary>
@@ -1908,9 +2182,10 @@ namespace JoeBrowser
         {
             var g = e.Graphics;
             Ui.Quality(g);
-            Color c = _hover || Focused ? Theme.AccentHi : Theme.AccentText;
+            bool focused = Ui.FocusCues(this);
+            Color c = _hover || focused ? Theme.AccentHi : Theme.AccentText;
             Ui.Text(g, Text, Font, c, Ui.S(2), (Height - Font.GetHeight(g)) / 2f, Width - Ui.S(4));
-            if (_hover || Focused)
+            if (_hover || focused)
             {
                 using (var pen = new Pen(c, 1f))
                 {
@@ -1987,7 +2262,7 @@ namespace JoeBrowser
             Ui.Text(g, _checked ? NightText : DayText, Theme.Body, Theme.Text,
                 Ui.S(47), (Height - Theme.Body.GetHeight(g)) / 2f, Width - Ui.S(58));
 
-            if (Focused && ShowFocusCues) Ui.FocusRing(g, r, Ui.S(4));
+            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(4));
         }
     }
 
@@ -2015,7 +2290,10 @@ namespace JoeBrowser
         {
             var g = e.Graphics;
             Ui.Quality(g);
-            g.Clear(Theme.Bg);
+            /* The rounded corners have to show the surface BEHIND the card, not a hard-coded
+               Theme.Bg: a card nested in a page or dialog with a different backdrop had four
+               bright corner pixels that read as a rendering artefact. */
+            g.Clear(Ui.SurfaceColor(this));
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             Ui.Fill(g, r, Theme.RLarge, _hover ? Color.FromArgb(255, Theme.PanelHover) : Theme.Panel);
             Ui.Stroke(g, r, Theme.RLarge, Theme.Line, 1f);

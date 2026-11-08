@@ -265,7 +265,8 @@ namespace JoeBrowser
             Ui.Quality(g);
             if (Item == null) return;
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(6), Theme.Card);
+            bool cues = Ui.FocusCues(this);
+            Ui.Fill(g, r, Ui.S(6), cues ? Theme.PanelHover : Theme.Card);
             Ui.Stroke(g, r, Ui.S(6), Theme.Line, 1f);
 
             float chip = Ui.S(34);
@@ -302,6 +303,7 @@ namespace JoeBrowser
             float kx = on ? sw.Right - knob - Ui.S(3) : sw.X + Ui.S(3);
             using (var b = new SolidBrush(Theme.OnAccent)) g.FillEllipse(b, kx, sw.Y + Ui.S(3), knob, knob);
             if (!on) Ui.Stroke(g, sw, sw.Height / 2f, Theme.Line, 1f);
+            if (cues) Ui.FocusRing(g, r, Ui.S(6));
         }
     }
 
@@ -317,19 +319,45 @@ namespace JoeBrowser
             _title = title;
             _desc = desc;
             _icon = icon;
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.UserPaint | ControlStyles.Selectable, true);
             Ui.Opaque(this);
             Cursor = Cursors.Hand;
+            TabStop = true;
         }
 
         public void ReStyle() { Invalidate(); }
         protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(Ui.SurfaceColor(this)); }
         protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
         protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            return keyData == Keys.Enter || keyData == Keys.Space || base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Space)
+            {
+                var h = OpenRequested;
+                if (h != null) h(this, EventArgs.Empty);
+                e.Handled = true;
+            }
+            base.OnKeyDown(e);
+        }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button == MouseButtons.Left) { var h = OpenRequested; if (h != null) h(this, EventArgs.Empty); }
+            if (e.Button == MouseButtons.Left)
+            {
+                Focus();
+                var h = OpenRequested;
+                if (h != null) h(this, EventArgs.Empty);
+            }
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -339,6 +367,7 @@ namespace JoeBrowser
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             Ui.Fill(g, r, Ui.S(8), _hover ? Theme.PanelHover : Theme.Panel);
             Ui.Stroke(g, r, Ui.S(8), _hover ? Theme.AccentBorder : Theme.Line, 1f);
+            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(8));
 
             float chip = Ui.S(34);
             var cr = new RectangleF(Ui.S(14), (Height - chip) / 2f, chip, chip);

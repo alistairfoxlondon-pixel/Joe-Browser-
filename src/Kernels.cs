@@ -219,6 +219,9 @@ namespace JoeBrowser
             if (!full.StartsWith(Path.GetFullPath(Root), StringComparison.OrdinalIgnoreCase)) return;
             try { Directory.Delete(full, true); }
             catch (Exception ex) { Log.Error("Kernel delete failed", ex); throw; }
+            /* The inventory other code reasons about just changed; a stale list would let a
+               profile keep pinning a build that no longer exists. */
+            KernelDiversity.Invalidate();
         }
 
         // ------------------------------------------------------------------ catalog
@@ -385,6 +388,7 @@ namespace JoeBrowser
             }
             catch { }
             Log.Info("Kernel installed: " + rel.Engine + " " + rel.Version + " -> " + exe);
+            KernelDiversity.Invalidate();
             return k;
         }
 

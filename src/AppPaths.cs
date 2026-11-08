@@ -43,6 +43,29 @@ namespace JoeBrowser
             Directory.CreateDirectory(Extensions);
             Directory.CreateDirectory(Trash);
             Directory.CreateDirectory(Exports);
+
+            /* A .NET file dialog will not open a folder that does not exist, and the
+               "add an extension" and "browse browser" actions start in these two. */
+            Directory.CreateDirectory(Browsers);
+            Directory.CreateDirectory(Kernels);
+        }
+
+        /// <summary>
+        /// True when the data folder is writable. Called once at start-up: without it a
+        /// redirected or read-only %APPDATA% produced an app that launched, looked normal and
+        /// silently lost every profile and setting on exit.
+        /// </summary>
+        public static bool IsWritable()
+        {
+            try
+            {
+                Directory.CreateDirectory(Root);
+                string probe = Path.Combine(Root, ".write-test");
+                File.WriteAllText(probe, "ok");
+                File.Delete(probe);
+                return true;
+            }
+            catch { return false; }
         }
     }
 }

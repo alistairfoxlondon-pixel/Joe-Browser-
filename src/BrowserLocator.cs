@@ -129,9 +129,28 @@ namespace JoeBrowser
                 string full;
                 try { full = System.IO.Path.GetFullPath(c); } catch { continue; }
                 if (!seen.Add(full)) continue;
-                result.Add(FromFile(full));
+                var info = FromFile(full);
+                /* FromFile reads the version resource, and a read that fails must not remove an
+                   executable that is demonstrably on disk: an entry with no version is a true
+                   statement, a missing entry is not. Found is derived from the path, so it stays
+                   correct either way. */
+                if (info == null) info = new BrowserInfo { Path = full, Name = EngineNameFromPath(full) };
+                result.Add(info);
             }
+            /* A failed candidate must never be able to throw the whole list away: an empty list
+               is indistinguishable from "no browser on this PC". */
             return result;
+        }
+
+        /// <summary>A display name from the file name alone, used when the version resource is unreadable.</summary>
+        private static string EngineNameFromPath(string path)
+        {
+            string n = path ?? "";
+            if (n.EndsWith("msedge.exe", StringComparison.OrdinalIgnoreCase)) return "Edge";
+            if (n.EndsWith("brave.exe", StringComparison.OrdinalIgnoreCase)) return "Brave";
+            if (n.EndsWith("firefox.exe", StringComparison.OrdinalIgnoreCase)) return "Firefox";
+            if (n.IndexOf("chromium", StringComparison.OrdinalIgnoreCase) >= 0) return "Chromium";
+            return "Chrome";
         }
 
         private static void AddRegistry(List<string> list, string key)

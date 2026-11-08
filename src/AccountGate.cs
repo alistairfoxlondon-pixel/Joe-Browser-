@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace JoeBrowser
@@ -27,7 +28,7 @@ namespace JoeBrowser
             StartPosition = FormStartPosition.CenterScreen;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new Size(Ui.S(440), Ui.S(430));
+            ClientSize = new Size(Ui.S(440), Ui.S(448));
 
             _title = new JBLabel
             {
@@ -61,10 +62,14 @@ namespace JoeBrowser
             {
                 ForeColor = Theme.Danger,
                 AutoSize = false,
-                Size = new Size(Ui.S(360), Ui.S(22)),
-                Location = new Point(Ui.S(40), Ui.S(196)),
+                /* Two lines, wrapping: a Google failure explains what to do next, and a single
+                   22 px line clipped every useful word of it. One line when it only carries the
+                   "waiting for Google" status, so it does not sit over the Sign in button. */
+                Size = new Size(Ui.S(360), Ui.S(34)),
+                Location = new Point(Ui.S(40), Ui.S(186)),
                 Visible = false
             };
+            _error.Wrap = true;
 
             _signIn = new JBButton { Text = "Sign in", Kind = BtnKind.Primary, Size = new Size(Ui.S(360), Ui.S(38)), Location = new Point(Ui.S(40), Ui.S(226)) };
             _signIn.Click += delegate { DoEmail(); };
@@ -75,6 +80,7 @@ namespace JoeBrowser
             {
                 Text = "Continue with Google",
                 Kind = BtnKind.Ghost,
+                BrandIcon = "google",
                 Size = new Size(Ui.S(360), Ui.S(38)),
                 Location = new Point(Ui.S(40), Ui.S(272))
             };
@@ -95,6 +101,36 @@ namespace JoeBrowser
 
             Controls.AddRange(new Control[] { _title, _subtitle, _email, _name, _password, _error, _signIn, _signUp, _google, _toggle });
             Theme.Restyle(this);
+
+            /* Tab order follows the layout, not the order the controls were created in: the
+               display-name field was added last but sits between the email and password boxes,
+               so Tab used to jump from the address straight into the buttons. In sign-in mode
+               the name field is hidden and the order collapses to email -> password by itself. */
+            _email.TabIndex = 0;
+            _name.TabIndex = 1;
+            _password.TabIndex = 2;
+            _signIn.TabIndex = 3;
+            _signUp.TabIndex = 3;
+            _google.TabIndex = 4;
+            _toggle.TabIndex = 5;
+            Shown += delegate { try { _email.Box.Focus(); } catch { } };
+        }
+
+        /// <summary>
+        /// The gate is the only way into the app, so it must not be dismissible by a stray Esc:
+        /// closing it quits Joe Browser. Esc clears the focused field instead, and the window
+        /// keeps its close button.
+        /// </summary>
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Escape)
+            {
+                _error.Visible = false;
+                if (_password.Box.Focused) _password.Value = "";
+                else if (_email.Box.Focused || ActiveControl == _email) _email.Value = "";
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private void ToggleMode()
@@ -104,12 +140,15 @@ namespace JoeBrowser
             _signUp.Visible = _registering;
             _name.Visible = _registering;
             _password.Location = new Point(Ui.S(40), Ui.S(_registering ? 192 : 150));
-            _error.Location = new Point(Ui.S(40), Ui.S(_registering ? 236 : 196));
-            int top = _registering ? 266 : 226;
-            _signIn.Location = new Point(Ui.S(40), Ui.S(top));
-            _signUp.Location = new Point(Ui.S(40), Ui.S(top));
-            _google.Location = new Point(Ui.S(40), Ui.S(top + 46));
-            _toggle.Location = new Point(Ui.S(40), Ui.S(top + 96));
+            /* The label is two lines tall now, so the message box and the buttons below it move
+               down with it: a single-line layout put the second line of every long message
+               underneath the Sign in button. */
+            _error.Location = new Point(Ui.S(40), Ui.S(_registering ? 236 : 186));
+            int top = _registering ? Ui.S(272) : Ui.S(228);
+            _signIn.Location = new Point(Ui.S(40), top);
+            _signUp.Location = new Point(Ui.S(40), top);
+            _google.Location = new Point(Ui.S(40), top + Ui.S(46));
+            _toggle.Location = new Point(Ui.S(40), top + Ui.S(96));
             _toggle.Text = _registering ? "Already have an account? Sign in" : "New here? Create an account";
             Text = _registering ? "Joe Browser - Create account" : "Joe Browser - Sign in";
             _title.Text = _registering ? "Create your Joe Browser account" : "Welcome to Joe Browser";
@@ -163,26 +202,113 @@ namespace JoeBrowser
             Close();
         }
 
-        private void DoGoogle()
+        private bool _busy;
+
+        /// <summary>
+        /// Shows that a long step is running and stops the form being clicked again while it
+        /// is. Sign-in waits on the browser for up to three minutes, and without this the
+        /// window simply froze with no explanation and could not even be closed.
+        /// </summary>
+        private void SetBusy(bool busy, string message)
         {
-            /* Real Google sign-in runs through the browser with OAuth. The client id is the
-               one piece of configuration that cannot ship inside the app - it belongs to the
-               publisher's Google Cloud project. Until it is configured the button explains
-               exactly that instead of failing silently. */
-            string clientId = GoogleSignIn.ClientId();
-            if (!GoogleSignIn.LooksValid(clientId))
+            _busy = busy;
+            _signIn.Enabled = _signUp.Enabled = _google.Enabled = !busy;
+            _email.Enabled = _password.Enabled = _name.Enabled = !busy;
+            Cursor = busy ? Cursors.AppStarting : Cursors.Default;
+            UseWaitCursor = busy;
+            if (message == null)
             {
-                Fail(clientId.Length == 0
-                    ? "Add a Google client id in Settings \u203a Account."
-                    : "That is not a Google client id. It ends with .apps.googleusercontent.com.");
+                _error.Visible = false;
+                _error.ForeColor = Theme.Danger;
                 return;
             }
-            var result = GoogleSignIn.SignIn(clientId);
-            if (!result.Ok) { Fail(result.Message); return; }
-            SignedIn = Accounts.SignInGoogle(result.Identity.Id, result.Identity.Email,
-                result.Identity.Name, result.Identity.Picture);
-            DialogResult = DialogResult.OK;
-            Close();
+            /* A status is not an error: "Waiting for Google" shown in the error colour made a
+               normal step look like a failure. */
+            _error.ForeColor = Theme.TextDim;
+            _error.Text = message;
+            _error.Visible = true;
+        }
+
+        /// <summary>
+        /// Google sign-up and sign-in are the same flow: a first-time Google account creates a
+        /// local account on the spot, which is what "Continue with Google" promises.
+        /// </summary>
+        private async void DoGoogle()
+        {
+            if (_busy) return;
+            _error.Visible = false;
+
+            try
+            {
+                /* The client id belongs to the publisher's Google Cloud project and is the one
+                   thing the app cannot invent, so when it is missing this opens the guided
+                   setup instead of refusing with a message pointing at a Settings card the
+                   first-run window cannot even reach - which is why users described sign-up as
+                   simply broken. */
+                string clientId = GoogleSignIn.ClientId();
+                if (!GoogleSignIn.LooksValid(clientId))
+                {
+                    if (!GoogleSetupDialog.Ensure(this, clientId))
+                    {
+                        _error.ForeColor = Theme.Danger;
+                        Fail("Google sign-in is not set up yet.");
+                        return;
+                    }
+                    clientId = GoogleSignIn.ClientId();
+                    if (!GoogleSignIn.LooksValid(clientId))
+                    {
+                        Fail("Google sign-in is not set up yet.");
+                        return;
+                    }
+                }
+
+                SetBusy(true, "Waiting for Google\u2026 finish in your browser.");
+                GoogleResult result;
+                try
+                {
+                    /* On a worker thread: the listener and the token exchange must not block
+                       the message loop, or the window cannot repaint the status above. */
+                    string id = clientId;
+                    result = await Task.Run(new Func<GoogleResult>(delegate { return GoogleSignIn.SignIn(id); }));
+                }
+                finally
+                {
+                    SetBusy(false, null);
+                }
+
+                if (result == null || !result.Ok)
+                {
+                    _error.ForeColor = Theme.Danger;
+                    string message = result == null ? "Google sign-in failed." : result.Message;
+                    if (result != null && GoogleSignIn.IsSetupProblem(result.Code))
+                        message += "  Use \u201cContinue with Google\u201d again once the client id is fixed.";
+                    Fail(message);
+                    return;
+                }
+
+                Account account = Accounts.SignInGoogle(result.Identity.Id, result.Identity.Email,
+                    result.Identity.Name, result.Identity.Picture);
+                if (account == null)
+                {
+                    _error.ForeColor = Theme.Danger;
+                    Fail("Google accepted the sign-in but the account could not be created on this PC. "
+                       + "Check that %APPDATA%\\JoeBrowser is writable.");
+                    return;
+                }
+
+                SignedIn = account;
+                DialogResult = DialogResult.OK;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                /* An async void handler that throws takes the whole process down through the
+                   global handler; this keeps a Google problem inside the form. */
+                Log.Error("Google sign-in failed", ex);
+                SetBusy(false, null);
+                _error.ForeColor = Theme.Danger;
+                Fail("Google sign-in failed: " + ex.Message);
+            }
         }
 
     }

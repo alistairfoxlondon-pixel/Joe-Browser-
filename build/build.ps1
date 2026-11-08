@@ -60,6 +60,19 @@ $lines.Add('/resource:"' + (Join-Path $src "app.ico") + '",JoeBrowser.app.ico')
 foreach ($logo in @("chrome", "chromium", "brave", "firefox", "edge", "usdc", "usdt", "dai", "bnb", "sol", "ltc", "matic", "trx")) {
     $lines.Add('/resource:"' + (Join-Path $src ("logos\" + $logo + ".png")) + '",JoeBrowser.logos.' + $logo + '.png')
 }
+# The UI type and the Material icon face travel INSIDE the executable. The installer copies
+# only JoeBrowser.exe, so an installed build used to have no fonts folder beside it and drew
+# no icons at all; embedding the faces (and extracting them on first run) removes that whole
+# class of "the icons are missing" reports. MaterialIcons-Regular.otf is not a valid sfnt and
+# is therefore not embedded - it is a stale copy of the .ttf.
+$fontDir = Join-Path $src "fonts"
+if (Test-Path $fontDir) {
+    $fonts = @(Get-ChildItem $fontDir -File | Where-Object { $_.Extension -eq ".ttf" -or $_.Extension -eq ".otf" })
+    foreach ($font in $fonts) {
+        if ($font.Name -eq "MaterialIcons-Regular.otf") { continue }
+        $lines.Add('/resource:"' + $font.FullName + '",JoeBrowser.fonts.' + $font.Name)
+    }
+}
 $lines.Add('/out:"' + $out + '"')
 foreach ($r in $refNames) { $lines.Add('/r:"' + (Join-Path $fw $r) + '"') }
 foreach ($s in $sources) { $lines.Add('"' + $s + '"') }

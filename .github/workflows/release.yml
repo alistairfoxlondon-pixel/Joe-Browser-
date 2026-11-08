@@ -1,0 +1,195 @@
+name: Release
+
+# Builds JoeBrowser.exe and JoeBrowserSetup.exe on a real Windows runner and publishes them.
+#
+# This exists because the EXE has to be produced by a Windows toolchain: the app is WinForms on
+# .NET Framework 4.8 and links against the machine's GDI and Win32 APIs, so it cannot be
+# cross-built honestly from a Linux container. Pushing a tag such as v1.3.0 runs this workflow,
+# smoke-tests the binary it just made, and attaches both files to the release with the exact
+# names the README links to (releases/latest/download/JoeBrowserSetup.exe).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (for example v1.3.0)'
+        required: true
+        default: 'v1.3.0'
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+
+jobs:
+  build:
+    name: Build and release
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@v4
+
+      - name: Read the version from the source
+        id: ver
+        shell: pwsh
+        run: |
+          # The one place the version is allowed to live is AssemblyInfo.cs; everything else
+          # (asset names, release title, the tag check) is derived from it, so the two cannot
+          # disagree at release time.
+          $text = Get-Content src/AssemblyInfo.cs -Raw
+          if ($text -notmatch 'AssemblyInformationalVersion\("([0-9]+\.[0-9]+\.[0-9]+)"\)') {
+            throw 'Could not read AssemblyInformationalVersion from src/AssemblyInfo.cs'
+          }
+          $version = $Matches[1]
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Version $version"
+
+      - name: Locate the SDK compiler
+        id: csc
+        shell: pwsh
+        run: |
+          # The repo builds with csc.exe directly (no project file, no NuGet), which is why the
+          # build scripts take a -Csc path. The SDK ships Roslyn, so that path is satisfied here.
+          $base = (& dotnet --info | Out-String)
+          if ($base -notmatch 'Base Path:\s*(.+)') { throw 'Could not find the dotnet base path' }
+          $roslyn = Join-Path $Matches[1].Trim() 'Roslyn\bincore\csc.dll'
+          if (-not (Test-Path $roslyn)) { throw "No Roslyn compiler at $roslyn" }
+          "path=$roslyn" >> $env:GITHUB_OUTPUT
+
+          # Both build scripts take -Csc and invoke it as csc.exe, so the forwarding wrapper is
+          # created once here and reused. It lives in RUNNER_TEMP and never reaches the repo.
+          $wrapper = Join-Path $env:RUNNER_TEMP 'csc.cmd'
+          "@echo off`r`ndotnet `"$roslyn`" %*" | Set-Content -Path $wrapper -Encoding ASCII
+          "wrapper=$wrapper" >> $env:GITHUB_OUTPUT
+          Write-Host "Compiler: $roslyn"
+
+      - name: Build JoeBrowser.exe
+        shell: pwsh
+        run: |
+          # build.ps1 drives csc directly; the wrapper forwards to the SDK's Roslyn.
+          .\build\build.ps1 -Csc '${{ steps.csc.outputs.wrapper }}'
+
+      - name: Build JoeBrowserSetup.exe
+        shell: pwsh
+        run: |
+          # setup.ps1 takes the same -Csc parameter, so nothing has to be written into the repo.
+          .\build\setup.ps1 -Csc '${{ steps.csc.outputs.wrapper }}'
+
+      - name: Verify the binaries
+        shell: pwsh
+        run: |
+          $want = '${{ steps.ver.outputs.version }}'
+          foreach ($f in @('dist\JoeBrowser.exe', 'dist\JoeBrowserSetup.exe')) {
+            if (-not (Test-Path $f)) { throw "$f was not produced" }
+            $size = (Get-Item $f).Length
+            if ($size -lt 200KB) { throw "$f is only $size bytes - the build did not link properly" }
+            $version = (Get-Item $f).VersionInfo.FileVersion
+            if ($version -ne "$want.0") { throw "$f reports $version, expected $want.0" }
+            Write-Host ("{0}  {1:N0} bytes  {2}" -f $f, $size, $version)
+          }
+
+          # A WinForms binary that cannot resolve its own types is the one failure a size check
+          # cannot see. --help walks every type the app needs on the way to its first window and
+          # exits without touching the user's data, so it is the cheapest real smoke test.
+          Copy-Item 'src\JoeBrowser.exe.config' 'dist\JoeBrowser.exe.config' -Force
+          $p = Start-Process -FilePath 'dist\JoeBrowser.exe' -ArgumentList '--help' -PassThru
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw 'JoeBrowser.exe --help hung' }
+          if ($p.ExitCode -ne 0) { throw "JoeBrowser.exe --help exited with $($p.ExitCode)" }
+          Write-Host 'Smoke test passed: the binary starts and resolves its own types.'
+
+      - name: Stage the release assets
+        shell: pwsh
+        run: |
+          # Flat, predictable asset names: the README links to releases/latest/download/<name>,
+          # so a renamed asset silently breaks every download link on the page.
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item 'dist\JoeBrowser.exe'      'out\JoeBrowser.exe'      -Force
+          Copy-Item 'dist\JoeBrowserSetup.exe' 'out\JoeBrowserSetup.exe' -Force
+          $hash = Get-FileHash 'out\JoeBrowserSetup.exe' -Algorithm SHA256
+          "$($hash.Hash)  JoeBrowserSetup.exe" | Set-Content 'out\SHA256.txt' -Encoding ASCII
+          Get-ChildItem out | Format-Table Name, Length
+
+      - name: Check the tag matches the build
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          if ('${{ github.ref_name }}' -ne '${{ steps.ver.outputs.tag }}') {
+            throw "Tag ${{ github.ref_name }} does not match the version in AssemblyInfo.cs (${{ steps.ver.outputs.version }}). Bump the source, or move the tag."
+          }
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          name: Joe Browser ${{ steps.ver.outputs.version }} - Download JoeBrowserSetup.exe (Windows)
+          tag_name: ${{ github.ref_name }}
+          files: |
+            out/JoeBrowser.exe
+            out/JoeBrowserSetup.exe
+            out/SHA256.txt
+          body: |
+            ## Joe Browser ${{ steps.ver.outputs.version }}
+
+            **Download and run `JoeBrowserSetup.exe`.** Windows 10/11, 64-bit. The installer is
+            per-user, so there is no administrator prompt and nothing is written outside your
+            profile. `JoeBrowser.exe` is the same app as one portable file: run it with
+            `--portable` if you would rather not install.
+
+            Requirements: any installed Chromium-based browser or Firefox. The Browsers page can
+            install Chrome, Brave or Chromium for you.
+
+            ### What is new in 1.3.0
+
+            **Every new profile is now provably different from every other one.** Profiles used to
+            be generated by pure chance over small pools, so a workspace of thirty reliably
+            contained several pairs sharing a GPU or a screen. Profiles are now compared across
+            twelve fingerprint surfaces and re-rolled until they are unique, with a deterministic
+            fallback for dense workspaces. Every card shows a short signature, so two identical
+            profiles are visible at a glance.
+
+            **A different browser build per profile.** When more than one kernel is installed, a
+            new profile takes the build the workspace is using least, and a duplicate takes a
+            different build from its source. With a single build installed, the app says so
+            instead of pretending.
+
+            **Account audit.** Tools > Account audit finds profiles that read as one browser, and
+            separately flags profiles sharing one proxy address - which no fingerprint can hide.
+            One button re-rolls what is fixable and reports what is not.
+
+            **Impossible machines are repaired.** A stored profile claiming a Direct3D renderer on
+            macOS, 16 GB of `deviceMemory`, or Android with no touch points is corrected when it
+            loads, without touching its seed, so its identity stays unique.
+
+            ### Fixes in this build
+
+            - A profile's signature no longer changes the first time it is opened.
+            - The fingerprint check compares the WebGL renderer exactly, and shows what the page
+              answered instead of echoing the value it expected.
+            - Signatures ignore letter case, so `windows 11` and `Windows 11` are recognised as one
+              machine.
+            - Bulk duplicate counts the copies it actually saved.
+            - Starting a second copy no longer unloads the first one's fonts.
+            - The fingerprint and audit windows close on Esc, like every other window.
+
+            ### Notes
+
+            The binaries are unsigned, so Windows may show "unknown publisher" the first time.
+            That warning is removed by a code-signing certificate, not by anything in the code.
+            `SHA256.txt` is attached for verification.
+
+      - name: Keep the binaries as a workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: joebrowser-${{ steps.ver.outputs.version }}
+          path: out/
+          if-no-files-found: warn
