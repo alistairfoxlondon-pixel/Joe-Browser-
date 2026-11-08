@@ -125,18 +125,15 @@ namespace JoeBrowser
 
             int bw = _close.PreferredWidth(Ui.S(96));
             _close.SetBounds(w - pad - bw, h - Ui.S(16) - Ui.S(33), bw, Ui.S(33));
-            int x = pad;
-            if (_browserScan.Visible)
-            {
-                int w1 = _browserScan.PreferredWidth(Ui.S(150));
-                int w2 = _ipFighter.PreferredWidth(Ui.S(130));
-                _browserScan.SetBounds(x, h - Ui.S(16) - Ui.S(33), w1, Ui.S(33));
-                x += w1 + Ui.S(8);
-                _ipFighter.SetBounds(x, h - Ui.S(16) - Ui.S(33), w2, Ui.S(33));
-                x += w2 + Ui.S(8);
-            }
-            int w3 = _report.PreferredWidth(Ui.S(100));
-            _report.SetBounds(x, h - Ui.S(16) - Ui.S(33), w3, Ui.S(33));
+
+            /* The footer buttons used to be laid out from the left with no regard for Close on
+               the right, so on a narrow window the report button was drawn under it. They flow
+               now and wrap, and the measured widths of all four are taken into account. */
+            JBButton[] footer = _browserScan.Visible
+                ? new[] { _browserScan, _ipFighter, _report }
+                : new[] { _report };
+            int avail = Math.Max(Ui.S(120), _close.Left - Ui.S(8) - pad);
+            Ui.FlowButtons(footer, pad, h - Ui.S(16) - Ui.S(33), avail, Ui.S(8), Ui.S(33));
         }
 
         private void Open(string url)

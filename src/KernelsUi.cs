@@ -136,8 +136,13 @@ namespace JoeBrowser
             int cwid = _close.PreferredWidth(Ui.S(84));
             _refresh.SetBounds(pad, h - Ui.S(16) - Ui.S(33), rw, Ui.S(33));
             _close.SetBounds(pad + rw + Ui.S(8), h - Ui.S(16) - Ui.S(33), cwid, Ui.S(33));
-            _note.SetBounds(pad + rw + cwid + Ui.S(24), h - Ui.S(16) - Ui.S(30),
-                Math.Max(Ui.S(80), w - pad * 2 - rw - cwid - Ui.S(32)), Ui.S(30));
+            /* The note shares the footer row with two buttons whose widths depend on the
+               language, so the space it is given is clamped at zero rather than allowed to
+               become a negative width that draws nothing at all. */
+            int noteX = pad + rw + cwid + Ui.S(24);
+            int noteW = Math.Max(0, w - pad - noteX);
+            _note.Visible = noteW >= Ui.S(80);
+            if (_note.Visible) _note.SetBounds(noteX, h - Ui.S(16) - Ui.S(30), noteW, Ui.S(30));
         }
 
         private void ClearRows()
