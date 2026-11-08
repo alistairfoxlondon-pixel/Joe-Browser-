@@ -96,7 +96,9 @@ namespace JoeBrowser
         }
 
         /// <summary>Points the page at a profile and rebuilds the list from disk.</summary>
-        public void Show(Profile profile)
+        /* Show is a Control method, so this overload has to be new or the compiler binds to the
+           inherited one and the page never receives the profile. */
+        public new void Show(Profile profile)
         {
             Profile = profile;
             _selected = -1;
