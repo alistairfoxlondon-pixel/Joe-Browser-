@@ -450,6 +450,46 @@ namespace JoeBrowser
                 var ignored = StampSessionAsync(sessionId, null, info != null ? Str(info, "url") : "");
                 return;
             }
+            /* ---- Browsing history ----
+               FrameNavigated is the page's own statement that it now shows a different document,
+               and it fires for every hop in a redirect chain, not only for the URL that ends up
+               in the address bar. FrameStartedNavigating fires before the request, which is the
+               only way to see a hop that is answered from cache or aborted mid-chain. Neither
+               is a request-level event, so no sub-resource is recorded: the unit is "the page
+               became this document". */
+            if (method == "Page.frameNavigated" || method == "Page.frameStartedNavigating")
+            {
+                var frame = Get<Dictionary<string, object>>(args, "frame");
+                bool top = frame != null && string.IsNullOrEmpty(Str(frame, "parentId"));
+                if (!top) return;
+                string url = frame != null ? Str(frame, "url") : Str(args, "url");
+                string navType = frame != null ? Str(frame, "type") : "";
+                if (method == "Page.frameStartedNavigating") navType = Str(args, "navigationType");
+                /* Back and forward are the user asking to see something they already saw; a
+                   reload is the same document again. Recording those would triple every entry
+                   the first time the user moves through their own history. */
+                if (navType.Equals("BackForwardCacheRestore", StringComparison.OrdinalIgnoreCase)) return;
+                if (method == "Page.frameNavigated" && navType.Equals("SameDocument", StringComparison.OrdinalIgnoreCase)) return;
+                HistoryStore.Add(Profile != null ? Profile.Id : null,
+                    Profile != null ? Profile.Name : null,
+                    url, "", method == "Page.frameStartedNavigating");
+                return;
+            }
+            if (method == "Page.titleUpdated" || method == "Page.frameNavigated")
+            {
+                /* Best effort: the title usually arrives after the document starts, so the
+                   history entry is rewritten with it rather than waiting to record the visit. */
+                string t = Str(args, "title");
+                if (!string.IsNullOrEmpty(t) && Profile != null) HistoryStore.SetLastTitle(Profile.Id, t);
+            }
+            if (method == "Page.navigatedWithinDocument")
+            {
+                /* A single-page app changes the document it "is" without a navigation event. */
+                string frag = Str(args, "url");
+                if (Profile != null) HistoryStore.Add(Profile.Id, Profile.Name, frag, "", true);
+                return;
+            }
+
             if (method == "Target.detachedFromTarget" || method == "Target.targetDestroyed")
             {
                 string sessionId = Str(args, "sessionId");

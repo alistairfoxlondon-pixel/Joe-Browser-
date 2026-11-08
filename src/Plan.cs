@@ -23,6 +23,42 @@ namespace JoeBrowser
         public const int FreeProfiles = Entitlements.FreeProfiles;
         public const int FreeConcurrent = Entitlements.FreeConcurrent;
 
+        /// <summary>
+        /// Accounts the publisher has granted Pro to by hand. This is an administrative
+        /// allowlist held by the program's owner, not a payment: it is checked against the
+        /// signed-in account, so the grant follows the account to any machine it signs in on,
+        /// and nobody else is affected when it is edited. It is deliberately NOT a hidden bypass
+        /// for the paid plan - the list contains exactly the accounts the publisher named, and
+        /// every other account still needs a confirmed payment.
+        ///
+        /// Being an allowlist of email addresses in the binary is a real trade: anyone who reads
+        /// the file learns which accounts are comped (they still cannot sign in as them). That is
+        /// a much smaller exposure than a blanket bypass, which is why this is the shape used.
+        /// </summary>
+        private static readonly string[] ComplimentaryAccounts =
+        {
+            "alistairfox.london@gmail.com"
+        };
+
+        /// <summary>True when the signed-in account has been given a complimentary subscription.</summary>
+        public static bool IsComplimentary
+        {
+            get
+            {
+                var a = Session.Current;
+                return a != null && IsComplimentaryEmail(a.Email);
+            }
+        }
+
+        public static bool IsComplimentaryEmail(string email)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return false;
+            string key = email.Trim().ToLowerInvariant();
+            foreach (string s in ComplimentaryAccounts)
+                if (string.Equals(s, key, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
         private static readonly object Gate = new object();
         private static PlanData _data;
         private static bool _loaded;
@@ -57,6 +93,9 @@ namespace JoeBrowser
         {
             get
             {
+                /* A complimentary account never lapses, and never needs a license file. Checked
+                   before the file so the answer is the same on a machine that has never paid. */
+                if (IsComplimentary) return true;
                 var d = Load();
                 if (d == null || !"pro".Equals(d.Plan, StringComparison.OrdinalIgnoreCase)) return false;
                 DateTime until;
@@ -68,6 +107,9 @@ namespace JoeBrowser
         {
             get
             {
+                // Complimentary accounts have no end date, and inventing one would put a
+                // countdown in the UI for a subscription that does not expire.
+                if (IsComplimentary) return null;
                 var d = Load();
                 DateTime until;
                 if (d != null && TryDate(d.Until, out until)) return until;
@@ -78,6 +120,7 @@ namespace JoeBrowser
         /// <summary>"Pro until 7 December" or "Free plan".</summary>
         public static string Summary()
         {
+            if (IsComplimentary) return "Pro, unlimited";
             if (!IsPro) return "Free plan";
             var u = Until;
             return u == null ? "Pro" : "Pro until " + u.Value.ToLocalTime().ToString("d MMMM", CultureInfo.InvariantCulture);

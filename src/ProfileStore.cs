@@ -13,6 +13,50 @@ namespace JoeBrowser
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("JoeBrowser.Proxy.v1");
         private readonly JavaScriptSerializer _json = new JavaScriptSerializer();
 
+        /// <summary>
+        /// Folder holding the profiles of one account. History and profiles both hang off this,
+        /// so two accounts signed in on the same Windows user never see each other's data - which
+        /// is what "each user's history must remain separate" has to mean in an app whose data
+        /// lives in one profile folder.
+        /// </summary>
+        public static string DirFor(string email)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return AppPaths.Profiles;
+            string safe = Safe(email);
+            return Path.Combine(AppPaths.Root, "accounts", safe, "profiles");
+        }
+
+        private static string Safe(string s)
+        {
+            var sb = new StringBuilder();
+            foreach (char c in s.Trim().ToLowerInvariant())
+                sb.Append(char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_' || c == '@' ? c : '_');
+            string v = sb.ToString();
+            return v.Length == 0 ? "account" : v;
+        }
+
+        /// <summary>Root folder of the signed-in account, or the shared root when nobody is.</summary>
+        public static string ActiveRoot
+        {
+            get
+            {
+                var a = Session.Current;
+                return a == null || string.IsNullOrEmpty(a.Email)
+                    ? AppPaths.Root
+                    : Path.Combine(AppPaths.Root, "accounts", Safe(a.Email));
+            }
+        }
+
+        /// <summary>The profiles folder for the signed-in account.</summary>
+        public static string ActiveProfiles
+        {
+            get
+            {
+                var a = Session.Current;
+                return a == null || string.IsNullOrEmpty(a.Email) ? AppPaths.Profiles : DirFor(a.Email);
+            }
+        }
+
         public List<Profile> LoadAll()
         {
             var list = new List<Profile>();
@@ -22,8 +66,8 @@ namespace JoeBrowser
             var seeds = new HashSet<int>();
             try
             {
-                Directory.CreateDirectory(AppPaths.Profiles);
-                foreach (string file in Directory.GetFiles(AppPaths.Profiles, "*.json"))
+                Directory.CreateDirectory(ActiveProfiles);
+                foreach (string file in Directory.GetFiles(ActiveProfiles, "*.json"))
                 {
                     try
                     {
@@ -76,7 +120,7 @@ namespace JoeBrowser
 
         public void Save(Profile p)
         {
-            Directory.CreateDirectory(AppPaths.Profiles);
+            Directory.CreateDirectory(ActiveProfiles);
             /* A profile written before Proxy was initialised - an older file, a hand-edited
                one, a duplicate that lost a field - made every save throw a NullReferenceException
                from here, so the profile could never be edited again. */
@@ -97,7 +141,7 @@ namespace JoeBrowser
                 if (!string.IsNullOrEmpty(enc)) p.Proxy.PasswordEnc = enc;
             }
 
-            string target = Path.Combine(AppPaths.Profiles, p.Id + ".json");
+            string target = Path.Combine(ActiveProfiles, p.Id + ".json");
             string tmp = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
             string json = _json.Serialize(p);
             File.WriteAllText(tmp, json, new UTF8Encoding(true));
@@ -129,7 +173,7 @@ namespace JoeBrowser
         /// </summary>
         public void Delete(Profile p, bool useTrash)
         {
-            string file = Path.Combine(AppPaths.Profiles, p.Id + ".json");
+            string file = Path.Combine(ActiveProfiles, p.Id + ".json");
             if (useTrash)
             {
                 try

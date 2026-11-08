@@ -27,7 +27,7 @@ namespace JoeBrowser
         private List<ExtensionItem> _extensions = new List<ExtensionItem>();
 
         // Sidebar
-        private JBButton _navProfiles, _navProxies, _navExtensions, _navBrowsers, _navSettings, _navTools, _navAbout, _navPlan;
+        private JBButton _navProfiles, _navHistory, _navAccount, _navProxies, _navExtensions, _navBrowsers, _navSettings, _navTools, _navAbout, _navPlan;
         private JBLabel _navGroupWorkspace, _navGroupSystem;
         private JBThemeSwitch _themeSwitch;
 
@@ -49,6 +49,7 @@ namespace JoeBrowser
         private JBScrollHost _host;
         private JBGrid _grid;
         private Panel _settingsPage, _aboutPage, _emptyPanel;
+        private HistoryPage _historyPage;
         private Panel _aboutColumn;
         private JBScrollHost _aboutHost;
         private ToolsPage _toolsPage;
@@ -112,6 +113,10 @@ namespace JoeBrowser
             MinimizeBox = true;
 
             _settings = _store.LoadSettings();
+            /* The store asks this whenever a page navigates; a null provider would silently
+               record nothing. Bound to the live settings object so the toggle in Settings takes
+               effect on the next page without a restart. */
+            HistoryStore.EnabledProvider = delegate { return _settings == null || _settings.HistoryEnabled; };
             L10n.Set(_settings.UiLanguage);
             Theme.SetMode(_settings.ThemeMode != 2);
             _proxies = ProxyVault.Load();
@@ -244,7 +249,11 @@ namespace JoeBrowser
 
         private void Build()
         {
+            /* History and Account sit straight after Profiles: they are things about the
+               workspace the user is looking at, not settings for how the app behaves. */
             _navProfiles = Nav(L10n.T("nav.profiles"), "layers", delegate { SetPage(0); });
+            _navHistory = Nav(L10n.T("nav.history"), "clock", delegate { SetPage(8); });
+            _navAccount = Nav(L10n.T("nav.account"), "user", delegate { SetPage(9); });
             _navProxies = Nav(L10n.T("nav.proxies"), "proxy", delegate { SetPage(1); });
             _navExtensions = Nav(L10n.T("nav.extensions"), "apps", delegate { SetPage(2); });
             _navBrowsers = Nav(L10n.T("nav.browsers"), "window", delegate { SetPage(3); });
@@ -341,6 +350,13 @@ namespace JoeBrowser
             _browsersPage = new BrowsersPage { Visible = false };
             _browsersPage.ActionRequested += delegate(object sender, BrowserActionEventArgs e) { BrowserAction(e.Key, e.Engine); };
 
+            /* History opens on the last profile that was opened, which is the one a user is
+               most likely to have forgotten a URL in. */
+            _historyPage = new HistoryPage { Visible = false };
+            _historyPage.Back += delegate { SetPage(0); };
+            _historyPage.ClearRequested += delegate { ClearHistory(); };
+            _historyPage.OpenRequested += delegate(object sender, string url) { OpenHistoryUrl(url); };
+
             _upgradePage = new UpgradePage { Visible = false };
             _upgradePage.ActionRequested += delegate(object sender, UpgradeActionEventArgs e) { PlanAction(e.Key); };
             _planTimer = new Timer { Interval = 1000 };
@@ -371,6 +387,8 @@ namespace JoeBrowser
             Controls.Add(_navGroupWorkspace);
             Controls.Add(_navGroupSystem);
             Controls.Add(_navProfiles);
+            Controls.Add(_navHistory);
+            Controls.Add(_navAccount);
             Controls.Add(_navProxies);
             Controls.Add(_navExtensions);
             Controls.Add(_navBrowsers);
@@ -392,6 +410,7 @@ namespace JoeBrowser
             Controls.Add(_extensionPage);
             Controls.Add(_browsersPage);
             Controls.Add(_upgradePage);
+            Controls.Add(_historyPage);
             Controls.Add(_aboutPage);
             Controls.Add(_toast);
             Controls.Add(_minBtn);
@@ -2198,14 +2217,16 @@ namespace JoeBrowser
             int navY = Ui.S(130), navStep = Ui.S(44);
             _navGroupWorkspace.SetBounds(navX + Ui.S(8), Ui.S(112), navW, Ui.S(16));
             _navProfiles.SetBounds(navX, navY, navW, Ui.S(40));
-            _navProxies.SetBounds(navX, navY + navStep, navW, Ui.S(40));
-            _navExtensions.SetBounds(navX, navY + navStep * 2, navW, Ui.S(40));
-            _navBrowsers.SetBounds(navX, navY + navStep * 3, navW, Ui.S(40));
-            _navGroupSystem.SetBounds(navX + Ui.S(8), navY + navStep * 4 + Ui.S(2), navW, Ui.S(16));
-            _navSettings.SetBounds(navX, navY + navStep * 4 + Ui.S(22), navW, Ui.S(40));
-            _navTools.SetBounds(navX, navY + navStep * 5 + Ui.S(22), navW, Ui.S(40));
-            _navAbout.SetBounds(navX, navY + navStep * 6 + Ui.S(22), navW, Ui.S(40));
-            _navPlan.SetBounds(navX, navY + navStep * 7 + Ui.S(22), navW, Ui.S(40));
+            _navHistory.SetBounds(navX, navY + navStep, navW, Ui.S(40));
+            _navAccount.SetBounds(navX, navY + navStep * 2, navW, Ui.S(40));
+            _navProxies.SetBounds(navX, navY + navStep * 3, navW, Ui.S(40));
+            _navExtensions.SetBounds(navX, navY + navStep * 4, navW, Ui.S(40));
+            _navBrowsers.SetBounds(navX, navY + navStep * 5, navW, Ui.S(40));
+            _navGroupSystem.SetBounds(navX + Ui.S(8), navY + navStep * 6 + Ui.S(2), navW, Ui.S(16));
+            _navSettings.SetBounds(navX, navY + navStep * 6 + Ui.S(22), navW, Ui.S(40));
+            _navTools.SetBounds(navX, navY + navStep * 7 + Ui.S(22), navW, Ui.S(40));
+            _navAbout.SetBounds(navX, navY + navStep * 8 + Ui.S(22), navW, Ui.S(40));
+            _navPlan.SetBounds(navX, navY + navStep * 9 + Ui.S(22), navW, Ui.S(40));
 
             // caption buttons, flush with the top right corner
             int cw = Ui.S(46), ch = Ui.S(32);
@@ -2473,6 +2494,49 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>The profile whose history is showing, or the most recently used one.</summary>
+        private string _historyProfileId;
+
+        private Profile HistoryTarget()
+        {
+            if (!string.IsNullOrEmpty(_historyProfileId))
+                foreach (var p in _profiles) if (p.Id == _historyProfileId) return p;
+            /* Newest first, so an unset target is the profile the user last actually browsed. */
+            Profile best = null;
+            foreach (var p in _profiles)
+                if (best == null || p.LastOpened > best.LastOpened) best = p;
+            return best;
+        }
+
+        private void RefreshHistory()
+        {
+            if (_historyPage == null) return;
+            _historyPage.Show(HistoryTarget());
+        }
+
+        private void ClearHistory()
+        {
+            var p = HistoryTarget();
+            if (p == null) { Toast(L10n.T("history.none"), ToastKind.Info); return; }
+            if (!ConfirmForm.Ask(this, L10n.T("history.confirm.title"), L10n.T("history.confirm.body"),
+                L10n.T("history.confirm.detail"), "Clear", BtnKind.Danger)) return;
+            int n = HistoryStore.Clear(p.Id);
+            _historyPage.Rebuild();
+            Toast(n + " " + L10n.T("history.cleared"), ToastKind.Success);
+        }
+
+        /// <summary>Opens a recorded URL in that profile's browser, launching it if needed.</summary>
+        private void OpenHistoryUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return;
+            var p = HistoryTarget();
+            if (p == null) return;
+            _historyProfileId = p.Id;
+            /* Re-opening a profile that is already running just focuses it: the URL belongs to
+               the tab the user already has, not to a second window. */
+            OpenProfile(p.Id, url);
+        }
+
         private void SetPage(int page)
         {
             FreezeRedraw(delegate { SetPageCore(page); });
@@ -2482,10 +2546,14 @@ namespace JoeBrowser
         {
             _page = page;
             SuspendLayout();
-            JBButton[] navs = { _navProfiles, _navProxies, _navExtensions, _navBrowsers, _navSettings, _navTools, _navAbout, _navPlan };
+            /* Pages 0-7 are the long-standing destinations; 8 and 9 are History and Account.
+               Selected state is per button, so the subscript mismatch between "page number" and
+               "slot in this array" has to be spelled out rather than assumed. */
+            JBButton[] navs = { _navProfiles, _navProxies, _navExtensions, _navBrowsers, _navSettings, _navTools, _navAbout, _navPlan, _navHistory, _navAccount };
+            int[] pageOf = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
             for (int i = 0; i < navs.Length; i++)
             {
-                navs[i].Selected = i == page;
+                navs[i].Selected = pageOf[i] == page;
                 navs[i].Invalidate();
             }
 
@@ -2504,6 +2572,8 @@ namespace JoeBrowser
             _toolsPage.Visible = page == 5;
             _aboutPage.Visible = page == 6;
             _upgradePage.Visible = page == 7;
+            _historyPage.Visible = page == 8;
+            if (page == 8) RefreshHistory();
             _search.Visible = profiles;
             _sortBtn.Visible = profiles;
             _newBtn.Visible = profiles;
@@ -2516,7 +2586,7 @@ namespace JoeBrowser
                toast, so without the second step the answer to a save, a proxy test or a Google
                sign-in was hidden behind an invisible page on every screen but Profiles, and the
                user saw nothing happen at all. */
-            Control[] pages = { _host, _emptyPanel, _proxyPage, _extensionPage, _browsersPage, _settingsPage, _toolsPage, _aboutPage, _upgradePage };
+            Control[] pages = { _host, _emptyPanel, _proxyPage, _extensionPage, _browsersPage, _settingsPage, _toolsPage, _aboutPage, _upgradePage, _historyPage };
             foreach (var p in pages) if (p.Visible) p.BringToFront();
             Restack();
 
@@ -3231,13 +3301,27 @@ namespace JoeBrowser
             Toast("Browser closed", ToastKind.Info);
         }
 
-        private async System.Threading.Tasks.Task OpenProfileCore(string id)
+        private async System.Threading.Tasks.Task OpenProfileCore(string id) { await OpenProfileCore(id, null); }
+
+        private async System.Threading.Tasks.Task OpenProfileCore(string id, string startUrl)
         {
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
 
             BrowserSession existing;
-            if (_sessions.TryGetValue(id, out existing)) { existing.Focus(); return; }
+            if (_sessions.TryGetValue(id, out existing))
+            {
+                existing.Focus();
+                /* The profile is already open: honour the URL in the window that exists rather
+                   than refusing or opening a second one. */
+                if (!string.IsNullOrEmpty(startUrl))
+                {
+                    var nav = existing.NavigateAsync(startUrl);
+                    nav.ContinueWith(delegate(System.Threading.Tasks.Task<bool> t) { var ignored = t.Exception; },
+                        System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted);
+                }
+                return;
+            }
             if (_launching.Contains(id)) return;
             if (!AllowAnotherBrowser()) return;
 
@@ -3256,7 +3340,9 @@ namespace JoeBrowser
                     if (!await DownloadBrowserAsync(p.BrowserKind)) return;
                 }
 
-                var session = await BrowserSession.LaunchAsync(p, _settings.DefaultStartUrl, _settings.BrowserPath, _settings);
+                var session = await BrowserSession.LaunchAsync(p,
+                    string.IsNullOrEmpty(startUrl) ? _settings.DefaultStartUrl : startUrl,
+                    _settings.BrowserPath, _settings);
                 _sessions[id] = session;
                 session.Closed += delegate { SessionClosed(id); };
                 /* A proxy that dies mid-session no longer freezes the tabs: the relay moves to a
@@ -3325,7 +3411,10 @@ namespace JoeBrowser
         }
 
         /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
-        private void OpenProfile(string id) { Guard("OpenProfile", delegate { return OpenProfileCore(id); }); }
+        private void OpenProfile(string id) { Guard("OpenProfile", delegate { return OpenProfileCore(id, null); }); }
+
+        /// <summary>Opens a profile and, when a URL is given, sends the running browser there.</summary>
+        private void OpenProfile(string id, string url) { Guard("OpenProfile", delegate { return OpenProfileCore(id, url); }); }
 
         private async Task<bool> DownloadBrowserAsync(string engine)
         {

@@ -380,6 +380,9 @@ namespace JoeBrowser
         public string TermsAccepted { get; set; }
         /// <summary>Referral code entered by this user, if any.</summary>
         public string ReferralCode { get; set; }
+        /// <summary>Record the pages each profile visits, so a URL that was passed through can
+        /// be found again. On by default; the History page and Settings can both turn it off.</summary>
+        public bool HistoryEnabled { get; set; }
         /// <summary>Window was maximized when the app last closed.</summary>
         public bool WinMaximized { get; set; }
         /// <summary>Restored window size from the last session, in device-independent pixels.</summary>
@@ -398,6 +401,7 @@ namespace JoeBrowser
             EnableCustomExtensions = true;
             StartMaximized = true;
             UseTrash = true;
+            HistoryEnabled = true;
             WinMaximized = true;
             WinWidth = 0;
             WinHeight = 0;
