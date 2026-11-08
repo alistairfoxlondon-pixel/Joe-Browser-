@@ -526,7 +526,9 @@ namespace JoeBrowser
         /// that is fixable. Opens without requiring Pro: an audit that says "you are linked" but
         /// sits behind a paywall is worse than no audit, because the user cannot act on it.
         /// </summary>
-        private void AccountAudit()
+        private void AccountAudit() { Guard("AccountAudit", delegate { return AccountAuditCore(); }); }
+
+        private async System.Threading.Tasks.Task AccountAuditCore()
         {
             using (var dlg = new FingerprintAuditForm(_profiles, _store))
             {
@@ -537,22 +539,26 @@ namespace JoeBrowser
                 Toast(dlg.Fixed + (dlg.Fixed == 1 ? " fingerprint re-rolled" : " fingerprints re-rolled"),
                     ToastKind.Success);
 
-                /* A re-rolled profile may be open. Its browser is still running the fingerprint it
-                   launched with, so the card would claim one identity while the tab answers with
-                   another - and the leak check would then disagree with the profile it is testing.
-                   Pushing the new configuration into the live page keeps the two honest; where
-                   that is impossible the user is told to reopen instead of being left guessing. */
-                int live = 0;
+                /* A re-rolled profile may be open, and its browser is still running the identity it
+                   launched with - so the card would claim one thing while the tab answers another,
+                   and the leak check would disagree with the profile it is testing. Push the new
+                   configuration into the live tabs and say whether it took: a re-roll nobody can
+                   see land is a re-roll nobody can trust. */
+                int live = 0, applied = 0;
                 foreach (var p in _profiles)
                 {
                     BrowserSession s;
                     if (!_sessions.TryGetValue(p.Id, out s) || s == null || !s.IsRunning) continue;
                     s.UpdateProfile(p);
                     live++;
+                    try { if (await s.ApplyLiveAsync()) applied++; }
+                    catch (Exception ex) { Log.Error("Live re-apply after audit failed", ex); }
                 }
                 if (live > 0)
-                    Toast(live + (live == 1 ? " open profile updated" : " open profiles updated") +
-                          " \u00b7 reopen any that still show the old identity", ToastKind.Info);
+                    Toast(applied == live
+                        ? "New identity applied to " + live + (live == 1 ? " open profile" : " open profiles")
+                        : applied + " of " + live + " open profiles took the new identity \u00b7 reopen the rest",
+                        applied == live ? ToastKind.Success : ToastKind.Warn);
             }
         }
 
