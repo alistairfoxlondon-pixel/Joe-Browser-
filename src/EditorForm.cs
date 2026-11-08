@@ -93,8 +93,9 @@ namespace JoeBrowser
             Build();
             ApplyScale();
             SwitchTab(_initialTab);
-            if (_initialTab == 0) { _name.Box.Select(); _name.Box.Focus(); }
-            else if (_initialTab == 3) { _host.Box.Select(); _host.Box.Focus(); }
+            /* SwitchTab already focuses the first field of the page it shows; focusing a
+               hard-coded field here would override that for the proxy tab, whose first field is
+               not the host box. */
         }
 
         private void ApplyScale()
@@ -111,6 +112,11 @@ namespace JoeBrowser
             base.OnLoad(e);
             CenterToScreen();
             LayoutAll();
+            /* The caret belongs in the first field of the page that is actually showing, and
+               only once the form is on screen - focusing during construction is lost when the
+               window is activated. */
+            Control first = FirstField(_tabs == null ? 0 : _tabs.SelectedIndex);
+            if (first != null) { try { first.Focus(); } catch { } }
             DetectLocaleAsync();
         }
 
@@ -1018,8 +1024,10 @@ namespace JoeBrowser
             /* Focus follows the tab. Without this the first control of the newly shown page is
                never focused, so Tab after switching a tab started from the old page and the
                keyboard user was dropped back where they came from. */
-            Control first = FirstField(index);
-            if (first != null && Visible) { try { first.Focus(); } catch { } }
+            /* Only once the form is on screen: focusing a control during construction is
+               discarded when the window is activated, and would fight OnLoad's choice. */
+            Control first = IsHandleCreated && Visible ? FirstField(index) : null;
+            if (first != null) { try { first.Focus(); } catch { } }
             Invalidate();
         }
 
