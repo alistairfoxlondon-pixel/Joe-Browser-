@@ -7,6 +7,19 @@ $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Set-Location $repoRoot
 $expected = "$Version.0"
 
+# The shipped XML is read by the runtime before any of our code runs, so a syntax error in it
+# stops the process from starting at all - and the message ("side by side configuration is
+# incorrect") points at the manifest rather than at the file that is wrong. Parse it here.
+foreach ($doc in @('src\app.manifest', 'src\JoeBrowser.exe.config', 'dist\JoeBrowser.exe.config')) {
+    if (-not (Test-Path $doc)) { throw "$doc is missing" }
+    try { [xml](Get-Content $doc -Raw) | Out-Null } catch { throw "$doc is not valid XML: $($_.Exception.Message)" }
+    $text = Get-Content $doc -Raw
+    foreach ($m in [regex]::Matches($text, '<!--(.*?)-->', 'Singleline')) {
+        if ($m.Groups[1].Value -match '--') { throw "$doc has a comment containing a double hyphen, which invalidates the document" }
+    }
+    Write-Host "$doc parses"
+}
+
 foreach ($f in @('dist\JoeBrowser.exe', 'dist\JoeBrowserSetup.exe')) {
     if (-not (Test-Path $f)) { throw "$f was not produced" }
     $size = (Get-Item $f).Length
