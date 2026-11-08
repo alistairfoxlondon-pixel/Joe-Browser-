@@ -1345,7 +1345,11 @@ namespace JoeBrowser
 
             // A 47-zone list is taller than the display. Page it instead of letting Windows
             // clamp the popup to the top edge, which hides the tail with no way to scroll.
-            int rows = Math.Max(6, Math.Min(20, (Screen.FromControl(this).WorkingArea.Height - Ui.S(120)) / Ui.S(34)));
+            /* Row height is the menu's own padding plus the text height, not a constant: at
+               150% scaling a hard-coded 34 px fitted more rows than the popup could show, and
+               the surplus was clamped off the bottom with no scrollbar. */
+            int rowH = Math.Max(Ui.S(28), Theme.Body.Height + Ui.S(14));
+            int rows = Math.Max(6, Math.Min(20, (Screen.FromControl(this).WorkingArea.Height - Ui.S(120)) / rowH));
             int pageSize = Math.Max(4, rows - 2);
             bool paged = Items.Count > rows;
 
