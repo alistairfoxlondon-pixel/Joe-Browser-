@@ -8,8 +8,10 @@ namespace JoeBrowser
     /// <summary>
     /// Small themed dialog used by the Tools &amp; data actions. Content is a vertical stack,
     /// so fields never overlap at narrow widths or high DPI. The body scrolls when needed.
+    /// Not sealed: GoogleSetupDialog extends it to add the guided OAuth-client setup, which is
+    /// a form of the same shape (notes, sections, a primary action) rather than a new one.
     /// </summary>
-    internal sealed class ToolDialog : JBForm
+    internal class ToolDialog : JBForm
     {
         private sealed class Row
         {
