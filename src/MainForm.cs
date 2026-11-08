@@ -2431,11 +2431,26 @@ namespace JoeBrowser
             int toolbarRight = w - cw * 3 - Ui.S(14);
             int newW = Math.Min(Ui.S(150), _newBtn.PreferredWidth(Ui.S(132)));
             _newBtn.SetBounds(toolbarRight - newW, Ui.S(17), newW, Ui.S(33));
-            int searchW = Math.Min(Ui.S(250), Math.Max(Ui.S(150),
-                _newBtn.Left - Ui.S(16) - (sb + Ui.S(12)) - _sortBtn.PreferredWidth(Ui.S(110))));
-            _search.SetBounds(_newBtn.Left - Ui.S(8) - searchW, Ui.S(17), searchW, Ui.S(33));
+            /* The toolbar gives way rather than overlapping. The old minimum of 150 px for the
+               search box was applied even when the space left was smaller, so on a narrow window
+               the box was drawn over the sort button and the sort button was pushed off the left
+               edge of the window. Whatever cannot fit is hidden, and it comes back on resize. */
+            const int minSearch = 120;
             int sortW = _sortBtn.PreferredWidth(Ui.S(110));
-            _sortBtn.SetBounds(_search.Left - Ui.S(8) - sortW, Ui.S(17), sortW, Ui.S(33));
+            int room = _newBtn.Left - Ui.S(16) - (sb + Ui.S(12));
+            bool showSort = room - sortW - Ui.S(8) >= minSearch;
+            bool showSearch = room - (showSort ? sortW + Ui.S(8) : 0) - Ui.S(8) >= minSearch;
+            _sortBtn.Visible = showSort && _page == 0;
+            _search.Visible = showSearch && _page == 0;
+            if (showSearch)
+            {
+                int searchW = Math.Min(Ui.S(250),
+                    room - (showSort ? sortW + Ui.S(8) : 0) - Ui.S(8));
+                _search.SetBounds(_newBtn.Left - Ui.S(8) - searchW, Ui.S(17), searchW, Ui.S(33));
+            }
+            if (showSort)
+                _sortBtn.SetBounds((showSearch ? _search.Left : _newBtn.Left) - Ui.S(8) - sortW,
+                    Ui.S(17), sortW, Ui.S(33));
             int saveW = Math.Min(Ui.S(160), _saveSettings.PreferredWidth(Ui.S(140)));
             _saveSettings.SetBounds(toolbarRight - saveW, Ui.S(17), saveW, Ui.S(33));
 
@@ -2836,8 +2851,9 @@ namespace JoeBrowser
             if (page == 8) RefreshHistory();
             _accountPage.Visible = page == 9;
             if (page == 9) _accountPage.Reload();
-            _search.Visible = profiles;
-            _sortBtn.Visible = profiles;
+            /* LayoutAll decides whether the toolbar has room for these two, so the page change
+               must not force them visible behind that decision. */
+            if (!profiles) { _search.Visible = false; _sortBtn.Visible = false; }
             _newBtn.Visible = profiles;
             _saveSettings.Visible = page == 4;
             _themeSwitch.Visible = true;
