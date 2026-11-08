@@ -289,18 +289,43 @@ data will be stored in a `userdata` folder next to the executable instead.
 
 ## Build
 
-From a PowerShell terminal:
+Releases are built by CI: push a tag such as `v1.3.0` and
+`.github/workflows/release.yml` builds both binaries on a Windows runner, runs the
+checks below, and attaches `JoeBrowser.exe`, `JoeBrowserSetup.exe` and `SHA256.txt` to
+the release. The tag has to match the version in `src/AssemblyInfo.cs`, because every
+other version in the build is derived from that file - a mismatch fails the build
+rather than shipping two files that disagree. A push to `master` runs the same build
+and tests but publishes nothing.
+
+To build by hand, from a PowerShell terminal:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File build\build.ps1
+powershell -ExecutionPolicy Bypass -File build\setup.ps1
 ```
 
+Both scripts take `-Csc <path to a C# compiler>`, so either can be built with the
+Roslyn compiler that ships inside the .NET SDK - which is how CI builds them on a
+runner with no Developer Pack. `setup.ps1` embeds
+`dist\JoeBrowser.exe` and its `.config` into `dist\JoeBrowserSetup.exe`, so build the
+application first. The installer writes both files, because .NET reads
+`JoeBrowser.exe.config` from beside the executable and an installed copy without it
+lost its DPI handling.
+
+Before a release, CI checks that both binaries carry the expected file version and
+start (`JoeBrowser.exe --selftest` reads its own configuration,
+`JoeBrowserSetup.exe --selftest` reads its embedded payload), that the shipped XML is
+well formed, and - on a tag - that the installer really installs: it is installed
+silently, the installed copy is run, the Apps and Features entry and Start menu
+shortcut are verified, and uninstalling is required to remove all of it.
+
 The script compiles all `src/*.cs` files against the .NET Framework 4.8 reference
-assemblies and produces `dist\JoeBrowser.exe` (~1.3 MB, no runtime dependencies
-beyond .NET Framework 4.8, which ships with Windows). A modern C# compiler is
-located automatically; install the .NET Framework 4.8 Developer Pack if none is
-found, or pass `-Csc <path to csc.exe>`. New `.cs` files are picked up
-automatically. `build\make-icon.ps1` regenerates the application icon.
+assemblies and produces `dist\JoeBrowser.exe` (~4 MB, most of it embedded artwork and
+type faces; no runtime dependencies beyond .NET Framework 4.8, which ships with
+Windows). A compiler is located automatically; install the .NET Framework 4.8
+Developer Pack if none is found, or pass `-Csc` an explicit path - the csc.dll inside
+the .NET SDK works, but it ships no `csc.rsp`, so the reference assemblies have to be
+named on the command line. New `.cs` files are picked up automatically. `build\make-icon.ps1` regenerates the application icon.
 
 The UI type and the Material icon face are **embedded in the executable** and
 extracted to `%APPDATA%\JoeBrowser\fonts` on first run. That matters because the
