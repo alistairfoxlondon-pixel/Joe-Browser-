@@ -105,6 +105,10 @@ namespace JoeBrowser
         public const int EM_LINESCROLL = 0x00B6;
         public const int EM_GETFIRSTVISIBLELINE = 0x00CE;
         public const int EM_GETLINECOUNT = 0x00BA;
+        public const int WM_QUERYUISTATE = 0x0129;
+        // Set in the answer to WM_QUERYUISTATE when the keyboard cues are hidden, which is
+        // exactly when Control.ShowFocusCues reports false.
+        public const int UISF_HIDEFOCUS = 0x0001;
 
         public static void RoundedCorners(IntPtr hwnd, int radius)
         {
@@ -1103,47 +1107,7 @@ namespace JoeBrowser
         {
             _hover = false;
             Invalidate();
-            // Resume the countdown only if the bar is still up and was paused by the hover.
-            if (Visible && !_timer.Enabled)
-            {
-                _timer.Interval = 1800;
-                _timer.Start();
-            }
             base.OnMouseLeave(e);
-        }
-
-        protected override void OnMouseWheel(MouseEventArgs e)
-        {
-            if (_multiline)
-            {
-                /* Scroll the field only while it still has somewhere to go; once it is at the
-                   top or the bottom the gesture belongs to the page behind it. Swallowing every
-                   notch meant the wheel died whenever the pointer happened to be over a notes
-                   box - a very common position - even though the page was scrollable. */
-                int before = FirstVisibleLine();
-                _wheelCarry += e.Delta;
-                int lines = _wheelCarry / 120;
-                if (lines != 0)
-                {
-                    _wheelCarry -= lines * 120;
-                    Native.SendMessage(Box.Handle, Native.EM_LINESCROLL, IntPtr.Zero, (IntPtr)lines);
-                }
-                Invalidate();
-                if (FirstVisibleLine() != before) return;   // the field moved: it took the gesture
-                _wheelCarry = 0;
-            }
-            base.OnMouseWheel(e);
-        }
-
-        /// <summary>First visible line of a multiline field, or 0 when it cannot be read.</summary>
-        private int FirstVisibleLine()
-        {
-            try
-            {
-                return (int)Native.SendMessage(Box.Handle, Native.EM_GETFIRSTVISIBLELINE,
-                    IntPtr.Zero, IntPtr.Zero).ToInt64();
-            }
-            catch { return 0; }
         }
 
         protected override void OnResize(EventArgs e)

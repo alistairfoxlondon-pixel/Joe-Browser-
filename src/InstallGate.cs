@@ -164,11 +164,14 @@ namespace JoeBrowser
                    responding" for the whole install. It also meant a failure inside
                    SelfInstall happened on the message loop rather than in a try - which is why
                    installing could end in the generic crash dialog. */
+                /* The out-parameter cannot cross the await, so SelfInstall runs inside the lambda
+                   and reports only its failure text. The names in here have to differ from the
+                   ones used below, because a lambda's scope is the enclosing method. */
                 string failure = await Task.Run(new Func<string>(delegate
                 {
-                    string error;
-                    bool ok = Installation.SelfInstall(_desktop.Checked, out error);
-                    return ok ? null : (string.IsNullOrEmpty(error) ? "unknown error" : error);
+                    string reason;
+                    bool installed = Installation.SelfInstall(_desktop.Checked, out reason);
+                    return installed ? null : (string.IsNullOrEmpty(reason) ? "unknown error" : reason);
                 }));
                 string error = failure;
                 bool ok = error == null;

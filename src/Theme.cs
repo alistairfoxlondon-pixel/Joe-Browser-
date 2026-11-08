@@ -818,7 +818,17 @@ namespace JoeBrowser
         public static bool FocusCues(Control c)
         {
             if (c == null || !c.Focused) return false;
-            return c.ShowFocusCues || KeyboardCuesForced;
+            if (KeyboardCuesForced) return true;
+            /* ShowFocusCues is protected on Control and cannot be read from out here. Asking
+               the window with WM_QUERYUISTATE returns the same UI state that property reports,
+               so a tablet or remote session that hides focus cues still hides them - and the
+               forced flag above still overrides it after a key press. */
+            try
+            {
+                long state = Native.SendMessage(c.Handle, Native.WM_QUERYUISTATE, IntPtr.Zero, IntPtr.Zero).ToInt64();
+                return (state & Native.UISF_HIDEFOCUS) == 0;
+            }
+            catch { return true; }
         }
 
         /// <summary>Called for the keys that move focus; ignored for ordinary typing.</summary>
