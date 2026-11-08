@@ -70,17 +70,33 @@ jobs:
           "wrapper=$wrapper" >> $env:GITHUB_OUTPUT
           Write-Host "Compiler: $roslyn"
 
+      - name: Smoke-test the compiler
+        shell: pwsh
+        run: |
+          # Compiles a three-line program through the same wrapper the build uses, so a broken
+          # wrapper, a missing dotnet or a missing reference assembly is reported here instead
+          # of as an unexplained failure halfway through the real build.
+          New-Item -ItemType Directory -Force (Join-Path $env:RUNNER_TEMP 'probe') | Out-Null
+          $probe = Join-Path $env:RUNNER_TEMP 'probe\probe.cs'
+          'class P { static void Main() { } }' | Set-Content -Path $probe -Encoding ASCII
+          $exe = Join-Path $env:RUNNER_TEMP 'probe\probe.exe'
+          & '${{ steps.csc.outputs.wrapper }}' /nologo /target:exe /out:$exe $probe
+          if ($LASTEXITCODE -ne 0) { throw "The SDK compiler could not build a trivial program (exit $LASTEXITCODE)" }
+          if (-not (Test-Path $exe)) { throw "The SDK compiler reported success but produced no output" }
+          Write-Host "Compiler smoke test passed: $((Get-Item $exe).Length) bytes"
+
       - name: Build JoeBrowser.exe
         shell: pwsh
         run: |
-          # build.ps1 drives csc directly; the wrapper forwards to the SDK's Roslyn.
-          .\build\build.ps1 -Csc '${{ steps.csc.outputs.wrapper }}'
+          # Wrapped so that a compiler error becomes a readable annotation rather than a bare
+          # exit code 1. build.ps1 drives csc directly; the wrapper forwards to the SDK's Roslyn.
+          .\.github\workflows\run-step.ps1 -Script build\build.ps1 -ScriptArgs @('-Csc', '${{ steps.csc.outputs.wrapper }}')
 
       - name: Build JoeBrowserSetup.exe
         shell: pwsh
         run: |
           # setup.ps1 takes the same -Csc parameter, so nothing has to be written into the repo.
-          .\build\setup.ps1 -Csc '${{ steps.csc.outputs.wrapper }}'
+          .\.github\workflows\run-step.ps1 -Script build\setup.ps1 -ScriptArgs @('-Csc', '${{ steps.csc.outputs.wrapper }}')
 
       - name: Verify the binaries
         shell: pwsh
