@@ -170,6 +170,12 @@ namespace JoeBrowser
             File.WriteAllLines(file, tail);
         }
 
+        /* The url of the newest row per profile, so the two events that describe one navigation
+           can be told apart from two navigations. Kept in memory: it only has to survive within a
+           run, and a duplicate that slips through after a restart is one row, not a pattern. */
+        private static readonly Dictionary<string, string> LastUrl = new Dictionary<string, string>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, bool> LastHop = new Dictionary<string, bool>(StringComparer.Ordinal);
+
         public static void Add(string profileId, string profileName, string url, string title, bool hop)
         {
             if (!Enabled || !Interesting(url)) return;
@@ -177,6 +183,26 @@ namespace JoeBrowser
             {
                 lock (Gate)
                 {
+                    /* frameStartedNavigating fires before the request and frameNavigated fires
+                       when the document is committed, so an ordinary navigation reaches here
+                       twice with the same address. The first is the hop, the second is the page
+                       the user is actually on, and the second has to win: it is the one in the
+                       address bar. */
+                    string key = profileId ?? "";
+                    string lastUrl;
+                    bool lastHop;
+                    if (LastUrl.TryGetValue(key, out lastUrl) && string.Equals(lastUrl, url.Trim(), StringComparison.Ordinal) &&
+                        LastHop.TryGetValue(key, out lastHop))
+                    {
+                        if (lastHop && !hop)
+                        {
+                            ClearHop(profileId);
+                            LastHop[key] = false;
+                        }
+                        return;
+                    }
+                    LastUrl[key] = url.Trim();
+                    LastHop[key] = hop;
                     var entry = new Entry
                     {
                         Url = url.Trim(),
@@ -255,6 +281,8 @@ namespace JoeBrowser
                 {
                     string file = FileFor(profileId);
                     if (File.Exists(file)) File.Delete(file);
+                    LastUrl.Remove(profileId ?? "");
+                    LastHop.Remove(profileId ?? "");
                 }
             }
             catch (Exception ex) { Log.Error("History clear failed", ex); return 0; }
@@ -280,6 +308,8 @@ namespace JoeBrowser
                         }
                         catch { }
                     }
+                    LastUrl.Clear();
+                    LastHop.Clear();
                 }
             }
             catch (Exception ex) { Log.Error("History clear-all failed", ex); }
@@ -315,6 +345,19 @@ namespace JoeBrowser
                     if (rows[2].Url != "https://example.com/start") problems.Append(" oldest=" + rows[2].Url);
                 }
 
+                /* One navigation reaches the store twice, as a hop and then as the committed
+                   page. The second must not add a row, and it must clear the hop mark. */
+                DeleteFileFor(id);
+                Add(id, "self test", "https://example.com/page", "", true);
+                Add(id, "self test", "https://example.com/page", "Page", false);
+                var collapsed = Read(id);
+                if (collapsed.Count != 1) problems.Append(" one navigation stored " + collapsed.Count + " rows");
+                else if (collapsed[0].Hop) problems.Append(" the committed page is still marked as a hop");
+
+                /* Two different addresses in a row are two rows. */
+                Add(id, "self test", "https://example.com/second", "", false);
+                if (Read(id).Count != 2) problems.Append(" a real second visit was dropped");
+
                 if (Interesting("chrome://settings")) problems.Append(" a browser page was recorded");
                 if (!Interesting("https://example.com/keep")) problems.Append(" a real url was rejected");
 
@@ -336,6 +379,29 @@ namespace JoeBrowser
         private static void DeleteFileFor(string profileId)
         {
             try { string f = FileFor(profileId); if (File.Exists(f)) File.Delete(f); } catch { }
+        }
+
+        /// <summary>Marks the newest row as a real page rather than a hop.</summary>
+        private static void ClearHop(string profileId)
+        {
+            try
+            {
+                string file = FileFor(profileId);
+                if (!File.Exists(file)) return;
+                var ser = new JavaScriptSerializer();
+                string[] lines = File.ReadAllLines(file);
+                int last = -1;
+                for (int i = lines.Length - 1; i >= 0; i--)
+                    if (!string.IsNullOrWhiteSpace(lines[i])) { last = i; break; }
+                if (last < 0) return;
+                Entry e;
+                try { e = ser.Deserialize<Entry>(lines[last]); } catch { return; }
+                if (e == null || !e.Hop) return;
+                e.Hop = false;
+                lines[last] = ser.Serialize(e);
+                File.WriteAllLines(file, lines);
+            }
+            catch (Exception ex) { Log.Error("History hop clear failed", ex); }
         }
 
         /// <summary>Removes a profile's history when the profile itself is deleted for good.</summary>

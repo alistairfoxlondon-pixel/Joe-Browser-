@@ -463,12 +463,24 @@ namespace JoeBrowser
                became this document". */
             if (method == "Page.frameNavigated" || method == "Page.frameStartedNavigating")
             {
+                /* The two methods describe the frame differently: frameNavigated nests it under
+                   "frame" with the url and the type, while frameStartedNavigating puts url,
+                   loaderId and navigationType at the top level next to frameId. Reading only the
+                   nested shape meant the earlier event recorded an empty url on every real
+                   navigation, which the store then discarded as uninteresting - so the hop that
+                   only that event can see would never have been kept. */
                 var frame = Get<Dictionary<string, object>>(args, "frame");
-                bool top = frame != null && string.IsNullOrEmpty(Str(frame, "parentId"));
+                bool started = method == "Page.frameStartedNavigating";
+                bool top = started ? string.IsNullOrEmpty(Str(args, "parentId"))
+                    : (frame != null && string.IsNullOrEmpty(Str(frame, "parentId")));
                 if (!top) return;
-                string url = frame != null ? Str(frame, "url") : Str(args, "url");
-                string navType = frame != null ? Str(frame, "type") : "";
-                if (method == "Page.frameStartedNavigating") navType = Str(args, "navigationType");
+                string url = !started && frame != null ? Str(frame, "url") : Str(args, "url");
+                if (string.IsNullOrEmpty(url))
+                {
+                    var nested = frame != null ? Str(frame, "url") : "";
+                    url = nested;
+                }
+                string navType = started ? Str(args, "navigationType") : (frame != null ? Str(frame, "type") : "");
                 /* Back and forward are the user asking to see something they already saw; a
                    reload is the same document again. Recording those would triple every entry
                    the first time the user moves through their own history. */
@@ -476,7 +488,7 @@ namespace JoeBrowser
                 if (method == "Page.frameNavigated" && navType.Equals("SameDocument", StringComparison.OrdinalIgnoreCase)) return;
                 HistoryStore.Add(Profile != null ? Profile.Id : null,
                     Profile != null ? Profile.Name : null,
-                    url, "", method == "Page.frameStartedNavigating");
+                    url, "", started);
                 return;
             }
             if (method == "Page.titleUpdated" || method == "Page.frameNavigated")
