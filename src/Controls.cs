@@ -442,17 +442,20 @@ namespace JoeBrowser
             e.TextColor = e.Item.Enabled ? Theme.Text : Theme.TextFaint;
             e.TextFont = e.Item.Font ?? Theme.Body;
 
-            // Items carry a glyph name rather than a bitmap, so draw it beside the label.
+            /* Items carry a glyph name rather than a bitmap. The glyph is drawn here, from the
+               text rectangle, and nowhere else: it used to be painted a second time from
+               OnRenderItemImage at a fixed x, which with no image margin put the icon straight
+               through the first two characters of the label. */
             var item = e.Item as IIconItem;
             if (item != null && item.Icon != null)
             {
                 var g = e.Graphics;
                 Ui.Quality(g);
                 float s = Ui.S(16);
-                float x = e.TextRectangle.Left - s - Ui.S(9);
-                float y = e.Item.Height / 2f - s / 2f;
-                Icons.Draw(g, item.Icon, new RectangleF(x, y, s, s),
-                    !e.Item.Enabled ? Theme.TextFaint : e.Item.Selected ? Theme.Accent : Theme.TextDim, 1.7f);
+                var lane = new RectangleF(e.TextRectangle.Left - s - Ui.S(9), e.Item.Height / 2f - s / 2f, s, s);
+                if (lane.Left >= 0)
+                    Icons.Draw(g, item.Icon, lane,
+                        !e.Item.Enabled ? Theme.TextFaint : e.Item.Selected ? Theme.Accent : Theme.TextDim, 1.7f);
             }
             base.OnRenderItemText(e);
         }
@@ -462,17 +465,17 @@ namespace JoeBrowser
             Ui.Quality(e.Graphics);
             if (e.Image != null)
             {
+                /* The menu turns the framework image lane off by default (glyphs are drawn as
+                   text), so a caller that does supply a bitmap - the country picker's flag chip -
+                   gets no rectangle from the framework and is placed here instead. */
                 var r = e.ImageRectangle;
                 if (r.Width <= 0 || r.Height <= 0)
                     r = new Rectangle(Ui.S(9), (e.Item.Height - e.Image.Height) / 2, e.Image.Width, e.Image.Height);
                 e.Graphics.DrawImage(e.Image, r);
                 return;
             }
-            var item = e.Item as IIconItem;
-            if (item == null || item.Icon == null) return;
-            float s = Ui.S(16);
-            Color c = e.Item.Selected ? Theme.Accent : Theme.TextFaint;
-            Icons.Draw(e.Graphics, item.Icon, new RectangleF(Ui.S(11), e.Item.Height / 2f - s / 2f, s, s), c, 1.7f);
+            /* Glyph icons are painted by OnRenderItemText, in the lane reserved by Item's left
+               padding. Drawing them here as well put two glyphs in two different places. */
         }
 
         protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
@@ -503,7 +506,11 @@ namespace JoeBrowser
                 Icon = icon;
                 Font = Theme.Body;
                 ForeColor = Theme.Text;
-                Padding = new Padding(Ui.S(14), Ui.S(7), Ui.S(18), Ui.S(7));
+                /* Room for the 16 px glyph plus its 9 px gap, so the label never sits on it.
+                   Only items with a glyph need the room; an item with a bitmap gets its own
+                   image margin from the framework. */
+                int left = string.IsNullOrEmpty(icon) ? Ui.S(14) : Ui.S(14 + 16 + 9);
+                Padding = new Padding(left, Ui.S(7), Ui.S(18), Ui.S(7));
                 AutoSize = true;
             }
         }
@@ -515,7 +522,10 @@ namespace JoeBrowser
             m.BackColor = Theme.Panel;
             m.ForeColor = Theme.Text;
             m.Font = Theme.Body;
-            m.ShowImageMargin = true;
+            /* Items carry glyph names, not bitmaps, so the framework's image lane would be an
+               empty gutter on every menu. It is switched on by callers that do insert flag
+               bitmaps into their items (the country picker). */
+            m.ShowImageMargin = false;
             m.ShowCheckMargin = false;
             m.Padding = new Padding(Ui.S(4), Ui.S(6), Ui.S(4), Ui.S(6));
             m.GripStyle = ToolStripGripStyle.Hidden;
