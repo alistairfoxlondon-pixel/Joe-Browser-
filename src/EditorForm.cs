@@ -1661,8 +1661,47 @@ namespace JoeBrowser
         {
             base.OnLoad(e);
             FitContent();
-            _ok.Select();
-            _ok.Focus();
+            /* A destructive confirmation must not be armed the moment it appears: a stray Enter
+               or Space - including the one that opens it - used to choose Delete. The safe
+               button takes focus, and Tab reaches the danger action in one step. */
+            if (_ok.Kind == BtnKind.Danger)
+            {
+                _cancel.Select();
+                _cancel.Focus();
+            }
+            else
+            {
+                _ok.Select();
+                _ok.Focus();
+            }
+        }
+
+        /* Enter and Esc are resolved here rather than through AcceptButton/CancelButton: the
+           window is borderless, and a command key would never reach the buttons' own handlers. */
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Escape)
+            {
+                DialogResult = DialogResult.Cancel;
+                Close();
+                return true;
+            }
+            if (keyData == Keys.Enter || keyData == Keys.Return)
+            {
+                /* Enter always means the safe answer. Only an explicitly focused danger button
+                   may be chosen with Enter, so the default action here is Cancel for a
+                   destructive prompt and OK for a notice. */
+                if (_ok.Kind == BtnKind.Danger && !_ok.Focused)
+                {
+                    DialogResult = DialogResult.Cancel;
+                    Close();
+                    return true;
+                }
+                DialogResult = DialogResult.OK;
+                Close();
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         /// <summary>Sizes the dialog around its text so long messages never clip or scroll.</summary>

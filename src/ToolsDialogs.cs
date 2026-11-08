@@ -65,9 +65,16 @@ namespace JoeBrowser
         /// <summary>Set to validate before the dialog closes. Return false to keep it open.</summary>
         public Func<bool> Validator;
 
+        /* Guards against a second commit from the same gesture: a double-click on the primary
+           button, or Enter reaching both the command-key pass and KeyPreview. Running the
+           validator twice showed two toasts and, for anything that writes, did the work twice. */
+        private bool _submitted;
+
         private void OnPrimary()
         {
+            if (_submitted) return;
             if (Validator != null && !Validator()) return;
+            _submitted = true;
             Confirmed = true;
             DialogResult = DialogResult.OK;
             Close();
@@ -270,6 +277,27 @@ namespace JoeBrowser
                 }
             }
             return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        /// <summary>
+        /// Enter submits from a single-line field. KeyPreview delivers it here before the focused
+        /// control sees it, which is the one path that does not depend on how the framework
+        /// classified the key for that particular child.
+        /// </summary>
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if ((e.KeyCode == Keys.Enter || e.KeyCode == Keys.Return) && Primary.Enabled && Primary.Visible)
+            {
+                JBTextBox field = FocusedField();
+                if (field == null || !field.Multiline)
+                {
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    OnPrimary();
+                    return;
+                }
+            }
+            base.OnKeyDown(e);
         }
 
         /// <summary>The text field that owns the caret, if any, unwrapping the nested edit.</summary>
