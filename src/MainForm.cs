@@ -2647,8 +2647,12 @@ namespace JoeBrowser
                 if (!sigs.TryGetValue(kv.Key, out sig) || sig.Length == 0) continue;
                 int n;
                 seen.TryGetValue(sig, out n);
+                /* A clash is worth a pointer, but the audit lives in Tools and a person reading a
+                   tooltip is not going to navigate there from a hint alone - so the text names the
+                   action and the numbers behind it. */
                 kv.Value.SetSignature(sig, n > 1
-                    ? "Fingerprint " + sig + " is shared by " + n + " profiles. Run Tools \u203a Account audit to separate them."
+                    ? "Fingerprint " + sig + " is shared by " + n +
+                      " profiles. Tools \u203a Account audit finds every group and can separate them."
                     : "Fingerprint " + sig + " \u00b7 unique in this workspace");
                 kv.Value.Invalidate();
             }
