@@ -245,8 +245,8 @@ namespace JoeBrowser
                 LayoutRemove();
             }
 
-            /// <summary>Keeps the button inside the row whatever the row's width and scale are,
-               and repaints the text that shares the row with it.</summary>
+            /* Keeps the button inside the row whatever the row's width and scale are, and
+               repaints the text that shares the row with it. */
             private void LayoutRemove()
             {
                 int bw = _remove.PreferredWidth(Ui.S(96));
