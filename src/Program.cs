@@ -162,7 +162,9 @@ namespace JoeBrowser
                 }
                 finally
                 {
-                    Theme.UnloadFonts();
+                    /* Fonts belong to the GDI session, not to one window: unloading them here
+                       while another copy of the app is about to be focused left that copy
+                       drawing with disposed Font objects, which is a crash, not a glitch. */
                     try { mutex.ReleaseMutex(); } catch { }
                     try { mutex.Dispose(); } catch { }
                 }
