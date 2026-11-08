@@ -67,10 +67,25 @@ jobs:
           if (-not (Test-Path $roslyn)) { throw "No Roslyn compiler at $roslyn" }
           "path=$roslyn" >> $env:GITHUB_OUTPUT
 
-          # Both build scripts take -Csc and invoke it as csc.exe, so the forwarding wrapper is
-          # created once here and reused. It lives in RUNNER_TEMP and never reaches the repo.
+          # Both build scripts take -Csc and invoke it as csc, so one forwarding wrapper is
+          # created here and reused. It lives in RUNNER_TEMP and never reaches the repo.
+          #
+          # The SDK's Roslyn ships no csc.rsp, so a compile that passes no /r: switch resolves
+          # nothing at all - not even System.Object - and fails with CS0518. The wrapper names
+          # the framework assemblies explicitly, limited to the ones a WinForms app needs so
+          # that type forwarding from 4.8 reference assemblies still lines up.
+          $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
+          $refs = @('mscorlib.dll', 'System.dll', 'System.Core.dll', 'System.Drawing.dll',
+                    'System.Windows.Forms.dll', 'System.Web.Extensions.dll',
+                    'System.Security.dll', 'System.IO.Compression.dll',
+                    'System.IO.Compression.FileSystem.dll') |
+              ForEach-Object { Join-Path $fw $_ } |
+              Where-Object { Test-Path $_ } |
+              ForEach-Object { "/r:`"$_`"" }
           $wrapper = Join-Path $env:RUNNER_TEMP 'csc.cmd'
-          "@echo off`r`ndotnet `"$roslyn`" %*" | Set-Content -Path $wrapper -Encoding ASCII
+          $body = "@echo off`r`ndotnet `"$roslyn`" $($refs -join ' ') %*"
+          Set-Content -Path $wrapper -Value $body -Encoding ASCII
+          Write-Host "Wrapper: $body"
           "wrapper=$wrapper" >> $env:GITHUB_OUTPUT
           Write-Host "Compiler: $roslyn"
 
