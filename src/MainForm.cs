@@ -1495,6 +1495,29 @@ namespace JoeBrowser
         {
             ExtensionCatalog.Save(_extensions);
             _extensionPage.SetItems(_extensions);
+            /* A running browser fixes its extension list at launch, so a change here can only
+               take effect on the next launch unless the tools are also re-injected. The injected
+               script is per document, so it applies to every new page in the sessions that are
+               already open - which is what the toast promises. Say which of the two just
+               happened instead of claiming both. */
+            int running = 0;
+            foreach (var kv in _sessions) if (kv.Value != null && kv.Value.IsRunning) running++;
+            _extensionLiveNotice = running;
+        }
+
+        /// <summary>
+        /// Set by SaveExtensions: how many browsers are open, so the message after a change says
+        /// whether it is in effect. An extension lives on the browser's command line, so it
+        /// cannot be added to a process that has already started, and the injected tools only
+        /// carry what can be injected.
+        /// </summary>
+        private int _extensionLiveNotice;
+
+        private string ExtensionNote(string done)
+        {
+            return _extensionLiveNotice > 0
+                ? done + ". Open browsers pick it up when they are restarted."
+                : done;
         }
 
         private async System.Threading.Tasks.Task AddExtensionByUrlCore()
@@ -1521,7 +1544,7 @@ namespace JoeBrowser
                 var item = await Task.Run(new Func<ExtensionItem>(delegate { return ExtensionCatalog.ImportFromUrl(url); }));
                 _extensions.Add(item);
                 SaveExtensions();
-                Toast("\"" + item.Name + "\" added to all Chromium profiles", ToastKind.Success);
+                Toast(ExtensionNote("\"" + item.Name + "\" added"), ToastKind.Success);
             }
             catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
             finally { _extensionPage.SetBusy(false, ""); }
@@ -1545,7 +1568,7 @@ namespace JoeBrowser
                     var item = ExtensionCatalog.ImportFromFile(ofd.FileName);
                     _extensions.Add(item);
                     SaveExtensions();
-                    Toast("\"" + item.Name + "\" added to all Chromium profiles", ToastKind.Success);
+                    Toast(ExtensionNote("\"" + item.Name + "\" added"), ToastKind.Success);
                 }
                 catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
             }
@@ -1561,7 +1584,7 @@ namespace JoeBrowser
                     var item = ExtensionCatalog.ImportFromFolder(fbd.SelectedPath);
                     _extensions.Add(item);
                     SaveExtensions();
-                    Toast("\"" + item.Name + "\" added", ToastKind.Success);
+                    Toast(ExtensionNote("\"" + item.Name + "\" added"), ToastKind.Success);
                 }
                 catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
             }
@@ -1572,7 +1595,7 @@ namespace JoeBrowser
             if (index < 0 || index >= _extensions.Count) return;
             _extensions[index].Enabled = !_extensions[index].Enabled;
             SaveExtensions();
-            Toast(_extensions[index].Enabled ? "Enabled for the next browser launch" : "Disabled", ToastKind.Success);
+            Toast(_extensions[index].Enabled ? "Enabled. Takes effect at the next launch." : "Disabled. Takes effect at the next launch.", ToastKind.Success);
         }
 
         private void DeleteExtension(int index)
@@ -1583,7 +1606,7 @@ namespace JoeBrowser
                 "The files stay on disk.", "Remove", BtnKind.Danger)) return;
             _extensions.RemoveAt(index);
             SaveExtensions();
-            Toast("Extension removed", ToastKind.Success);
+            Toast(ExtensionNote("Extension removed"), ToastKind.Success);
         }
 
         private void OpenExtensionStore(int index)
