@@ -2261,7 +2261,10 @@ namespace JoeBrowser
         {
             var g = e.Graphics;
             Ui.Quality(g);
-            g.Clear(Theme.Bg);
+            /* The rounded corners have to show the surface BEHIND the card, not a hard-coded
+               Theme.Bg: a card nested in a page or dialog with a different backdrop had four
+               bright corner pixels that read as a rendering artefact. */
+            g.Clear(Ui.SurfaceColor(this));
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             Ui.Fill(g, r, Theme.RLarge, _hover ? Color.FromArgb(255, Theme.PanelHover) : Theme.Panel);
             Ui.Stroke(g, r, Theme.RLarge, Theme.Line, 1f);
