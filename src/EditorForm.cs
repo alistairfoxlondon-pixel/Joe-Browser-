@@ -1348,9 +1348,23 @@ namespace JoeBrowser
             _fontSet.SetBounds(0, y, two ? (cw - cg) / 2 : cw, fh); y += fh + rg;
 
             _lblUa.SetBounds(0, y, cw, lh); y += lh + lg;
-            int uaW = two ? cw - Ui.S(214) - cg : cw;
-            _ua.SetBounds(0, y, uaW, fh);
-            _autoUa.SetBounds(uaW + cg, y, cw - uaW - cg, fh);
+            /* The "keep it automatic" button was placed at a fixed 214 px reserve, measured
+               against the English label. A longer translation needs more than that, and the two
+               controls then overlapped across the middle of the row. Its real width is asked
+               for instead, and the field keeps whatever is left. */
+            if (two)
+            {
+                int autoW = Math.Min(cw / 2, _autoUa.PreferredWidth(Ui.S(150)));
+                int uaW = cw - autoW - cg;
+                _ua.SetBounds(0, y, uaW, fh);
+                _autoUa.SetBounds(uaW + cg, y, autoW, fh);
+            }
+            else
+            {
+                _ua.SetBounds(0, y, cw, fh);
+                y += fh + lg;
+                _autoUa.SetBounds(0, y, Math.Min(cw, _autoUa.PreferredWidth(Ui.S(150))), fh);
+            }
             y += fh + rg;
 
             Control[] toggles = { _canvas, _audio, _fonts, _hwNoise, _battery, _dnt, _autoMatch };
@@ -1431,7 +1445,11 @@ namespace JoeBrowser
 
         private void FinishPage(Panel page, JBScrollHost host, int cw, int height)
         {
-            page.SetBounds(0, 0, cw, Math.Max(height, host.Height));
+            /* The page carries its content plus room for the footer bar, which is not part of the
+               scrolling area: without the allowance the last row of the last tab sat under the
+               Save button and could not be scrolled clear of it. */
+            int bottom = height + Ui.S(24);
+            page.SetBounds(0, 0, cw, Math.Max(bottom, host.Height));
             host.SyncExtent();
         }
 
