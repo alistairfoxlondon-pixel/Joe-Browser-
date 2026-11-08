@@ -50,6 +50,11 @@ namespace JoeBrowser
         /// </summary>
         private string _sig = "";
 
+        /// <summary>
+        /// Sets the signature chip and the hint behind it, once. The card is recreated on every
+        /// reload, so the tooltip is written here rather than per paint: TextRenderer costs
+        /// nothing next to a ToolTip that is set a hundred times a second.
+        /// </summary>
         public void SetSignature(string sig, string tooltip)
         {
             _sig = string.IsNullOrEmpty(sig) ? "" : sig;
