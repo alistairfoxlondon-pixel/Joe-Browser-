@@ -58,7 +58,7 @@ namespace JoeBrowser
             string key = cfg == null || !cfg.Enabled
                 ? "direct"
                 : (cfg.Type ?? "") + "|" + (cfg.Host ?? "") + "|" + cfg.Port.ToString() + "|" +
-                  (cfg.Username ?? "") + "|" + (cfg.Password ?? "") + "|" + (cfg.FallbackDirect ? "1" : "0");
+                  (cfg.User ?? "") + "|" + (cfg.Password ?? "") + "|" + (cfg.FallbackDirect ? "1" : "0");
             if (!string.Equals(key, _epochKey, StringComparison.Ordinal))
             {
                 _epochKey = key;
