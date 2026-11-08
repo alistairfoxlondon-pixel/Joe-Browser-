@@ -50,7 +50,13 @@ namespace JoeBrowser
 
         public static void Set(string key)
         {
-            if (!IsKnown(key)) key = "en";
+            /* A saved preference may name a language with no table - an older build offered
+               three of them, and a hand-edited settings.json can say anything. Falling back to
+               English is right; leaving a dangling key in Current is what made T() return the
+               raw "nav.profiles" identifiers.
+               It also matters that a failed Set does not raise Changed: every listener would
+               rebuild the whole interface for nothing. */
+            if (!IsTranslated(key)) key = "en";
             if (Current == key) return;
             Current = key;
             var h = Changed;
