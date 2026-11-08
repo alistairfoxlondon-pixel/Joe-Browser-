@@ -46,4 +46,11 @@ foreach ($f in @('dist\JoeBrowser.exe', 'dist\JoeBrowserSetup.exe')) {
     if ($p.ExitCode -ne 0) { throw "$f --selftest exited with $($p.ExitCode): $said" }
 }
 
-Write-Host 'Verification passed: both binaries link, start and read their own configuration.'
+# A green run has to mean the release is newer than the last one, or the workflow publishes a
+# build with the same version as the last release and the new version is not one.
+$latest = $null
+try { $latest = (gh release list --limit 1 --json tagName --jq '.[0].tagName').Trim() } catch { }
+if ($latest -and $latest -eq ('v' + $Version)) { throw "Version $Version is already released as $latest" }
+Write-Host "Version $Version is newer than $latest"
+
+Write-Host 'Verification passed: both binaries link, start, read their own configuration, and carry a new version.'
