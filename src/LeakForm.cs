@@ -87,6 +87,17 @@ namespace JoeBrowser
             LayoutCore();
         }
 
+        /// <summary>
+        /// Esc closes. This is a report, not a form: the only reason it exists is to be read, and
+        /// every other window in the app dismisses on Esc. Missing here it was the one dialog the
+        /// keyboard could not leave.
+        /// </summary>
+        protected override bool ProcessDialogKey(Keys keyData)
+        {
+            if (keyData == Keys.Escape) { Close(); return true; }
+            return base.ProcessDialogKey(keyData);
+        }
+
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);

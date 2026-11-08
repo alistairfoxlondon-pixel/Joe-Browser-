@@ -155,24 +155,40 @@ namespace JoeBrowser
                    the whole cluster has in common - which is the part the user can act on. */
                 FingerprintIdentity.Comparison worst = null;
                 var sharedAll = new HashSet<string>(FpSurface.All);
-                var ids = new HashSet<string>(members.Select(m => m.Id ?? ""));
+                /* Pairs are read back through the same union-find that grouped the members, so
+                   every pair is visited once and only by the cluster it belongs to. Walk the whole
+                   pair list per cluster instead and a workspace with forty profiles that share one
+                   renderer does 1600 x 40 comparisons for no extra information. */
+                var index = new Dictionary<string, int>(StringComparer.Ordinal);
+                for (int i = 0; i < n; i++) index[list[i].Id ?? ""] = i;
+                int first;
+                if (!index.TryGetValue(members[0].Id ?? "", out first)) first = 0;
+                int root = Find(parent, first);
 
                 foreach (var c in pairs)
                 {
                     if (c.A == null || c.B == null) continue;
-                    if (!ids.Contains(c.A.Id ?? "") || !ids.Contains(c.B.Id ?? "")) continue;
+                    int ia, ib;
+                    if (!index.TryGetValue(c.A.Id ?? "", out ia)) continue;
+                    if (!index.TryGetValue(c.B.Id ?? "", out ib)) continue;
+                    if (Find(parent, ia) != root || Find(parent, ib) != root) continue;
                     if (worst == null || RankOf(c.Relation) > RankOf(worst.Relation) ||
                         (RankOf(c.Relation) == RankOf(worst.Relation) && c.Score > worst.Score)) worst = c;
                     foreach (string s in FpSurface.All)
                         if (!c.SharedSurfaces.Contains(s)) sharedAll.Remove(s);
                 }
 
+                var relation = worst == null ? FingerprintIdentity.Relation.Related : worst.Relation;
+                /* "Remote" means they happen to share something minor - an operating system, a
+                   language. That is most of any honest workspace, and listing it would bury the
+                   pairs that matter under the pairs that do not. */
+                if (relation == FingerprintIdentity.Relation.Remote) continue;
+
                 var f = new AuditFinding
                 {
                     Kind = "environment",
-                    Relation = worst == null ? FingerprintIdentity.Relation.Related : worst.Relation,
-                    Title = members.Count + (members.Count == 2 ? " profiles look like one browser"
-                                                                : " profiles look like one browser"),
+                    Relation = relation,
+                    Title = members.Count + " profiles look like one browser",
                     Detail = DetailFor(sharedAll, worst)
                 };
                 foreach (var m in members) { f.Ids.Add(m.Id); f.Names.Add(m.Name); }
@@ -257,26 +273,16 @@ namespace JoeBrowser
                 findings.Add(f);
             }
 
-            // A profile with no proxy at all shares this PC's address with every other one that
-            // has none, which is worth saying once rather than per pair.
-            int direct = list.Count(p => p.Proxy == null || !p.Proxy.Enabled);
-            if (direct >= 2 && list.Count > 1)
-            {
-                var open = list.Where(p => p.Proxy == null || !p.Proxy.Enabled).ToList();
-                var f = new AuditFinding
-                {
-                    Kind = "ip",
-                    Title = direct + " profiles use this PC's own connection",
-                    Detail = "Without a proxy they share your home IP, which ties them to each other and to you."
-                };
-                foreach (var p in open) { f.Ids.Add(p.Id); f.Names.Add(p.Name); }
-                // Only report when it is most of the workspace, otherwise every new workspace
-                // opens with a wall of findings before a single proxy has been added.
-                if (direct == list.Count) f.Detail = "Every profile uses this PC's own connection, so they all share one IP.";
-                findings.Add(f);
-            }
+            /* Profiles with no proxy share this PC's address. That is one sentence in the summary
+               rather than a finding per profile: on a fresh install every profile looks like this,
+               the user has not had a chance to add a proxy yet, and a stack of red rows on first
+               launch teaches people to close the window. */
+            LastDirectCount = list.Count(p => p.Proxy == null || !p.Proxy.Enabled);
             return findings;
         }
+
+        /// <summary>Profiles on this PC's own connection, for the summary line.</summary>
+        public static int LastDirectCount;
 
         // ------------------------------------------------------------------ kernel spread
 
@@ -339,6 +345,7 @@ namespace JoeBrowser
         private readonly List<Profile> _profiles;
         private readonly ProfileStore _store;
         private readonly List<AuditFinding> _findings;
+        private readonly int _directCount;
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
         private readonly List<AuditRow> _rows = new List<AuditRow>();
@@ -353,6 +360,9 @@ namespace JoeBrowser
             _profiles = profiles ?? new List<Profile>();
             _store = store;
             _findings = FingerprintAudit.Run(_profiles);
+            // Copied out of the static immediately: the number belongs to this workspace view,
+            // and a second audit opened later must not change what this one says.
+            _directCount = FingerprintAudit.LastDirectCount;
 
             Text = "Account audit";
             Resizable = true;
@@ -411,6 +421,17 @@ namespace JoeBrowser
             base.OnLoad(e);
             CenterToScreen();
             LayoutCore();
+        }
+
+        /// <summary>
+        /// Esc and Enter both close. This window has one primary action and one dismiss, and a
+        /// read-only report that refuses to close on Esc - or swallows it into an accidental
+        /// "fix" - is the kind of small rudeness that makes a dialog feel unfinished.
+        /// </summary>
+        protected override bool ProcessDialogKey(Keys keyData)
+        {
+            if (keyData == Keys.Escape) { Close(); return true; }
+            return base.ProcessDialogKey(keyData);
         }
 
         protected override void OnResize(EventArgs e)
@@ -474,9 +495,14 @@ namespace JoeBrowser
             else
             {
                 int env = _findings.Count(f => f.Kind == "environment");
-                sub = _profiles.Count + " profiles \u00b7 " + env + (env == 1 ? " shared environment" : " shared environments") +
+                sub = _profiles.Count + " profiles \u00b7 " + env +
+                      (env == 1 ? " shared environment" : " shared environments") +
                       " \u00b7 " + KernelDiversity.DistinctCount(_profiles) + " browser builds";
             }
+            /* Always worth one sentence, even when nothing else is wrong: an IP is the one thing
+               a fingerprint cannot cover, and profiles on this PC's own connection share it. */
+            if (_profiles.Count >= 2 && _directCount >= 2)
+                sub += "  \u00b7  " + _directCount + " on this PC's IP";
             Ui.Text(g, sub, Theme.Small, tone, pad, Ui.S(44), w - pad * 2 - Ui.S(40));
 
             using (var p = new Pen(Theme.Line))
