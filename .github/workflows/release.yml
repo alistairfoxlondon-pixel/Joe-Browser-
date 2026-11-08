@@ -181,7 +181,37 @@ jobs:
             Requirements: any installed Chromium-based browser or Firefox. The Browsers page can
             install Chrome, Brave or Chromium for you.
 
-            ### What is new in 1.4.1
+            ### What is new in 1.4.2
+
+            **Import an extension from a file.** A store link and an unpacked folder covered
+            neither an extension downloaded elsewhere nor a store package saved to disk, and
+            Chrome 137 removed the drag and drop that used to. The Extensions page now takes a
+            `.crx` or `.zip`, finds the package inside the crx header, and unwraps the folder a
+            zip usually wraps it in so the browser can load it.
+
+            **History is per profile, and now reachable per profile.** The page showed whichever
+            profile was opened last, so the pages of a specific one could not be looked at at all.
+            A profile's own menu opens the page focused on it, and the title carries the name.
+
+            **A payment made before the app closed is finished on the next start.** The
+            confirmation used to run only while the upgrade window was open, so a buyer who paid
+            and quit stayed on the free plan. The invoice, including the address it was drawn
+            against, is remembered and checked again. Nothing is granted without a matching unseen
+            transaction.
+
+            **Older Chrome builds are offered.** The catalog carried four builds in total, and
+            every profile is supposed to have a browser version of its own, which four cannot
+            cover. The last hundred known good versions are listed with their exact versions so a
+            workspace can spread across them.
+
+            **Extension changes say when they take effect.** Three messages claimed a change had
+            reached every profile while a browser that was already open keeps the list it started
+            with.
+
+            **A phone profile says what it is.** It emulates the device the page sees, on this PC's
+            hardware, and the window now says so once rather than leaving it to be discovered.
+
+            ### What was new in 1.4.1
 
             **Text can be selected again.** The tool that restores selection was gated behind the
             right click switch and only unlocked `html` and `body`, which does nothing for the
