@@ -92,36 +92,34 @@ if ($cscDll -and (Test-Path $cscDll)) {
 }
 
 try {
-    if ($wrapper -and (Test-Path $wrapper)) {
-        $out = Join-Path $env:RUNNER_TEMP "probe-app.exe"
-        $srcs = Get-ChildItem -Path $src -Filter *.cs -Recurse | Where-Object { $_.Name -ne "Setup.cs" } | ForEach-Object { '"' + $_.FullName + '"' }
-        $a = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $wrapper, "/nologo", "/target:winexe",
-               "/platform:anycpu", "/langversion:7.3", "/out:`"$out`"") + $srcs
-        $text = (& powershell @a 2>&1 | Out-String)
-        $errs = @($text -split "`r?`n" | Where-Object { $_ -match ": error " })
-        Add-Report ("app compile: errors=" + $errs.Count + " produced=" + (Test-Path $out))
-        foreach ($e in ($errs | Select-Object -First 6)) { Add-Report ("  " + ($e -replace "\s+", " ")) }
-    }
-
-    # The build script itself. This writes into dist\, which is what the workflow does anyway.
+    # The build script itself, with the same wrapper the workflow uses. This is the real gate.
     Add-Report "running build.ps1 with the wrapper"
     $btext = (& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot "build\build.ps1") -Csc $wrapper 2>&1 | Out-String)
-    $berrs = @($btext -split "`r?`n" | Where-Object { $_.Trim() })
     $main = Join-Path $repoRoot "dist\JoeBrowser.exe"
     $size = 0
     if (Test-Path $main) { $size = (Get-Item $main).Length }
-    Add-Report ("build.ps1 exit=" + $LASTEXITCODE + " produced=" + (Test-Path $main) + " size=" + $size)
-    if ($LASTEXITCODE -ne 0) {
-        foreach ($l in ($berrs | Select-Object -First 6)) { Add-Report ("  " + ($l -replace "\s+", " ")) }
+    $code = $LASTEXITCODE
+    Add-Report ("build.ps1 exit=" + $code + " produced=" + (Test-Path $main) + " size=" + $size)
+
+    $errs = @($btext -split "`r?`n" | Where-Object { $_ -match ": (error|warning) " })
+    Add-Report ("diagnostics: " + $errs.Count)
+    foreach ($e in ($errs | Select-Object -First 24)) {
+        $line = $e -replace "D:\\a\\Joe-Browser-\\Joe-Browser-\\", "" -replace "\s+", " "
+        Add-Report ("  " + $line.Trim())
+    }
+    if ($code -ne 0 -and $errs.Count -eq 0) {
+        foreach ($l in (@($btext -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 8))) {
+            Add-Report ("  ! " + (($l -replace "\s+", " ").Trim()))
+        }
     }
 } catch {
-    Add-Report ("COMPILE PROBE CRASHED: " + $_)
+    Add-Report ("BUILD PROBE CRASHED: " + $_)
 }
 
 # Emit the report as a few annotations; each holds at most about 1024 characters.
 $chunk = ""
 foreach ($line in $report) {
-    if ($chunk.Length + $line.Length + 3 -gt 900) {
+    if ($chunk.Length + $line.Length + 3 -gt 700) {
         Write-Host ("::notice title=toolchain::$chunk")
         $chunk = ""
     }
