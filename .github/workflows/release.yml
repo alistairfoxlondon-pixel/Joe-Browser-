@@ -124,6 +124,14 @@ jobs:
           # becomes a readable annotation: the raw log is not reachable from here.
           ./.github/workflows/run-step.ps1 -Script .github/workflows/verify-binaries.ps1 -ScriptArgs @('-Version', '${{ steps.ver.outputs.version }}')
 
+      - name: Install, run and remove the installer's result
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          # Only on a tag: this writes to the runner's profile and registry, and it is the last
+          # thing worth proving before a release goes out. Branches keep to the cheaper checks.
+          ./.github/workflows/run-step.ps1 -Script .github/workflows/install-test.ps1 -ScriptArgs @('-Version', '${{ steps.ver.outputs.version }}')
+
       - name: Stage the release assets
         shell: pwsh
         run: |
