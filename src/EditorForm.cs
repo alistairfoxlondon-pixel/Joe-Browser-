@@ -1352,20 +1352,21 @@ namespace JoeBrowser
                against the English label. A longer translation needs more than that, and the two
                controls then overlapped across the middle of the row. Its real width is asked
                for instead, and the field keeps whatever is left. */
+            int autoW = Math.Min(two ? cw / 2 : cw, MeasureToggleWidth(_autoUa));
             if (two)
             {
-                int autoW = Math.Min(cw / 2, _autoUa.PreferredWidth(Ui.S(150)));
                 int uaW = cw - autoW - cg;
                 _ua.SetBounds(0, y, uaW, fh);
                 _autoUa.SetBounds(uaW + cg, y, autoW, fh);
+                y += fh + rg;
             }
             else
             {
                 _ua.SetBounds(0, y, cw, fh);
                 y += fh + lg;
-                _autoUa.SetBounds(0, y, Math.Min(cw, _autoUa.PreferredWidth(Ui.S(150))), fh);
+                _autoUa.SetBounds(0, y, autoW, fh);
+                y += fh + rg;
             }
-            y += fh + rg;
 
             Control[] toggles = { _canvas, _audio, _fonts, _hwNoise, _battery, _dnt, _autoMatch };
             int cols = two ? 2 : 1;
@@ -1441,6 +1442,17 @@ namespace JoeBrowser
             _openExtFolder.SetBounds(0, y, bw, fh); y += fh + Ui.S(12);
 
             FinishPage(page, host, cw, y);
+        }
+
+        /// <summary>Width a toggle needs for its label, plus the switch it draws itself.</summary>
+        private static int MeasureToggleWidth(JBToggle t)
+        {
+            if (t == null) return Ui.S(180);
+            using (var g = System.Drawing.Graphics.FromHwnd(IntPtr.Zero))
+            {
+                float text = Ui.Measure(g, t.Text ?? "", t.Font ?? Theme.Body).Width;
+                return (int)Math.Ceiling(text) + Ui.S(78);
+            }
         }
 
         private void FinishPage(Panel page, JBScrollHost host, int cw, int height)
