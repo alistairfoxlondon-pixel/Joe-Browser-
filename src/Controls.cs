@@ -926,6 +926,12 @@ namespace JoeBrowser
             set { Box.UseSystemPasswordChar = value; Invalidate(); }
         }
 
+        /// <summary>
+        /// A multi-line field edits notes, not a value: Enter must insert a newline there. The
+        /// dialogs ask this to decide whether Enter should submit the form instead.
+        /// </summary>
+        public bool Multiline { get { return _multiline; } }
+
         public int PadLeft = 10, PadRight = 10, PadTop = 6;
 
         public string Value

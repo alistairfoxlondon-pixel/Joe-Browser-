@@ -157,9 +157,20 @@ namespace JoeBrowser
         /// <summary>Call after adding every row if you added controls directly to Body.</summary>
         public void RefreshLayout() { LayoutCore(); }
 
+        /* The value each field had when the dialog opened. Esc needs this to know whether there
+           is anything to undo: "the box has text in it" is not the same question, and every
+           one of these dialogs opens with its fields already filled in. */
+        private readonly Dictionary<JBTextBox, string> _initial = new Dictionary<JBTextBox, string>();
+
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
+            _initial.Clear();
+            foreach (Control c in _body.Controls)
+            {
+                var box = c as JBTextBox;
+                if (box != null) _initial[box] = box.Value ?? "";
+            }
             LayoutCore();
             CenterToParent();
         }
@@ -194,7 +205,10 @@ namespace JoeBrowser
             int footerH = Ui.S(56);
             _body.SetBounds(pad, Ui.S(56), Math.Max(Ui.S(100), w - pad * 2), Math.Max(Ui.S(60), h - Ui.S(56) - footerH));
 
-            int innerW = Math.Max(Ui.S(100), _body.Width - Ui.S(24));
+            /* _body is AutoScroll: when the rows are taller than the dialog a scrollbar appears
+               and takes 17 px from the client area. Laying the rows out against the full width
+               pushed their right edge - and the right edge of every field - underneath it. */
+            int innerW = Math.Max(Ui.S(100), _body.Width - Ui.S(24) - (_body.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0));
             int y = Ui.S(6);
             foreach (var r in _rows)
             {
@@ -219,44 +233,57 @@ namespace JoeBrowser
         {
             if (keyData == Keys.Escape)
             {
-                /* Esc used to close the dialog outright. Inside a text field that is the wrong
-                   behaviour twice over: people press Esc to abandon a half-typed value, not the
-                   whole form, and everything they had already filled in was thrown away with
-                   no warning. In a field, Esc now clears focus back to the dialog; a second
-                   Esc (or Esc anywhere else) still closes it. */
-                Control focused = ActiveControl;
-                while (focused is ContainerControl && ((ContainerControl)focused).ActiveControl != null)
-                    focused = ((ContainerControl)focused).ActiveControl;
-
-                if (HasTypedText(focused))
+                /* Esc used to close the dialog and throw away everything typed into it. Now the
+                   first Esc undoes the field the caret is in, if it differs from what the dialog
+                   opened with, and a second Esc closes. Nothing is lost by pressing Esc once. */
+                JBTextBox field = FocusedField();
+                if (field != null)
                 {
-                    if (!_escHinted)
+                    string original;
+                    string typed = field.Value ?? "";
+                    if (_initial.TryGetValue(field, out original) && !string.Equals(original, typed, StringComparison.Ordinal))
                     {
+                        field.Value = original;
+                        field.Box.SelectAll();
                         _escHinted = true;
-                        Secondary.Text = "Discard and close";
+                        Secondary.Text = "Press Esc again to close";
                         Secondary.Invalidate();
+                        return true;
                     }
-                    SelectNextControl(focused, false, false, true, false);
-                    ActiveControl = null;
-                    return true;
                 }
-
                 DialogResult = DialogResult.Cancel;
                 Close();
                 return true;
             }
+
+            /* Enter submits, from any single-line field. JBTextBox deliberately swallows Enter
+               (so a dialog cannot submit while the user is still typing a value), which also
+               meant the AcceptButton never saw it and every one of these dialogs had to be
+               finished with the mouse. */
+            if ((keyData == Keys.Enter || keyData == Keys.Return) && Primary.Enabled && Primary.Visible)
+            {
+                JBTextBox field = FocusedField();
+                if (field == null || !field.Multiline)
+                {
+                    OnPrimary();
+                    return true;
+                }
+            }
             return base.ProcessCmdKey(ref msg, keyData);
         }
 
-        private bool _escHinted;
-
-        private static bool HasTypedText(Control control)
+        /// <summary>The text field that owns the caret, if any, unwrapping the nested edit.</summary>
+        private JBTextBox FocusedField()
         {
-            var tb = control as TextBox;
-            if (tb != null) return !tb.ReadOnly && !string.IsNullOrEmpty(tb.Text);
-            var field = control as JBTextBox;
-            if (field != null) return !string.IsNullOrEmpty(field.Value);
-            return false;
+            Control c = ActiveControl;
+            while (c is ContainerControl && ((ContainerControl)c).ActiveControl != null)
+                c = ((ContainerControl)c).ActiveControl;
+            var box = c as TextBox;
+            // JBTextBox hosts a real TextBox, and that is what actually has focus.
+            if (box != null) return box.Parent as JBTextBox;
+            return c as JBTextBox;
         }
+
+        private bool _escHinted;
     }
 }
