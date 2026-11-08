@@ -465,7 +465,7 @@ namespace JoeBrowser
                 if ((DateTime.UtcNow - created.Value).TotalMinutes < 2) return;
                 if ((DateTime.UtcNow - created.Value).TotalDays > 7) { Plan.ClearPending(); return; }
 
-                var coin = CoinOption.ByKey(coinKey);
+                var coin = CoinCatalog.ByKey(coinKey);
                 if (coin == null) { Plan.ClearPending(); return; }
                 string address = Plan.PendingAddress;
                 if (string.IsNullOrEmpty(address)) address = coin.Address;
@@ -483,7 +483,7 @@ namespace JoeBrowser
                 {
                     /* A different receiving address is a different invoice; the invoice object
                        carries the coin, so the address the user was shown is restored onto it. */
-                    var copy = CoinOption.ByKey(coinKey);
+                    var copy = CoinCatalog.ByKey(coinKey);
                     if (copy != null) { copy.Address = address; inv.Coin = copy; }
                 }
 
