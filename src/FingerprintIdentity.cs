@@ -146,7 +146,9 @@ namespace JoeBrowser
         {
             // Two independent 32-bit passes so a 10-char token is not a collision waiting to
             // happen when a workspace holds a few hundred profiles.
-            const uint p1 = 16777619u, p2 = 1099511628211u & 0xFFFFFFFFu;
+            // Both multipliers are uint literals: a ulong one, even masked to 32 bits, stays a
+            // ulong constant and does not convert.
+            const uint p1 = 16777619u, p2 = 3266489917u;
             uint h1 = 2166136261u, h2 = 2166136261u ^ 0x9E3779B9u;
             byte[] bytes = Encoding.UTF8.GetBytes(text ?? "");
             foreach (byte b in bytes)

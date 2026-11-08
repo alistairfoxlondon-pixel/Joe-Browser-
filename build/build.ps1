@@ -40,7 +40,7 @@ $sources = Get-ChildItem -Path $src -Filter *.cs -Recurse |
     ForEach-Object { $_.FullName }
 if (-not $sources) { throw "No source files found." }
 
-$refNames = @("System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.Forms.dll", "System.Web.Extensions.dll", "System.Security.dll", "System.IO.Compression.dll", "System.IO.Compression.FileSystem.dll")
+$refNames = @("System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.Forms.dll", "System.Configuration.dll", "System.Web.Extensions.dll", "System.Security.dll", "System.IO.Compression.dll", "System.IO.Compression.FileSystem.dll")
 $out = Join-Path $dist "JoeBrowser.exe"
 
 $lines = New-Object System.Collections.Generic.List[string]

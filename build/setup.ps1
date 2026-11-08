@@ -38,18 +38,41 @@ $lines.Add('/win32icon:"' + (Join-Path $root "src\app.ico") + '"')
 $lines.Add('/win32manifest:"' + (Join-Path $root "src\app.manifest") + '"')
 # The application travels inside the installer as a resource.
 $lines.Add('/resource:"' + $app + '",JoeBrowser.payload.exe')
+# The installer carries its own identity, including the version: without it the file exports as
+# 0.0.0.0, so Add/Remove Programs had no version to show, Properties had no version tab, and
+# nothing could tell a stale installer from a fresh one. csc has no switch for this - the
+# version resource is generated from assembly attributes - so the installer gets a small
+# generated file, with the version read from the application's AssemblyInfo so the two can
+# never disagree.
+$info = Get-Content (Join-Path $root "src\AssemblyInfo.cs") -Raw
+$version = "1.0.0.0"
+if ($info -match 'AssemblyFileVersion\("([0-9.]+)"\)') { $version = $Matches[1] }
+$assemblyInfo = Join-Path $PSScriptRoot "setup.assemblyinfo.cs"
+@(
+    'using System.Reflection;'
+    "[assembly: AssemblyTitle(`"Joe Browser setup`")]"
+    "[assembly: AssemblyDescription(`"Installs Joe Browser for the current Windows user`")]"
+    '[assembly: AssemblyCompany("Joe Goldberg")]'
+    '[assembly: AssemblyProduct("Joe Browser")]'
+    '[assembly: AssemblyCopyright("Copyright (c) 2026 Joe Goldberg")]'
+    "[assembly: AssemblyVersion(`"$version`")]"
+    "[assembly: AssemblyFileVersion(`"$version`")]"
+    "[assembly: AssemblyInformationalVersion(`"$version`")]"
+) | Set-Content -Path $assemblyInfo -Encoding UTF8
 $lines.Add('/out:"' + $Out + '"')
 foreach ($r in @("System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.Forms.dll")) {
     $lines.Add('/r:"' + (Join-Path $fw $r) + '"')
 }
 $lines.Add('"' + (Join-Path $root "src\Setup.cs") + '"')
 $lines.Add('"' + (Join-Path $root "src\Installation.cs") + '"')
+$lines.Add('"' + $assemblyInfo + '"')
 
 $rsp = Join-Path $PSScriptRoot "setup.rsp"
 Set-Content -Path $rsp -Value $lines -Encoding ASCII
 & $csc "@$rsp"
 if ($LASTEXITCODE -ne 0) { throw "Setup build failed with exit code $LASTEXITCODE" }
 Remove-Item $rsp -Force -ErrorAction SilentlyContinue
+Remove-Item $assemblyInfo -Force -ErrorAction SilentlyContinue
 
 # Optional Authenticode signing. Without a certificate Windows will still warn on first run;
 # signing is the only legitimate way to remove that warning.

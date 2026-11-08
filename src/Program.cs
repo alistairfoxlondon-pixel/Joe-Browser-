@@ -13,7 +13,7 @@ namespace JoeBrowser
         [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int cmd);
 
         [STAThread]
-        private static void Main(string[] args)
+        private static int Main(string[] args)
         {
             /* Add/Remove Programs invokes the installed executable with --uninstall. This has
                to run before the single-instance mutex, because a running copy would otherwise
@@ -23,6 +23,7 @@ namespace JoeBrowser
                unknown switch means the user mistyped something and should be told rather than
                have the app start and silently ignore it. */
             bool uninstall = false, silent = false, portable = false, help = false, unknown = false;
+            bool selfTest = false;
             if (args != null)
             {
                 foreach (string a in args)
@@ -32,22 +33,56 @@ namespace JoeBrowser
                     else if (a.Equals("--silent", StringComparison.OrdinalIgnoreCase) ||
                         a.Equals("/silent", StringComparison.OrdinalIgnoreCase)) silent = true;
                     else if (a.Equals("--portable", StringComparison.OrdinalIgnoreCase)) portable = true;
+                    else if (a.Equals("--selftest", StringComparison.OrdinalIgnoreCase)) selfTest = true;
                     else if (a.Equals("--help", StringComparison.OrdinalIgnoreCase) ||
                              a.Equals("/help", StringComparison.OrdinalIgnoreCase) ||
                              a.Equals("/?", StringComparison.OrdinalIgnoreCase)) help = true;
                     else if (a.Length > 0 && (a[0] == '-' || a[0] == '/')) unknown = true;
                 }
             }
+            /* --selftest exists for the build. A binary that links is not the same as a binary
+               that runs: the framework those two facts differ over is .NET's application
+               configuration, which is read lazily by the first component that consults it, and
+               an unknown <section> in JoeBrowser.exe.config throws there rather than here. So
+               the release build launches the freshly made EXE with this switch, on a machine
+               with no interactive desktop, and fails the build if the exit code is not zero. */
+            if (selfTest)
+            {
+                try
+                {
+                    /* Reading an appSettings value forces .NET to parse JoeBrowser.exe.config,
+                       section by section - which is exactly where an undeclared custom section
+                       throws. A missing file is fine; a file that cannot be parsed is not. */
+                    System.Configuration.ConfigurationManager.RefreshSection("appSettings");
+                    string probe = System.Configuration.ConfigurationManager.AppSettings["JoeBrowser.SelfTest"];
+                    if (probe == null) { Console.Error.WriteLine("selftest: configuration has no appSettings value"); return 3; }
+                }
+                catch (Exception ex)
+                {
+                    /* The outer exception of a configuration failure is always the same
+                       sentence, so the inner ones - which name the section and the reason -
+                       are what has to be reported. */
+                    var sb = new System.Text.StringBuilder("selftest: configuration could not be read:");
+                    for (Exception e = ex; e != null; e = e.InnerException)
+                        sb.Append(" [" + e.GetType().Name + ": " + e.Message + "]");
+                    Console.Error.WriteLine(sb.ToString());
+                    return 2;
+                }
+                Console.WriteLine("selftest ok " + Application.ProductVersion);
+                return 0;
+            }
+
             if (help)
             {
                 MessageBox.Show(
                     "Joe Browser\r\n\r\n"
                     + "  --portable     run from this folder without installing\r\n"
                     + "  --uninstall    remove Joe Browser (profiles are kept)\r\n"
-                    + "  --silent       no prompts, for the uninstaller\r\n\r\n"
+                    + "  --silent       no prompts, for the uninstaller\r\n"
+                    + "  --selftest     check the installation from a script, then exit\r\n\r\n"
                     + "Without an argument Joe Browser starts normally.",
                     "Joe Browser", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
+                return 0;
             }
             if (uninstall)
             {
@@ -55,12 +90,12 @@ namespace JoeBrowser
                         "Remove Joe Browser from this PC?\r\n\r\nYour profiles, proxies and browser "
                         + "sessions in %APPDATA%\\JoeBrowser are kept.",
                         "Joe Browser", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-                    return;
+                    return 0;
                 Installation.Uninstall(silent);
                 if (!silent)
                     MessageBox.Show("Joe Browser has been removed.", "Joe Browser",
                         MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
+                return 0;
             }
 
             // A second copy would hold the same profile store and settings at once, so bring the
@@ -76,7 +111,7 @@ namespace JoeBrowser
             {
                 FocusRunningWindow();
                 mutex = AcquireInstance(6000);
-                if (mutex == null) return;
+                if (mutex == null) return 0;
             }
 
             try { ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12; } catch { }
@@ -168,7 +203,7 @@ namespace JoeBrowser
                     try { mutex.ReleaseMutex(); } catch { }
                     try { mutex.Dispose(); } catch { }
                 }
-                return;
+                return 0;
             }
 
             try
@@ -192,7 +227,7 @@ namespace JoeBrowser
                         gate.ShowDialog();
                         /* The signed-in account is the only reliable signal: the dialog result
                            is Cancel whenever the window is closed by any other path. */
-                        if (gate.SignedIn == null) return;
+                        if (gate.SignedIn == null) return 0;
                         Session.Open(gate.SignedIn);
                     }
                 }
@@ -206,11 +241,11 @@ namespace JoeBrowser
                         using (var ask = new AskDialog("Joe Browser is locked",
                                    "Enter your PIN to unlock Joe Browser.", "PIN", true))
                         {
-                            if (ask.ShowDialog() != DialogResult.OK) return;
+                            if (ask.ShowDialog() != DialogResult.OK) return 0;
                             ok = Accounts.VerifyPin(Session.Current.Email, ask.Value);
                         }
                     }
-                    if (!ok) return;
+                    if (!ok) return 0;
                 }
                 Application.Run(new MainForm());
             }
@@ -225,6 +260,7 @@ namespace JoeBrowser
                 try { mutex.ReleaseMutex(); } catch { }
                 try { mutex.Dispose(); } catch { }
             }
+            return 0;
         }
 
         /// <summary>
