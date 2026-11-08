@@ -1374,7 +1374,13 @@ namespace JoeBrowser
             _store.Save(p);
             session.UpdateProfile(p);
             ReloadCards(true);
-            Toast("Proxy changed live · your tab and session are still open", ToastKind.Success);
+            /* A window that opened with no proxy has nothing to re-point: Chrome reads its
+               proxy once, from the command line. Saying "live" there would be a lie the user
+               only discovers at a leak test, so the two cases get different words. */
+            Toast(session.HasRelay
+                ? "Proxy changed live · your tab and session are still open"
+                : "Proxy saved · reopen this profile to route it through it",
+                session.HasRelay ? ToastKind.Success : ToastKind.Info);
         }
 
         /* ------------------------------------------------------------------ *

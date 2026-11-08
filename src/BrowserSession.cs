@@ -54,6 +54,12 @@ namespace JoeBrowser
 
         public bool ProxyFellBack { get; private set; }
 
+        /// <summary>True when this window's traffic goes through a relay that can be re-pointed
+        /// at a different upstream without closing the window. A profile that opened with no
+        /// proxy has none, and Chrome cannot be handed one after it starts: its proxy comes from
+        /// the command line it was launched with.</summary>
+        public bool HasRelay { get { return _relay != null; } }
+
         public bool IsRunning
         {
             get
