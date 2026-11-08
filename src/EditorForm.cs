@@ -1155,6 +1155,9 @@ namespace JoeBrowser
         {
             _err.Text = text ?? "";
             _err.Visible = text != null && text.Length > 0;
+            /* The line elides at the end, and the end of "…is too long" is the part that says
+               what is wrong. The tooltip carries the whole sentence. */
+            ToolTips.Attach(_err, _err.Text);
             LayoutFooter();
             _err.Invalidate();
         }
@@ -1203,8 +1206,13 @@ namespace JoeBrowser
             _cancel.SetBounds(_save.Left - Ui.S(8) - cancelW, h - Ui.S(16) - saveH, cancelW, saveH);
             /* The label starts at pad+22 (right of the alert glyph), so its width has to be
                measured from that x or the last characters sit under the Cancel button. */
-            int errW = Math.Max(Ui.S(120), _cancel.Left - Ui.S(8) - (pad + Ui.S(22)) - Ui.S(4));
+            /* The error line is one row high and takes whatever the two buttons leave. On a
+               narrow window that used to be negative, so the message was drawn nowhere: the save
+               was refused and nothing said why. It gets a minimum and is allowed to overlap the
+               footer padding rather than vanish. */
+            int errW = Math.Max(Ui.S(80), _cancel.Left - Ui.S(8) - (pad + Ui.S(22)) - Ui.S(4));
             _err.SetBounds(pad + Ui.S(22), h - Ui.S(16) - saveH, errW, saveH);
+            ToolTips.Attach(_err, _err.Text);
             _footerY = h - Ui.S(64);
         }
 
