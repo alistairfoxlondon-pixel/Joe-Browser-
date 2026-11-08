@@ -143,7 +143,7 @@ namespace JoeBrowser
             /* Refuse to run as a loose file. Opening the download directly skipped the
                shortcuts, the Add/Remove Programs entry and in-place updates, and left a second
                copy of the product in Downloads. --portable is the deliberate escape hatch for
-               the test harness and for support work. */
+               the test harness and for support work; --help lists the switching options. */
             if (unknown && !silent)
             {
                 /* Say it once, then carry on: a stray switch should not stop the app from
