@@ -18,16 +18,36 @@ namespace JoeBrowser
             /* Add/Remove Programs invokes the installed executable with --uninstall. This has
                to run before the single-instance mutex, because a running copy would otherwise
                just bring its window forward instead of removing anything. */
-            bool uninstall = false, silent = false;
+            /* Recognised arguments. Anything else is ignored here and forwarded meaningfully:
+               Chromium is launched by this app, never by passing its own switches to it, so an
+               unknown switch means the user mistyped something and should be told rather than
+               have the app start and silently ignore it. */
+            bool uninstall = false, silent = false, portable = false, help = false, unknown = false;
             if (args != null)
             {
                 foreach (string a in args)
                 {
                     if (a.Equals("--uninstall", StringComparison.OrdinalIgnoreCase) ||
                         a.Equals("/uninstall", StringComparison.OrdinalIgnoreCase)) uninstall = true;
-                    if (a.Equals("--silent", StringComparison.OrdinalIgnoreCase) ||
+                    else if (a.Equals("--silent", StringComparison.OrdinalIgnoreCase) ||
                         a.Equals("/silent", StringComparison.OrdinalIgnoreCase)) silent = true;
+                    else if (a.Equals("--portable", StringComparison.OrdinalIgnoreCase)) portable = true;
+                    else if (a.Equals("--help", StringComparison.OrdinalIgnoreCase) ||
+                             a.Equals("/help", StringComparison.OrdinalIgnoreCase) ||
+                             a.Equals("/?", StringComparison.OrdinalIgnoreCase)) help = true;
+                    else if (a.Length > 0 && (a[0] == '-' || a[0] == '/')) unknown = true;
                 }
+            }
+            if (help)
+            {
+                MessageBox.Show(
+                    "Joe Browser\r\n\r\n"
+                    + "  --portable     run from this folder without installing\r\n"
+                    + "  --uninstall    remove Joe Browser (profiles are kept)\r\n"
+                    + "  --silent       no prompts, for the uninstaller\r\n\r\n"
+                    + "Without an argument Joe Browser starts normally.",
+                    "Joe Browser", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
             }
             if (uninstall)
             {
@@ -124,10 +144,12 @@ namespace JoeBrowser
                shortcuts, the Add/Remove Programs entry and in-place updates, and left a second
                copy of the product in Downloads. --portable is the deliberate escape hatch for
                the test harness and for support work. */
-            bool portable = false;
-            if (args != null)
-                foreach (string a in args)
-                    if (a.Equals("--portable", StringComparison.OrdinalIgnoreCase)) portable = true;
+            if (unknown && !silent)
+            {
+                /* Say it once, then carry on: a stray switch should not stop the app from
+                   opening, but it should not be invisible either. */
+                Log.Info("Ignored unrecognised command line arguments.");
+            }
 
             if (!portable && !Installation.IsRunningInstalled())
             {
