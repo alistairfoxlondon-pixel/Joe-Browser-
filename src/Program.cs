@@ -59,7 +59,13 @@ namespace JoeBrowser
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine("selftest: configuration could not be read: " + ex.GetType().Name + ": " + ex.Message);
+                    /* The outer exception of a configuration failure is always the same
+                       sentence, so the inner ones - which name the section and the reason -
+                       are what has to be reported. */
+                    var sb = new System.Text.StringBuilder("selftest: configuration could not be read:");
+                    for (Exception e = ex; e != null; e = e.InnerException)
+                        sb.Append(" [" + e.GetType().Name + ": " + e.Message + "]");
+                    Console.Error.WriteLine(sb.ToString());
                     return 2;
                 }
                 Console.WriteLine("selftest ok " + Application.ProductVersion);
