@@ -3288,9 +3288,12 @@ namespace JoeBrowser
                 return;
             }
             using (var dlg = new LeakForm(result, p.Name, s)) dlg.ShowDialog(this);
+            /* The report dialog already lists every check with its own verdict, so the bar
+               afterwards is a one line summary and nothing more. It used to repeat the whole
+               verdict sentence, which in the dialog had just been read. */
             if (!string.IsNullOrEmpty(result.Error)) Toast(result.Error, ToastKind.Warn);
             else if (result.Clean) Toast("No leak found in " + result.Total + " checks", ToastKind.Success);
-            else Toast(result.Verdict, ToastKind.Warn);
+            else Toast(result.Verdict + " in the report above", ToastKind.Warn);
         }
 
         /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
@@ -3708,16 +3711,30 @@ namespace JoeBrowser
                     _cards[id].Model = p;
                     _cards[id].Invalidate();
                 }
-                Toast("\u201c" + p.Name + "\u201d is ready", ToastKind.Success);
-                /* A phone profile is the device the page sees, not a phone. Everything the page
-                   can read is emulated and consistent; what cannot be emulated on a Windows PC is
-                   the hardware underneath, so a user testing one should be told once rather than
-                   left to assume a phone is being faked completely. */
-                if (p.Fp != null && FingerprintFactory.IsMobileOs(p.Fp.Os))
-                    Toast("The page sees " + p.Fp.Os + ". The window runs on this PC, so hardware " +
-                          "level checks still belong to it.", ToastKind.Info);
-                if (session.IsFirefox && p.Fp != null && !FingerprintFactory.IsWindowsTarget(p.Fp.Os))
-                    Toast("Firefox cannot spoof " + p.Fp.Os + ". WebGL, timezone and screen stay real.", ToastKind.Error);
+                /* One message, not three. Each of these used to be its own toast on the same
+                   launch, and there is only ever one toast: the caveat replaced "is ready" before
+                   anyone could read it, and the second caveat replaced the first. The launch
+                   notice carries the caveat that applies, and the worst of them decides the
+                   colour. */
+                string ready = "\u201c" + p.Name + "\u201d is ready";
+                ToastKind kind = ToastKind.Success;
+                bool mobile = p.Fp != null && FingerprintFactory.IsMobileOs(p.Fp.Os);
+                bool firefoxForeign = session.IsFirefox && p.Fp != null && !FingerprintFactory.IsWindowsTarget(p.Fp.Os);
+                if (firefoxForeign)
+                {
+                    ready += ". Firefox cannot spoof " + p.Fp.Os + ", so WebGL, timezone and screen stay real";
+                    kind = ToastKind.Error;
+                }
+                else if (mobile)
+                {
+                    /* A phone profile is the device the page sees, not a phone. Everything the
+                       page can read is emulated and consistent; what cannot be emulated on a
+                       Windows PC is the hardware underneath, so a user testing one should be
+                       told once rather than left to assume a phone is being faked completely. */
+                    ready += ". The page sees " + p.Fp.Os + ", the hardware is this PC";
+                    kind = ToastKind.Info;
+                }
+                Toast(ready, kind);
                 Invalidate();
             }
             catch (Exception ex)
