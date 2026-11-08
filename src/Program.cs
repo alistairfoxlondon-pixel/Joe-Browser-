@@ -125,6 +125,25 @@ namespace JoeBrowser
                     }
                     foreach (var kv in bySignature)
                         if (kv.Value > 1) sb.Append(" [" + kv.Value + " of 8 profiles share one signature]");
+                    /* A unique signature is not enough on its own: the brief asks for a different
+                       kernel each time as well, so a grid of eight identical Chrome builds would
+                       pass the check above and fail the requirement. Pinning only happens when
+                       more than one build is installed - a lone build is shared by design - so
+                       the rule is checked only where it can apply. */
+                    var kernels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var p in profiles)
+                    {
+                        string key = (p.KernelEngine ?? "browser") + "|" + (p.KernelVersion ?? "system");
+                        int k;
+                        kernels.TryGetValue(key, out k);
+                        kernels[key] = k + 1;
+                    }
+                    int pinned = 0;
+                    foreach (var p in profiles) if (KernelDiversity.IsPinned(p)) pinned++;
+                    if (pinned > 0 && pinned < profiles.Count)
+                        sb.Append(" [" + pinned + " of 8 profiles have a build of their own]");
+                    if (pinned == 0 && kernels.Count != 1)
+                        sb.Append(" [" + kernels.Count + " kinds of kernel among 8 profiles]");
 
                     /* The start page every new profile gets: the fingerprint test page, not a
                        search engine. Checked here because it is a one line default that three
