@@ -803,22 +803,19 @@ namespace JoeBrowser
                     y += Ui.S(44);
                 }
 
-                int fw = _restore.PreferredWidth(Ui.S(170));
-                _restore.SetBounds(pad, y, fw, Ui.S(33));
-                if (TermsAccepted)
-                    _termsLink.SetBounds(pad + fw + Ui.S(10), y, _termsLink.PreferredWidth(Ui.S(90)), Ui.S(33));
-                y += Ui.S(33) + Ui.S(26);
+                _termsLink.Visible = TermsAccepted;
+                JBButton[] bottomActions = TermsAccepted
+                    ? new[] { _restore, _termsLink }
+                    : new[] { _restore };
+                y = Ui.FlowButtons(bottomActions, pad, y, inner, Ui.S(10), Ui.S(33)) + Ui.S(26);
 
                 _sectionInvite.SetBounds(pad, y, inner, Ui.S(22));
                 y += Ui.S(22) + Ui.S(6);
                 _inviteLine.SetBounds(pad, y, inner, Ui.S(20));
                 y += Ui.S(20) + Ui.S(10);
 
-                int iw1 = _copyInvite.PreferredWidth(Ui.S(140));
-                int iw2 = _claim.PreferredWidth(Ui.S(150));
-                _copyInvite.SetBounds(pad, y, iw1, Ui.S(32));
-                _claim.SetBounds(pad + iw1 + Ui.S(10), y, iw2, Ui.S(32));
-                y += Ui.S(32) + Ui.S(28);
+                JBButton[] invite = { _copyInvite, _claim };
+                y = Ui.FlowButtons(invite, pad, y, inner, Ui.S(10), Ui.S(32)) + Ui.S(28);
 
                 _column.SetBounds(0, 0, Math.Max(inner + pad * 2, avail), Math.Max(y, _host.Height));
                 _host.SyncExtent();

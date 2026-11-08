@@ -180,9 +180,23 @@ namespace JoeBrowser
                    button on a line could cross the edge and start the next line under it. */
                 y = Ui.FlowButtons(actions, pad, y, inner, Ui.S(8), bh) + Ui.S(24);
 
-                _accountsHeading.SetBounds(pad, y, inner - _refresh.PreferredWidth(Ui.S(100)) - Ui.S(8), Ui.S(22));
                 int rw = _refresh.PreferredWidth(Ui.S(100));
-                _refresh.SetBounds(pad + inner - rw, y - Ui.S(4), rw, bh);
+                /* The heading keeps its own line when the refresh button would leave nothing
+                   readable of it; otherwise the two share a row. */
+                int headW = inner - rw - Ui.S(8);
+                if (headW < Ui.S(120))
+                {
+                    _accountsHeading.SetBounds(pad, y, inner, Ui.S(22));
+                    y += Ui.S(26);
+                    _refresh.SetBounds(pad + inner - rw, y, rw, bh);
+                    y += bh + Ui.S(4);
+                }
+                else
+                {
+                    _accountsHeading.SetBounds(pad, y, headW, Ui.S(22));
+                    _refresh.SetBounds(pad + inner - rw, y - Ui.S(4), rw, bh);
+                    y += Ui.S(30);
+                }
                 y += Ui.S(30);
 
                 foreach (var r in _rows)
