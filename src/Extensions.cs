@@ -616,7 +616,8 @@ if (cfg.human) {
    blocker - it does not remove any browser feature. */
 /* Selection is not a site's choice to take away here. Whatever else is switched off, the
    page cannot refuse to let the user select and copy its own text - that was reported as
-   "text selection does not work", and a site that blocks selectstart is almost always one
+   reported as text selection not working, and a site that blocks selectstart is almost
+   always one
    that also blocks the copy it would need. */
 (function () {
   try {
