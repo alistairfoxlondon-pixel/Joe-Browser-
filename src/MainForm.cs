@@ -2150,11 +2150,17 @@ namespace JoeBrowser
                     sub = _filter.Length > 0
                         ? shown + " of " + _profiles.Count + " profiles"
                         : _profiles.Count + (_profiles.Count == 1 ? " profile" : " profiles");
-                    /* The header is the one place a user always sees. If two profiles share a
-                       signature, saying so here is the difference between a workspace that looks
-                       fine and one that is fine. */
+                    /* The header is the one place a user always sees, so it carries the state of
+                       the workspace and not just its size: how many profiles share an identity and
+                       how many browser builds they run on. Without this the two facts that decide
+                       whether the workspace is safe are only visible by opening every card. */
                     if (_collisionGroups > 0 && _filter.Length == 0)
                         sub += "  \u00b7  " + _collisionProfiles + " share a fingerprint";
+                    if (_filter.Length == 0 && _profiles.Count > 1)
+                    {
+                        int builds = KernelDiversity.DistinctCount(_profiles);
+                        if (builds <= 1) sub += "  \u00b7  one browser build";
+                    }
                     break;
                 case 1: title = L10n.T("header.proxies"); sub = L10n.T("sub.proxies"); break;
                 case 2: title = L10n.T("header.extensions"); sub = L10n.T("sub.extensions"); break;
