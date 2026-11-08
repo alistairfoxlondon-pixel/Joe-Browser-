@@ -351,6 +351,39 @@ namespace JoeBrowser
     return a;
   }
 
+  /* ---- window.chrome ----
+     A Chromium browser always exposes this object, and its absence is one of the oldest bot
+     checks in existence: a page that finds navigator.userAgent saying Chrome and no
+     window.chrome has found automation, not a browser. Some of the ways this app drives a
+     profile - the CDP session, an isolated world, an extension loaded late - can leave it
+     missing, so it is put back rather than hoped for, with the shape a real Chrome has even
+     when no extension is installed. Chrome's own object has no runtime.id in that case, and
+     inventing one would be the new tell. */
+  try {
+    if (!window.chrome) {
+      var chromeStub = {};
+      chromeStub.app = {
+        isInstalled: false,
+        InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+        RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' }
+      };
+      chromeStub.runtime = {
+        OnInstalledReason: {
+          CHROME_UPDATE: 'chrome_update', INSTALL: 'install',
+          SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update'
+        },
+        OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
+        PlatformArch: { ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
+        PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' },
+        connect: function () { throw new Error('Could not establish connection. Receiving end does not exist.'); },
+        sendMessage: function () { throw new Error('Could not establish connection. Receiving end does not exist.'); }
+      };
+      chromeStub.loadTimes = function () { return null; };
+      chromeStub.csi = function () { return null; };
+      Object.defineProperty(window, 'chrome', { value: chromeStub, writable: true, configurable: true, enumerable: true });
+    }
+  } catch (e) {}
+
   /* ---- iOS and Android tell-tales ---- */
   try {
     if (isSafari) {
