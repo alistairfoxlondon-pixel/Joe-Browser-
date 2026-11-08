@@ -120,54 +120,9 @@ jobs:
       - name: Verify the binaries
         shell: pwsh
         run: |
-          $want = '${{ steps.ver.outputs.version }}'
-          foreach ($f in @('dist\JoeBrowser.exe', 'dist\JoeBrowserSetup.exe')) {
-            if (-not (Test-Path $f)) { throw "$f was not produced" }
-            $size = (Get-Item $f).Length
-            if ($size -lt 200KB) { throw "$f is only $size bytes - the build did not link properly" }
-            $version = (Get-Item $f).VersionInfo.FileVersion
-            if ($version -ne "$want.0") { throw "$f reports $version, expected $want.0" }
-            Write-Host ("{0}  {1:N0} bytes  {2}" -f $f, $size, $version)
-          }
-
-          # A binary that links is not a binary that runs. --selftest starts the freshly built EXE,
-          # has it parse its own JoeBrowser.exe.config and exit with a code - no window, so it
-          # works on a runner with no interactive desktop. --help would open a MessageBox there
-          # and block until the timeout.
-          foreach ($f in @('dist\JoeBrowser.exe', 'dist\JoeBrowserSetup.exe')) {
-            $p = Start-Process -FilePath $f -ArgumentList '--selftest' -PassThru `
-                 -RedirectStandardOutput 'selftest.out' -RedirectStandardError 'selftest.err'
-            if (-not $p.WaitForExit(60000)) {
-              $p.Kill()
-              Write-Host "::error title=Self-test hung::$f did not exit within 60 seconds"
-              throw "$f --selftest hung"
-            }
-            $said = @(Get-Content 'selftest.out', 'selftest.err' -ErrorAction SilentlyContinue) -join ' / '
-            Write-Host "$f --selftest exit=$($p.ExitCode) said=$said"
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- ``$f`` --selftest exit=$($p.ExitCode): $said" 
-            if ($p.ExitCode -ne 0) {
-              # ::error has to be written to the log to become an annotation; a thrown message
-              # does not. The raw step log is not readable from the environment that maintains
-              # this repository, so this is the only place the reason can surface.
-              Write-Host "::error title=Self-test failed::$f exited with $($p.ExitCode). $said"
-              throw "$f --selftest exited with $($p.ExitCode)"
-            }
-          }
-          Write-Host 'Smoke test passed: both binaries start and can read their configuration.'
-
-      - name: Report the self-test result
-        if: always()
-        shell: pwsh
-        run: |
-          # The build log itself is not reachable from the environment that maintains this
-          # repository, but the job summary is, as an annotation. So the self-test writes its
-          # verdict there as it goes and this step republishes it.
-          $summary = Join-Path $env:GITHUB_STEP_SUMMARY ''
-          if (-not $summary -or -not (Test-Path $summary)) { Write-Host 'no summary to report'; exit 0 }
-          $text = (Get-Content $summary -Raw) -replace "\r?\n", ' '
-          if (-not $text.Trim()) { Write-Host 'summary empty'; exit 0 }
-          if ($text.Length -gt 900) { $text = $text.Substring($text.Length - 900) }
-          Write-Host "::notice title=Self-test::$text"
+          # Routed through run-step.ps1 so that whatever this check prints on the way to failing
+          # becomes a readable annotation: the raw log is not reachable from here.
+          ./.github/workflows/run-step.ps1 -Script .github/workflows/verify-binaries.ps1 -ScriptArgs @('-Version', '${{ steps.ver.outputs.version }}')
 
       - name: Stage the release assets
         shell: pwsh
