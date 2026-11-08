@@ -621,7 +621,7 @@ A guarantee nobody can check is not a guarantee:
   collisions at 5/10/30/50 profiles, 33 renderers and 15 screens.
 * Similarity rules simulated at 5/10/30/50/100 profiles: no false flags below 100.
 * Every new API call checked against the declaring class (members, overloads, argument types).
-* Brace/paren/bracket balance clean across all 62 source files.
+* Brace/paren/bracket balance clean across all 65 source files.
 * Needs a Windows run: create 20 profiles and confirm every card signature is distinct; duplicate a
   profile and confirm both the signature and the kernel in Settings change; delete a kernel and
   confirm the pinned profile still opens on the installed browser; run Tools › Account audit on a
