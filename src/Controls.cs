@@ -1089,6 +1089,11 @@ namespace JoeBrowser
         {
             if (_multiline)
             {
+                /* Scroll the field only while it still has somewhere to go; once it is at the
+                   top or the bottom the gesture belongs to the page behind it. Swallowing every
+                   notch meant the wheel died whenever the pointer happened to be over a notes
+                   box - a very common position - even though the page was scrollable. */
+                int before = FirstVisibleLine();
                 _wheelCarry += e.Delta;
                 int lines = _wheelCarry / 120;
                 if (lines != 0)
@@ -1097,9 +1102,21 @@ namespace JoeBrowser
                     Native.SendMessage(Box.Handle, Native.EM_LINESCROLL, IntPtr.Zero, (IntPtr)lines);
                 }
                 Invalidate();
-                return;
+                if (FirstVisibleLine() != before) return;   // the field moved: it took the gesture
+                _wheelCarry = 0;
             }
             base.OnMouseWheel(e);
+        }
+
+        /// <summary>First visible line of a multiline field, or 0 when it cannot be read.</summary>
+        private int FirstVisibleLine()
+        {
+            try
+            {
+                return (int)Native.SendMessage(Box.Handle, Native.EM_GETFIRSTVISIBLELINE,
+                    IntPtr.Zero, IntPtr.Zero).ToInt64();
+            }
+            catch { return 0; }
         }
 
         protected override void OnResize(EventArgs e)
@@ -1897,7 +1914,21 @@ namespace JoeBrowser
         /// Columns are chosen so each row always spans the full width: a wide window gets more
         /// cards per row instead of a capped grid with dead space on the right.
         /// </summary>
+        private bool _layingOut;
+
         public void LayoutGrid()
+        {
+            /* Setting Height below raises OnResize, which calls straight back in here. The
+               second pass computes the same numbers, so it is harmless today - but it re-enters
+               this method in the middle of the control loop, and the guard makes that
+               impossible rather than merely unlikely. */
+            if (_layingOut) return;
+            _layingOut = true;
+            try { LayoutGridCore(); }
+            finally { _layingOut = false; }
+        }
+
+        private void LayoutGridCore()
         {
             int gap = Ui.S(Gap);
             int min = Ui.S(MinCell);
