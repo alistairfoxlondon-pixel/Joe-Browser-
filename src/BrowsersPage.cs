@@ -315,7 +315,10 @@ namespace JoeBrowser
         {
             base.OnResize(e);
             if (_action == null) return;
-            int w = _action.PreferredWidth(Ui.S(132));
+            /* The button is kept inside the row: a long translation makes a preferred width
+               wider than the row, and the old placement then put its left edge at 8 px while its
+               right edge stayed off the card. */
+            int w = Math.Min(Math.Max(Ui.S(96), Width - Ui.S(120)), _action.PreferredWidth(Ui.S(132)));
             _action.SetBounds(Math.Max(Ui.S(8), Width - Ui.S(16) - w), (Height - Ui.S(31)) / 2, w, Ui.S(31));
         }
 
