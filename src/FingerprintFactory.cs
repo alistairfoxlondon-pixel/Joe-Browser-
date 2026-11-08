@@ -1149,11 +1149,41 @@ namespace JoeBrowser
                 else if (parts.Length == 3 && int.TryParse(parts[0], out head) && head > 0)
                     return v.Trim() + "." + (40 + StableHash(v) % 160);
             }
-            // A real Chromium build is always four numeric parts with non-zero build and patch.
-            // "131.0.0.0" never appears in the wild and is an instant mismatch against client hints.
-            int build = 6000 + StableHash("b" + major) % 1300;
-            int patch = 40 + StableHash("p" + major) % 190;
+            /* A real Chromium build is always four numeric parts with a non-zero build and patch,
+               and "131.0.0.0" never appears in the wild. More than that: the build branch rises
+               strictly with the major, because Google cuts a branch per release. Randomising it
+               produced versions like 132.0.6325.213, which is not a Chrome that has ever existed
+               and which a checker holding its own version table catches in one comparison, so
+               the branch comes from a real table and the patch, which genuinely differs between
+               platforms and channels, is the part that varies. */
+            int build = BuildBranchFor(major);
+            int patch = 60 + StableHash("p" + major) % 180;
             return major + ".0." + build + "." + patch;
+        }
+
+        /// <summary>Real stable build branch per major version, filled in for the range in use.</summary>
+        private static readonly Dictionary<int, int> BuildBranches = new Dictionary<int, int>
+        {
+            { 120, 6099 }, { 121, 6167 }, { 122, 6261 }, { 123, 6312 }, { 124, 6367 },
+            { 125, 6422 }, { 126, 6478 }, { 127, 6533 }, { 128, 6613 }, { 129, 6668 },
+            { 130, 6723 }, { 131, 6778 }, { 132, 6834 }, { 133, 6943 }, { 134, 6998 },
+            { 135, 7049 }, { 136, 7103 }, { 137, 7151 }, { 138, 7204 }, { 139, 7258 },
+            { 140, 7339 }, { 141, 7390 }, { 142, 7444 }, { 143, 7499 }
+        };
+
+        /// <summary>
+        /// The build branch for a major, interpolated in the same rhythm when the table does not
+        /// reach it. Interpolating beats hashing here even though it is less varied: a version
+        /// that is merely older than the newest real one is ordinary, and a version that could
+        /// not have existed is a flag.
+        /// </summary>
+        private static int BuildBranchFor(int major)
+        {
+            int known;
+            if (BuildBranches.TryGetValue(major, out known)) return known;
+            int nearest = major > 143 ? 143 : (major < 120 ? 120 : major);
+            if (major > 143) return 7499 + (major - 143) * 54;
+            return 6099 - (120 - nearest) * 54;
         }
 
         private static int StableHash(string value)
