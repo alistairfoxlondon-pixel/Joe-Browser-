@@ -270,6 +270,9 @@ namespace JoeBrowser
             if ((keyData == Keys.Enter || keyData == Keys.Return) && Primary.Enabled && Primary.Visible)
             {
                 JBTextBox field = FocusedField();
+                /* Enter in a multi-line field inserts a newline and stays there; the dialog is
+                   submitted from the buttons or from any single-line field. A field can also be
+                   the body of a commit (a receipt, a store link) - those are single-line. */
                 if (field == null || !field.Multiline)
                 {
                     OnPrimary();
@@ -277,27 +280,6 @@ namespace JoeBrowser
                 }
             }
             return base.ProcessCmdKey(ref msg, keyData);
-        }
-
-        /// <summary>
-        /// Enter submits from a single-line field. KeyPreview delivers it here before the focused
-        /// control sees it, which is the one path that does not depend on how the framework
-        /// classified the key for that particular child.
-        /// </summary>
-        protected override void OnKeyDown(KeyEventArgs e)
-        {
-            if ((e.KeyCode == Keys.Enter || e.KeyCode == Keys.Return) && Primary.Enabled && Primary.Visible)
-            {
-                JBTextBox field = FocusedField();
-                if (field == null || !field.Multiline)
-                {
-                    e.Handled = true;
-                    e.SuppressKeyPress = true;
-                    OnPrimary();
-                    return;
-                }
-            }
-            base.OnKeyDown(e);
         }
 
         /// <summary>The text field that owns the caret, if any, unwrapping the nested edit.</summary>
