@@ -1515,6 +1515,8 @@ namespace JoeBrowser
             _setBrowserInfo.TextAlign = ContentAlignment.MiddleRight;
             _setStoragePath = Label(LabelRole.Body, AppPaths.Root);
             _setStoragePath.TextAlign = ContentAlignment.MiddleRight;
+            /* A path is the one thing here a user regularly needs out of the window. */
+            _setStoragePath.Selectable = true;
             /* The folder path is longer than the row on a normal window, so the label elides
                it. The tooltip is what makes the elision harmless: the full path is one hover
                away and the Open button sits right beside it. */
@@ -1579,6 +1581,8 @@ namespace JoeBrowser
             _setKernelInfo = new JBLabel(LabelRole.Body, "");
             _setKernelInfo.Wrap = true;
             _setKernelInfo.TextAlign = ContentAlignment.MiddleLeft;
+            /* Kernel names and versions are the other thing a user copies into a report. */
+            _setKernelInfo.Selectable = true;
 
             var workspace = Card("set.workspace");
             Row(workspace, "set.row.kernels", null, _setKernelInfo);

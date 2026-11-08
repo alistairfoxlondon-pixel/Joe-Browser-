@@ -614,6 +614,36 @@ if (cfg.human) {
    clipboard back: page handlers never see those trusted events, inline blockers are
    stripped, and selection CSS is unlocked. This is the opposite of a right-click
    blocker - it does not remove any browser feature. */
+/* Selection is not a site's choice to take away here. Whatever else is switched off, the
+   page cannot refuse to let the user select and copy its own text - that was reported as
+   "text selection does not work", and a site that blocks selectstart is almost always one
+   that also blocks the copy it would need. */
+(function () {
+  try {
+    var st = document.createElement('style');
+    st.setAttribute('data-jb', 'selection');
+    st.textContent = 'html,body,body *{-webkit-user-select:text!important;-moz-user-select:text!important' +
+                     ';-ms-user-select:text!important;user-select:text!important}';
+    (document.head || document.documentElement).appendChild(st);
+  } catch (e) {}
+  try {
+    var nativePreventSelect = Event.prototype.preventDefault;
+    Event.prototype.preventDefault = function () {
+      try {
+        /* selectstart and copy are the two events a page uses to stop selection. Trusted ones
+           are swallowed; the page's own synthetic events still work. */
+        if (this && (this.type === 'selectstart' || this.type === 'copy' || this.type === 'cut') && this.isTrusted) return;
+      } catch (e) {}
+      return nativePreventSelect.call(this);
+    };
+  } catch (e) {}
+  try {
+    document.addEventListener('selectstart', function (e) {
+      try { if (e.isTrusted) e.stopImmediatePropagation(); } catch (x) {}
+    }, true);
+  } catch (e) {}
+})();
+
 if (cfg.rightClick) {
   var UNBLOCK = { contextmenu:1, copy:1, cut:1, selectstart:1, dragstart:1, mousedown:1, mouseup:1 };
   Event.prototype.preventDefault = function(){

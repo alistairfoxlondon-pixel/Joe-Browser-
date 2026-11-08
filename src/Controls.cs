@@ -16,6 +16,49 @@ namespace JoeBrowser
     {
         public LabelRole Role = LabelRole.Body;
 
+        /// <summary>
+        /// A label whose text can be selected and copied. A plain WinForms label cannot: the
+        /// user can see an error message or a path and has no way to get it out of the window,
+        /// which is exactly when they need it - to paste into a report. Turning the label into a
+        /// read only single line text box would lose the ellipsis and the themed font, so the
+        /// paint is done here instead: the same native text drawing, plus a selection that
+        /// follows a mouse drag and a Ctrl+C that copies it. Ctrl+A selects everything.
+        /// </summary>
+        private bool _selectable;
+
+        public bool Selectable
+        {
+            get { return _selectable; }
+            set
+            {
+                _selectable = value;
+                /* A label is not focusable by default, and a key handler only runs on the
+                   focused control, so Ctrl+C needs this to work at all. */
+                SetStyle(ControlStyles.Selectable, value);
+                TabStop = value;
+                if (value) Cursor = Cursors.IBeam;
+            }
+        }
+
+        private int _selStart = -1, _selEnd = -1;
+        private bool _dragging;
+        private string _dragText;
+        private Rectangle _dragBounds;
+
+        public string SelectedText
+        {
+            get
+            {
+                if (_selStart < 0 || _selEnd < 0 || Text == null) return "";
+                int a = Math.Min(_selStart, _selEnd), b = Math.Max(_selStart, _selEnd);
+                if (a >= Text.Length) return "";
+                if (b > Text.Length) b = Text.Length;
+                return Text.Substring(a, b - a);
+            }
+        }
+
+        public void ClearSelection() { _selStart = _selEnd = -1; Invalidate(); }
+
         public JBLabel()
         {
             AutoSize = false;
@@ -47,6 +90,98 @@ namespace JoeBrowser
         }
 
         public void ReStyle() { Apply(); }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (!Selectable) return;
+            _dragging = true;
+            _dragText = Text;
+            _dragBounds = ClientRectangle;
+            _selStart = _selEnd = IndexAt(e.X);
+            Invalidate();
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (!Selectable || !_dragging) return;
+            int i = IndexAt(e.X);
+            if (i != _selEnd) { _selEnd = i; Invalidate(); }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (!Selectable) return;
+            _dragging = false;
+            if (_selStart == _selEnd) { _selStart = _selEnd = -1; Invalidate(); }
+        }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            if (Selectable && (keyData == Keys.Left || keyData == Keys.Right)) return true;
+            return base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (Selectable && e.Control && e.KeyCode == Keys.A)
+            {
+                _selStart = 0; _selEnd = Text == null ? 0 : Text.Length;
+                Invalidate(); e.Handled = true; return;
+            }
+            if (Selectable && e.Control && e.KeyCode == Keys.C)
+            {
+                string t = SelectedText;
+                if (!string.IsNullOrEmpty(t)) { try { Clipboard.SetText(t); } catch { } }
+                e.Handled = true; return;
+            }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            if (!Selectable || Text == null || _selStart < 0 || _selEnd < 0) return;
+            int a = Math.Min(_selStart, _selEnd), b = Math.Max(_selStart, _selEnd);
+            if (a == b) return;
+            /* The highlight is measured with the same font the label draws with, so it lands on
+               the glyphs rather than near them. AutoEllipsis means the visible tail may be cut;
+               the selection is clamped to what is drawn. */
+            string shown = Text;
+            Size proposed = TextRenderer.MeasureText(shown, Font, new Size(int.MaxValue, Height),
+                TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+            if (proposed.Width > Width && Width > 0)
+            {
+                while (shown.Length > 0 && TextRenderer.MeasureText(shown + "…", Font).Width > Width)
+                    shown = shown.Substring(0, shown.Length - 1);
+                if (b > shown.Length) b = shown.Length;
+                if (a >= b) return;
+            }
+            int x1 = TextRenderer.MeasureText(shown.Substring(0, Math.Min(a, shown.Length)), Font,
+                new Size(int.MaxValue, Height), TextFormatFlags.NoPadding).Width;
+            int x2 = TextRenderer.MeasureText(shown.Substring(0, Math.Min(b, shown.Length)), Font,
+                new Size(int.MaxValue, Height), TextFormatFlags.NoPadding).Width;
+            int y = (Height - Font.Height) / 2;
+            var fill = new Rectangle(x1 + Padding.Left, y, Math.Max(1, x2 - x1), Font.Height);
+            using (var b2 = new SolidBrush(Theme.SelOverlay)) e.Graphics.FillRectangle(b2, fill);
+        }
+
+        /// <summary>Character index nearest a client X, for turning a drag into a range.</summary>
+        private int IndexAt(int x)
+        {
+            if (Text == null) return 0;
+            int best = 0, bestDist = int.MaxValue;
+            for (int i = 0; i <= Text.Length; i++)
+            {
+                int w = TextRenderer.MeasureText(Text.Substring(0, i), Font,
+                    new Size(int.MaxValue, Height), TextFormatFlags.NoPadding).Width;
+                int d = Math.Abs(w - x);
+                if (d < bestDist) { bestDist = d; best = i; }
+            }
+            return best;
+        }
 
         /// <summary>Wrap to several lines instead of trimming the tail with an ellipsis.</summary>
         public bool Wrap
