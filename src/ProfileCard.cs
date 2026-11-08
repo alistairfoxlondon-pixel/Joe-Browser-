@@ -32,6 +32,7 @@ namespace JoeBrowser
         public event EventHandler RenameRequested;
         public event EventHandler ClearCacheRequested;
         public event EventHandler LeakTestRequested;
+        public event EventHandler HistoryRequested;
 
         // CSS pixel metrics for the whole card.
         public const double CardH = 200;
@@ -224,6 +225,10 @@ namespace JoeBrowser
             if (Running)
                 JBMenu.Add(menu, "Clear cache (keeps tab open)", "refresh",
                     delegate { var h = ClearCacheRequested; if (h != null) h(this, EventArgs.Empty); });
+            /* History belongs to one profile, and the History page otherwise shows whichever
+               profile was opened last - which is not a way to find a page in a particular one. */
+            JBMenu.Add(menu, "Browsing history", "clock",
+                delegate { var h = HistoryRequested; if (h != null) h(this, EventArgs.Empty); });
             JBMenu.Add(menu, Picked ? "Remove from selection" : "Add to selection", "check",
                 delegate { var h = PickToggled; if (h != null) h(this, EventArgs.Empty); });
             JBMenu.Add(menu, "Duplicate", "copy", delegate { var h = DuplicateRequested; if (h != null) h(this, EventArgs.Empty); });

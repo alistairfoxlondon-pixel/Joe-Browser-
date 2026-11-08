@@ -2592,6 +2592,13 @@ namespace JoeBrowser
             return best;
         }
 
+        /// <summary>Opens the History page focused on one profile rather than the last used.</summary>
+        private void ShowProfileHistory(string id)
+        {
+            _historyProfileId = id;
+            SetPage(8);
+        }
+
         private void RefreshHistory()
         {
             if (_historyPage == null) return;
@@ -2765,6 +2772,7 @@ namespace JoeBrowser
                 card.RenameRequested += delegate { RenameProfile(id); };
                 card.ClearCacheRequested += delegate { ClearProfileData(id); };
                 card.LeakTestRequested += delegate { RunLeakTest(id); };
+                card.HistoryRequested += delegate { ShowProfileHistory(id); };
                 card.DuplicateRequested += delegate { DuplicateProfile(id); };
                 card.DeleteRequested += delegate { DeleteProfile(id); };
                 card.PickToggled += delegate { TogglePick(id, (ModifierKeys & Keys.Shift) != 0); };
