@@ -80,6 +80,22 @@ namespace JoeBrowser
                 default: return 1;
             }
         }
+
+        /// <summary>
+        /// Surfaces whose value is <em>derived</em> from another choice rather than chosen.
+        ///
+        /// A profile's user agent is built from its OS and its browser build, and its timezone
+        /// and language are set by the proxy's country. Two profiles on the same provider and the
+        /// same browser therefore share them without sharing an identity - describing that as
+        /// "linked" would fire on the normal case and teach the user to ignore the audit. These
+        /// still count toward the weighted score; they just cannot on their own make a pair
+        /// Linked. The surfaces left - WebGL, canvas, audio, fonts, screen, hardware, navigator -
+        /// are the ones a generated identity genuinely varies.
+        /// </summary>
+        public static bool IsDerived(string surface)
+        {
+            return surface == UserAgent || surface == Timezone || surface == Language;
+        }
     }
 
     /// <summary>One surface of one profile: its short hash and the value that produced it.</summary>
@@ -328,7 +344,7 @@ namespace JoeBrowser
             }
 
             int totalWeight = 0, sharedWeight = 0;
-            bool sharesStrong = false, sharesAnything = false;
+            bool sharesAnything = false;
 
             foreach (string surface in FpSurface.All)
             {
@@ -343,7 +359,8 @@ namespace JoeBrowser
                     sharedWeight += w;
                     result.SharedSurfaces.Add(surface);
                     sharesAnything = true;
-                    if (w >= 4) sharesStrong = true;
+                    /* A shared user agent follows from sharing an OS and a browser build; it is
+                       reported and weighted, and never on its own grounds for a link. */
                 }
                 else
                 {
@@ -353,9 +370,26 @@ namespace JoeBrowser
 
             result.Score = totalWeight == 0 ? 0 : (int)Math.Round(100.0 * sharedWeight / totalWeight);
 
+            /* Calibration, because the difference between a useful warning and noise is
+               entirely in these numbers.
+
+               Sharing one surface is not evidence of anything. Millions of machines have an RTX
+               3060, and a workspace of fifty profiles on thirty-three renderers cannot avoid
+               repeating one - so "shares WebGL" alone must never be reported as a link, or the
+               audit cries wolf on every large workspace and gets ignored.
+
+               What detectors actually group on is the combination: a pair matching on the
+               renderer, the screen and the hardware is a pair even when the canvas noise differs,
+               because noise is the cheapest thing to re-roll. So the verdict is driven by the
+               weighted overlap, with a count of strong surfaces as a shortcut for the near-miss
+               case where the overlap sits just under the threshold. */
+            int strongShared = 0;
+            foreach (string s2 in result.SharedSurfaces)
+                if (FpSurface.Weight(s2) >= 4 && !FpSurface.IsDerived(s2)) strongShared++;
+
             if (result.SharedSurfaces.Count == FpSurface.All.Length) result.Relation = Relation.Identical;
-            else if (sharesStrong) result.Relation = Relation.Linked;
-            else if (sharesAnything && result.Score >= 35) result.Relation = Relation.Related;
+            else if (result.Score >= 65) result.Relation = Relation.Linked;
+            else if (result.Score >= 40 || strongShared >= 3) result.Relation = Relation.Related;
             else if (sharesAnything) result.Relation = Relation.Remote;
             else result.Relation = Relation.Distinct;
 
@@ -480,6 +514,27 @@ namespace JoeBrowser
                     return attempt + 1;
                 }
 
+                /* On the last third of the loop, stop hoping the roll lands well and move the
+                   renderer to one this workspace has never used. That is what makes the
+                   guarantee hold at fifty profiles instead of only at five. */
+                if (attempt >= 8 && RetargetRenderer(fp, pool))
+                {
+                    probeMap = Surfaces(fp);
+                    var afterSwap = WorstMatch(probe, probeMap, poolMaps);
+                    if (afterSwap == null || afterSwap.Relation == Relation.Distinct ||
+                        afterSwap.Relation == Relation.Remote)
+                    {
+                        clash = afterSwap;
+                        return attempt + 1;
+                    }
+                    if (bestClash == null || Rank(afterSwap.Relation) < Rank(bestClash.Relation) ||
+                        (Rank(afterSwap.Relation) == Rank(bestClash.Relation) && afterSwap.Score < bestClash.Score))
+                    {
+                        best = fp.Copy();
+                        bestClash = afterSwap;
+                    }
+                }
+
                 if (bestClash == null || Rank(worst.Relation) < Rank(bestClash.Relation) ||
                     (Rank(worst.Relation) == Rank(bestClash.Relation) && worst.Score < bestClash.Score))
                 {
@@ -526,6 +581,59 @@ namespace JoeBrowser
                 accepted.Add(p);
             }
             return repaired;
+        }
+
+        /// <summary>
+        /// Resolves a workspace that random rolls cannot separate.
+        ///
+        /// At about thirty profiles the loop stops being enough on its own: the Windows pool has
+        /// thirty-three renderers and the screen table a dozen entries, so by then most rolls
+        /// land on a surface something else already uses, and twelve attempts do not find a
+        /// clean one. Rather than give up and report a clash, this takes the renderer - the single
+        /// strongest grouping signal - and moves it to one no other profile in the workspace is
+        /// using. Deterministic, so it either succeeds or says it cannot.
+        ///
+        /// The swap is deliberate and narrow: a real card from the same OS pool, so the profile
+        /// stays plausible; the cores and memory already rolled are left alone, because those are
+        /// legitimate for almost every card and changing them too would make the profile drift
+        /// from what the rest of its surfaces describe.
+        /// </summary>
+        public static bool RetargetRenderer(FingerprintConfig fp, IEnumerable<Profile> others)
+        {
+            if (fp == null) return false;
+            /* Desktop only. On Android and iOS the renderer is not a free choice: it is the
+               silicon the handset behind the viewport actually shipped, and the user agent names
+               the same model. Swapping it to dodge a collision would create a phone that was
+               never built - a far louder tell than a shared desktop card. */
+            if (FingerprintFactory.IsMobileOs(fp.Os)) return false;
+
+            var used = new HashSet<string>(StringComparer.Ordinal);
+            if (others != null)
+                foreach (var o in others)
+                {
+                    if (o == null || o.Fp == null) continue;
+                    if (string.Equals(o.Fp.Os, fp.Os, StringComparison.OrdinalIgnoreCase) &&
+                        !string.IsNullOrEmpty(o.Fp.WebGlRenderer))
+                        used.Add(o.Fp.WebGlRenderer);
+                }
+
+            var pool = FingerprintFactory.GpusFor(fp.Os);
+            if (pool == null || pool.Count == 0) return false;
+
+            /* Start at a position derived from the seed rather than the head of the list, so a
+               workspace of fifty profiles spreads across the pool instead of everyone fighting
+               over the newest card. */
+            int start = Math.Abs(fp.Seed) % pool.Count;
+            for (int i = 0; i < pool.Count; i++)
+            {
+                var candidate = pool[(start + i) % pool.Count];
+                if (candidate == null || candidate.Length < 2) continue;
+                if (used.Contains(candidate[1])) continue;
+                fp.WebGlVendor = candidate[0];
+                fp.WebGlRenderer = candidate[1];
+                return true;
+            }
+            return false;
         }
 
         /// <summary>Copies every malleable field of <paramref name="from"/> onto <paramref name="to"/>.</summary>
