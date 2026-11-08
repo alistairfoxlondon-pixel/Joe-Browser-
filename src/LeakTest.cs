@@ -286,9 +286,17 @@ new Promise(function (resolve) {
                                  rtc.IndexOf(".local", StringComparison.OrdinalIgnoreCase) >= 0;
                 string mode = fp.WebRtcMode ?? "proxy";
                 bool expectOpen = mode.Equals("public", StringComparison.OrdinalIgnoreCase);
-                result.Items.Add(new LeakItem("WebRTC", expectOpen || localOnly,
-                    string.IsNullOrEmpty(rtc) ? "No candidate addresses exposed"
-                        : (expectOpen ? "Exposes " + rtc : "Exposes " + rtc)));
+                /* "public" means the profile deliberately lets WebRTC reveal the exit address;
+                   anything else must stay private. The detail says which of the two happened, so a
+                   failure explains itself instead of repeating the same sentence in both cases. */
+                string detail = string.IsNullOrEmpty(rtc)
+                    ? "No candidate addresses exposed"
+                    : expectOpen
+                        ? "Exposes " + rtc + " (allowed by this profile)"
+                        : localOnly
+                            ? "Only a local address exposed: " + rtc
+                            : "Exposes the real address " + rtc + " - turn on WebRTC protection";
+                result.Items.Add(new LeakItem("WebRTC", expectOpen || localOnly, detail));
             }
 
             return result;
