@@ -844,7 +844,12 @@ namespace JoeBrowser
             else Toast("Could not restore that profile", ToastKind.Error);
         }
 
-        /// <summary>Shortcut table shared by the help dialog and the About page.</summary>
+        /// <summary>
+        /// Shortcut table shared by the help dialog and the About page. A non-empty third column
+        /// starts a new group; the renderer prints it as a heading. Two of the old entries were
+        /// not shortcuts at all ("Right click", "On-page alert") and belonged nowhere near this
+        /// list, so they were removed rather than dressed up as keyboard commands.
+        /// </summary>
         private static readonly string[][] ShortcutRows =
         {
             new[] { "Ctrl + N", "New profile", "PROFILE LIST" },
@@ -853,12 +858,31 @@ namespace JoeBrowser
             new[] { "Ctrl + A", "Select every visible profile", "" },
             new[] { "F2", "Edit the focused profile", "" },
             new[] { "F5", "Reload profiles from disk", "" },
-            new[] { "Esc", "Clear search or selection", "" },
+            new[] { "Esc", "Clear the search, then the selection", "" },
             new[] { "Shift + click", "Select a range of profiles", "" },
-            new[] { "Ctrl + V", "Paste as human, typed like a person", "IN THE BROWSER" },
-            new[] { "Right click", "Restored on sites that block it", "" },
-            new[] { "On-page alert", "Proxy rotated or went offline", "" }
+            new[] { "Arrows", "Move between profile cards", "" },
+            new[] { "Enter", "Open the focused profile", "" },
+            new[] { "Shift + F10", "Open the card menu", "" },
+            new[] { "Tab", "Move through every control on the page", "EVERYWHERE" },
+            new[] { "Page Up/Down", "Scroll the page", "" },
+            new[] { "F4", "Open a dropdown list", "" },
+            new[] { "Enter", "Submit the dialog you are in", "" }
         };
+
+        /// <summary>
+        /// The same table with group headings folded in, so both renderers walk one list and
+        /// neither can silently drop the grouping.
+        /// </summary>
+        private static List<string[]> ShortcutDisplay()
+        {
+            var rows = new List<string[]>();
+            foreach (var r in ShortcutRows)
+            {
+                if (!string.IsNullOrEmpty(r[2])) rows.Add(new[] { "", r[2] });
+                rows.Add(new[] { r[0], r[1] });
+            }
+            return rows;
+        }
 
         private void ShortcutHelp()
         {
@@ -866,10 +890,11 @@ namespace JoeBrowser
             {
                 dlg.Secondary.Visible = false;
                 string text = "";
-                foreach (var s in ShortcutRows)
+                foreach (var s in ShortcutDisplay())
                 {
-                    if (s[2].Length > 0) text += (text.Length > 0 ? "\r\n\r\n" : "") + s[2] + "\r\n";
-                    text += s[0].PadRight(18) + s[1] + "\r\n";
+                    // A row with no key is a group heading.
+                    if (s[0].Length == 0) text += (text.Length > 0 ? "\r\n" : "") + s[1] + "\r\n";
+                    else text += s[0].PadRight(18) + s[1] + "\r\n";
                 }
                 dlg.AddReadOnlyText(text, 360);
                 dlg.ShowDialog(this);
@@ -3305,18 +3330,29 @@ namespace JoeBrowser
             float scSect = afterTiles + Ui.S(10);
             Ui.Text(g, L10n.T("about.shortcuts"), Theme.Micro, Theme.TextFaint, x + Ui.S(2), scSect, colW - Ui.S(4));
 
+            var shortcuts = ShortcutDisplay();
             int scCols = colW >= Ui.S(900) ? 2 : 1;
-            int perCol = (int)Math.Ceiling(ShortcutRows.Length / (double)scCols);
+            int perCol = (int)Math.Ceiling(shortcuts.Count / (double)scCols);
             float rowH = Ui.S(38);
             var sc = new RectangleF(x, scSect + Ui.S(26), colW, perCol * rowH + Ui.S(14));
             Ui.Fill(g, sc, Ui.S(8), Theme.Panel);
             Ui.Stroke(g, sc, Ui.S(8), Theme.Line, 1f);
 
             float halfW = colW / scCols;
-            for (int i = 0; i < ShortcutRows.Length; i++)
+            for (int i = 0; i < shortcuts.Count; i++)
             {
                 int col = i / perCol, line = i % perCol;
                 float ry = sc.Y + Ui.S(7) + line * rowH;
+                float kx = sc.X + col * halfW + Ui.S(18);
+                float cy = ry + (rowH - Ui.S(24)) / 2f;
+
+                // A row with no key is a heading, not a shortcut: no chip, no divider above it.
+                if (shortcuts[i][0].Length == 0)
+                {
+                    Ui.Text(g, shortcuts[i][1], Theme.Micro, Theme.TextFaint, kx, cy, halfW - Ui.S(36));
+                    continue;
+                }
+
                 if (line > 0)
                     using (var p = new Pen(Theme.Line))
                     {
@@ -3324,15 +3360,13 @@ namespace JoeBrowser
                         g.DrawLine(p, x + col * halfW + Ui.S(16), dy, x + (col + 1) * halfW - Ui.S(16), dy);
                     }
 
-                float kx = sc.X + col * halfW + Ui.S(18);
-                float cy = ry + (rowH - Ui.S(24)) / 2f;
-                int keyW = (int)Math.Ceiling(Ui.Measure(g, ShortcutRows[i][0], Theme.Caption).Width) + Ui.S(18);
+                int keyW = (int)Math.Ceiling(Ui.Measure(g, shortcuts[i][0], Theme.Caption).Width) + Ui.S(18);
                 var chipR = new RectangleF(kx, cy, keyW, Ui.S(24));
                 Ui.Fill(g, chipR, Ui.S(4), Theme.Card);
                 Ui.Stroke(g, chipR, Ui.S(4), Theme.Line, 1f);
-                Ui.Text(g, ShortcutRows[i][0], Theme.Caption, Theme.Text, chipR.X, chipR.Y, chipR.Width, "center");
+                Ui.Text(g, shortcuts[i][0], Theme.Caption, Theme.Text, chipR.X, chipR.Y, chipR.Width, "center");
 
-                Ui.Text(g, ShortcutRows[i][1], Theme.Small, Theme.TextDim, chipR.Right + Ui.S(12),
+                Ui.Text(g, shortcuts[i][1], Theme.Small, Theme.TextDim, chipR.Right + Ui.S(12),
                     ry + (rowH - Theme.Small.GetHeight(g)) / 2f,
                     sc.X + (col + 1) * halfW - (chipR.Right + Ui.S(30)));
             }
