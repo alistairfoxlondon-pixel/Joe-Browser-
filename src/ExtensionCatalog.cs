@@ -60,7 +60,53 @@ namespace JoeBrowser
             return "https://chromewebstore.google.com/detail/" + id;
         }
 
-        /// <summary>Ensures the shipped store extensions are present in the library, once.</summary>
+        /// <summary>
+        /// Adds the shipped store extensions that are already unpacked on disk to the library,
+        /// with no network access. Called at start, because the library is what the Extensions
+        /// page and the launch path read; a download there would put a web request in front of
+        /// the first window.
+        /// </summary>
+        public static void ListPresentDefaults()
+        {
+            try
+            {
+                var items = Load();
+                bool changed = false;
+                foreach (var entry in DefaultStoreExtensions)
+                {
+                    string id = entry[0];
+                    string target = Path.Combine(ImportedRoot, id);
+                    if (!File.Exists(Path.Combine(target, "manifest.json"))) continue;
+                    bool listed = false;
+                    foreach (var e in items)
+                    {
+                        if (e == null || string.IsNullOrEmpty(e.Folder)) continue;
+                        try
+                        {
+                            if (e.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase))
+                            { listed = true; break; }
+                        }
+                        catch { }
+                    }
+                    if (listed) continue;
+                    items.Add(new ExtensionItem
+                    {
+                        Name = entry[1],
+                        Folder = target,
+                        Enabled = true,
+                        Source = "store",
+                        StoreUrl = StoreUrlFor(id),
+                        Version = VersionFromManifest(Path.Combine(target, "manifest.json"))
+                    });
+                    changed = true;
+                }
+                if (changed) Save(items);
+            }
+            catch (Exception ex) { Log.Error("Listing the default extensions failed", ex); }
+        }
+
+        /// <summary>Ensures the shipped store extensions are present in the library, once.
+        /// Downloads what is missing, so it belongs off the startup path.</summary>
         public static void EnsureDefaults()
         {
             try

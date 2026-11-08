@@ -346,7 +346,7 @@ namespace JoeBrowser
                    that had never opened it: EnsureDefaults only ran when the page was built, so
                    a profile launched straight from a fresh install had the folders on disk and
                    the catalog listing them as absent. Listing is cheap and idempotent. */
-                try { ExtensionCatalog.EnsureDefaults(); } catch (Exception ex) { Log.Error("Default extensions", ex); }
+                try { ExtensionCatalog.ListPresentDefaults(); } catch (Exception ex) { Log.Error("Default extensions", ex); }
                 /* The account gate only appears until the first account exists. After that the
                    app remembers the sign-in for this Windows user (DPAPI-protected session
                    marker), so daily use stays a double-click. */
