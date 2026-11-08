@@ -486,6 +486,8 @@ namespace JoeBrowser
             _navTools.Text = L10n.T("header.tools");
             _navAbout.Text = L10n.T("nav.about");
             _navPlan.Text = L10n.T("nav.plan");
+            _navHistory.Text = L10n.T("nav.history");
+            _navAccount.Text = L10n.T("nav.account");
             _themeSwitch.NightText = L10n.T("theme.night");
             _themeSwitch.DayText = L10n.T("theme.day");
             _themeSwitch.Invalidate();
