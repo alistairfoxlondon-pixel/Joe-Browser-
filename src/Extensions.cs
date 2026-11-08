@@ -626,10 +626,10 @@ if (cfg.human) {
                      ';-ms-user-select:text!important;user-select:text!important}';
     (document.head || document.documentElement).appendChild(st);
   } catch (e) {}
-  /* No preventDefault patch here on purpose. This whole script is a C# verbatim string that
-     is compiled into the EXE, so an {" "} style empty catch, and every brace literal, has to
-     survive the C# parser before it can reach a page; the guard below does the same job with
-     a capture listener and nothing to escape. The copy unlock in the right click block still
+  /* No preventDefault patch here on purpose. This script is a C# verbatim string compiled
+     into the EXE, so a stray double quote inside it ends the string and every brace has to
+     survive the C# parser before it reaches a page. The guard below does the same job with a
+     capture listener and nothing to escape. The copy unlock in the right click block still
      patches preventDefault once, and keeps its own reference to the native one. */
   try {
     document.addEventListener('copy', function (e) {
