@@ -330,8 +330,8 @@ namespace JoeBrowser.Setup
             };
             var sub = new Label
             {
-                Text = "Anti-detect browser workspace. Installs for this Windows account only - "
-                     + "no administrator rights required.",
+                Text = "Anti-detect browser workspace. Installs for this Windows account only. "
+                     + "No administrator rights required.",
                 ForeColor = Faint,
                 AutoSize = false,
                 Size = new Size(504, 38),

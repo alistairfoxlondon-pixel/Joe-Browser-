@@ -863,9 +863,9 @@ namespace JoeBrowser
         private static readonly string[] SpeedKeys = { "relaxed", "natural", "fast", "instant" };
         private static readonly string[] SpeedLabels =
         {
-            "Relaxed - 90 to 240 ms per key",
-            "Natural - 38 to 135 ms per key",
-            "Fast - 18 to 60 ms per key",
+            "Relaxed, 90 to 240 ms per key",
+            "Natural, 38 to 135 ms per key",
+            "Fast, 18 to 60 ms per key",
             "Instant, no delay"
         };
         private static readonly int[] IntervalValues = { 30, 60, 120, 300, 600 };

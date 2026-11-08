@@ -229,7 +229,7 @@ namespace JoeBrowser
             public DateTime Deleted;
             public override string ToString()
             {
-                return (string.IsNullOrWhiteSpace(Name) ? Id : Name) + "   -   " + Deleted.ToString("yyyy-MM-dd HH:mm");
+                return (string.IsNullOrWhiteSpace(Name) ? Id : Name) + "   \u00b7   " + Deleted.ToString("yyyy-MM-dd HH:mm");
             }
         }
 

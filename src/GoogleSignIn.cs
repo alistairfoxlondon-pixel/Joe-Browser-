@@ -335,7 +335,7 @@ namespace JoeBrowser
                     return "That is not a Google OAuth client id. It ends with .apps.googleusercontent.com.";
                 default:
                     if (string.IsNullOrEmpty(code)) return "Google sign-in failed.";
-                    if (!string.IsNullOrEmpty(description)) return "Google returned: " + code + " - " + description;
+                    if (!string.IsNullOrEmpty(description)) return "Google returned " + code + ": " + description;
                     return "Google returned: " + code + ".";
             }
         }
@@ -394,7 +394,7 @@ namespace JoeBrowser
                 Log.Error("Google token exchange", ex);
                 return GoogleResult.Fail("token_exchange",
                     "Could not reach Google's token endpoint: " + ex.Message +
-                    " - check the connection (and any proxy) and try again.");
+                    ". Check the connection (and any proxy) and try again.");
             }
 
             var ser = new JavaScriptSerializer();

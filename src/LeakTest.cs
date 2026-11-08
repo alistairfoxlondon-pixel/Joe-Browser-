@@ -318,7 +318,7 @@ new Promise(function (resolve) {
                         ? "Exposes " + rtc + " (allowed by this profile)"
                         : localOnly
                             ? "Only a local address exposed: " + rtc
-                            : "Exposes the real address " + rtc + " - turn on WebRTC protection";
+                            : "Exposes the real address " + rtc + ". Turn on WebRTC protection.";
                 result.Items.Add(new LeakItem("WebRTC", expectOpen || localOnly, detail));
             }
 

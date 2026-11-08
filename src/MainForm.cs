@@ -152,8 +152,8 @@ namespace JoeBrowser
             if (SystemProbe.IsElevated())
             {
                 Log.Info("Started elevated; recommending a normal (non-administrator) launch.");
-                Toast("Running as administrator. Close Joe Browser and open it normally - "
-                      + "elevated browsers can trigger security prompts and behave worse.",
+                Toast("Running as administrator. Close Joe Browser and open it normally. "
+                      + "Elevated browsers can trigger security prompts and behave worse.",
                       ToastKind.Warn);
             }
             else

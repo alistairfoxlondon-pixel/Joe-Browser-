@@ -131,7 +131,7 @@ namespace JoeBrowser
                     if (viaProxy && dns.Length > 2 && dns[2].Length > 0 && report.CountryCode.Length > 0 &&
                         !string.Equals(dns[2], report.CountryCode, StringComparison.OrdinalIgnoreCase))
                         report.Warnings.Add("DNS resolves through " + dns[1] + " (" + dns[2] + ") while the exit IP is in " +
-                                            report.CountryCode + " - a DNS leak test would flag this.");
+                                            report.CountryCode + ". A DNS leak test would flag this.");
                 }
                 return report;
             }
@@ -258,24 +258,34 @@ namespace JoeBrowser
                 string ip = Str(dns, "ip");
                 string geo = Str(dns, "geo");
                 if (ip.Length == 0) return null;
-                // geo reads like "United States - Dallas"
-                string cc = "";
-                int dash = geo.IndexOf(" - ", StringComparison.Ordinal);
-                string country = dash > 0 ? geo.Substring(0, dash) : geo;
-                if (country.Equals("United States", StringComparison.OrdinalIgnoreCase)) cc = "US";
-                else if (country.Equals("United Kingdom", StringComparison.OrdinalIgnoreCase)) cc = "GB";
-                else if (country.Equals("Germany", StringComparison.OrdinalIgnoreCase)) cc = "DE";
-                else if (country.Equals("Netherlands", StringComparison.OrdinalIgnoreCase)) cc = "NL";
-                else if (country.Equals("France", StringComparison.OrdinalIgnoreCase)) cc = "FR";
-                else if (country.Equals("Canada", StringComparison.OrdinalIgnoreCase)) cc = "CA";
-                else if (country.Equals("Singapore", StringComparison.OrdinalIgnoreCase)) cc = "SG";
-                else if (country.Equals("Japan", StringComparison.OrdinalIgnoreCase)) cc = "JP";
-                else if (country.Equals("Australia", StringComparison.OrdinalIgnoreCase)) cc = "AU";
-                else if (country.Equals("Brazil", StringComparison.OrdinalIgnoreCase)) cc = "BR";
-                else if (country.Equals("India", StringComparison.OrdinalIgnoreCase)) cc = "IN";
+                /* geo arrives as one free text line such as "United States, Dallas" and the
+                   service is free to change the separator or swap the two halves. Matching the
+                   country name inside the line survives all of that, where splitting on one
+                   punctuation mark did not. */
+                string cc = CountryCodeIn(geo);
                 return new[] { ip, geo, cc };
             }
             catch { return null; }
+        }
+
+        /// <summary>Two letter code for whichever known country the line names, else empty.</summary>
+        private static string CountryCodeIn(string geo)
+        {
+            if (string.IsNullOrEmpty(geo)) return "";
+            string[][] table =
+            {
+                new[] { "United States", "US" }, new[] { "United Kingdom", "GB" },
+                new[] { "Germany", "DE" }, new[] { "Netherlands", "NL" },
+                new[] { "France", "FR" }, new[] { "Canada", "CA" },
+                new[] { "Singapore", "SG" }, new[] { "Japan", "JP" },
+                new[] { "Australia", "AU" }, new[] { "Brazil", "BR" },
+                new[] { "India", "IN" }
+            };
+            foreach (var row in table)
+            {
+                if (geo.IndexOf(row[0], StringComparison.OrdinalIgnoreCase) >= 0) return row[1];
+            }
+            return "";
         }
 
         private static Dictionary<string, object> GetJson(IWebProxy proxy, string url, int timeout, out int skew)
