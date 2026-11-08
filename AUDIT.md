@@ -620,6 +620,10 @@ A guarantee nobody can check is not a guarantee:
 * Pools parsed out of the source and the retry loop re-implemented in Python: 0 unresolved
   collisions at 5/10/30/50 profiles, 33 renderers and 15 screens.
 * Similarity rules simulated at 5/10/30/50/100 profiles: no false flags below 100.
+* Saturation test at the limit: 30 profiles created clean, then 30 duplicates added. 57 rolls were
+  clean outright, 2 needed the renderer moved, and 1 pair was left genuinely `Related` at 40%
+  overlap - a true positive at 60 profiles on 33 renderers. The app reports that pair instead of
+  claiming a uniqueness it cannot deliver.
 * Whole-workflow simulation against the real pools: create 8 (0 collisions) → duplicate all 8 (0
   collisions across 16, max overlap 36%) → import two hand-edited copies (2 pairs flagged
   `Identical`, 100% overlap) → run Fix (2 re-rolled, 0 remaining). That is the exact path a user
