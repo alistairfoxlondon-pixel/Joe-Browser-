@@ -2585,6 +2585,9 @@ namespace JoeBrowser
             Invalidate();
         }
 
+        /// <summary>Collision counters from the last reload, for the header subtitle.</summary>
+        private int _collisionGroups, _collisionProfiles;
+
         /// <summary>
         /// Puts a fingerprint signature on every card, and marks the ones that collide.
         ///
@@ -2593,9 +2596,6 @@ namespace JoeBrowser
         /// are one browser, and a card cannot see its siblings. Hashing twelve surfaces per
         /// profile is a few microseconds, and this runs only when the list is rebuilt.
         /// </summary>
-        /// <summary>Collision counters from the last reload, for the header subtitle.</summary>
-        private int _collisionGroups, _collisionProfiles;
-
         private void ApplySignatures()
         {
             _collisionGroups = 0;
