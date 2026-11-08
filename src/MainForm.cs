@@ -531,12 +531,28 @@ namespace JoeBrowser
             using (var dlg = new FingerprintAuditForm(_profiles, _store))
             {
                 dlg.ShowDialog(this);
-                if (dlg.Fixed > 0)
+                if (dlg.Fixed <= 0) return;
+
+                ReloadCards(true);
+                Toast(dlg.Fixed + (dlg.Fixed == 1 ? " fingerprint re-rolled" : " fingerprints re-rolled"),
+                    ToastKind.Success);
+
+                /* A re-rolled profile may be open. Its browser is still running the fingerprint it
+                   launched with, so the card would claim one identity while the tab answers with
+                   another - and the leak check would then disagree with the profile it is testing.
+                   Pushing the new configuration into the live page keeps the two honest; where
+                   that is impossible the user is told to reopen instead of being left guessing. */
+                int live = 0;
+                foreach (var p in _profiles)
                 {
-                    ReloadCards(true);
-                    Toast(dlg.Fixed + (dlg.Fixed == 1 ? " fingerprint re-rolled" : " fingerprints re-rolled"),
-                        ToastKind.Success);
+                    BrowserSession s;
+                    if (!_sessions.TryGetValue(p.Id, out s) || s == null || !s.IsRunning) continue;
+                    s.UpdateProfile(p);
+                    live++;
                 }
+                if (live > 0)
+                    Toast(live + (live == 1 ? " open profile updated" : " open profiles updated") +
+                          " \u00b7 reopen any that still show the old identity", ToastKind.Info);
             }
         }
 
