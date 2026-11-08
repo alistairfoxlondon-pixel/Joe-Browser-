@@ -2867,14 +2867,18 @@ namespace JoeBrowser
         /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
         private void RunLeakTest(string id) { Guard("RunLeakTest", delegate { return RunLeakTestCore(id); }); }
 
+        /// <summary>Reason the last duplicate could not be given its own identity, if any.</summary>
+        private string _duplicateWarning;
+
         private void DuplicateProfile(string id) { DuplicateProfile(id, true); }
-        private void DuplicateProfile(string id, bool announce)
+        private bool DuplicateProfile(string id, bool announce)
         {
+            _duplicateWarning = null;
             var p = _profiles.FirstOrDefault(x => x.Id == id);
-            if (p == null) return;
+            if (p == null) return false;
             /* The bulk path is clamped once, up front: _profiles does not grow inside the loop,
                so re-checking here would let a batch overshoot the cap. */
-            if (announce && !AllowAnotherProfile()) return;
+            if (announce && !AllowAnotherProfile()) return false;
             var copy = p.Copy(true);
             copy.Name = p.Name + " copy";
             copy.Proxy.Password = p.Proxy.Password;
@@ -2889,19 +2893,22 @@ namespace JoeBrowser
             if (!pinned) warning = kernelNote;
             else if (clash != null && clash.Relation == FingerprintIdentity.Relation.Linked)
                 warning = clash.Summary;
+            _duplicateWarning = warning;
             try
             {
                 _store.Save(copy);
-                if (!announce) return;
+                if (!announce) return true;
                 ReloadCards(true);
                 Toast(warning == null ? "Profile duplicated \u00b7 new fingerprint and kernel"
                     : "Profile duplicated \u00b7 " + warning,
                     warning == null ? ToastKind.Success : ToastKind.Warn);
+                return true;
             }
             catch (Exception ex)
             {
                 Log.Error("Duplicate failed", ex);
                 Toast("Could not duplicate profile", ToastKind.Error);
+                return false;
             }
         }
 
@@ -3064,16 +3071,26 @@ namespace JoeBrowser
             int allowed = AllowProfiles(ids.Length);
             if (allowed <= 0) { ClearPicks(); return; }
 
-            int made = 0;
+            int made = 0, failed = 0;
+            string lastWarning = null;
             foreach (string id in ids)
             {
                 if (made >= allowed) break;
-                DuplicateProfile(id, false);
-                made++;
+                /* Counted from what actually succeeded. The old loop incremented made whether or
+                   not the save worked, so a full disk produced a cheerful "5 profiles duplicated"
+                   and five missing cards. */
+                if (DuplicateProfile(id, false)) { made++; lastWarning = _duplicateWarning; }
+                else failed++;
             }
             ReloadCards(true);
             ClearPicks();
-            Toast(made + (made == 1 ? " profile duplicated" : " profiles duplicated"), ToastKind.Success);
+            if (failed > 0)
+                Toast(made + " duplicated, " + failed + " could not be saved", ToastKind.Warn);
+            else if (lastWarning != null)
+                Toast(made + (made == 1 ? " profile duplicated" : " profiles duplicated") +
+                      " \u00b7 " + lastWarning, ToastKind.Warn);
+            else
+                Toast(made + (made == 1 ? " profile duplicated" : " profiles duplicated"), ToastKind.Success);
         }
 
         private void BulkDelete()
