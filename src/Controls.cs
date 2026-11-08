@@ -1829,11 +1829,13 @@ namespace JoeBrowser
         }
 
         /// <summary>
-        /// WinForms does not bubble MouseWheel: it is posted to whatever control is under the
-        /// pointer, and if that control does not handle it the message is simply dropped. Over
-        /// the card grid, an empty state panel or a chip, the page silently refused to scroll,
-        /// which is the single most reported "the wheel does nothing" glitch in a scrollable app.
-        /// Routing it from the message loop catches every child that did not take it.
+        /// Windows delivers WM_MOUSEWHEEL to the focused window, not to the one under the
+        /// pointer, and only forwards it up the parent chain while nothing consumes it. Inside a
+        /// page the focused window is usually a profile card or a chip - a control that neither
+        /// scrolls nor wants the gesture - so the notches that should have moved the page were
+        /// lost on the way down. Claiming the message here, at the host that owns the scrolling,
+        /// catches every descendant that did not take it for itself (a multiline field still
+        /// does, and hands back only what it cannot use).
         /// </summary>
         protected override void WndProc(ref Message m)
         {
