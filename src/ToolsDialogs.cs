@@ -65,9 +65,16 @@ namespace JoeBrowser
         /// <summary>Set to validate before the dialog closes. Return false to keep it open.</summary>
         public Func<bool> Validator;
 
+        /* Guards against a second commit from the same gesture: a double-click on the primary
+           button, or Enter reaching both the command-key pass and KeyPreview. Running the
+           validator twice showed two toasts and, for anything that writes, did the work twice. */
+        private bool _submitted;
+
         private void OnPrimary()
         {
+            if (_submitted) return;
             if (Validator != null && !Validator()) return;
+            _submitted = true;
             Confirmed = true;
             DialogResult = DialogResult.OK;
             Close();
@@ -157,9 +164,20 @@ namespace JoeBrowser
         /// <summary>Call after adding every row if you added controls directly to Body.</summary>
         public void RefreshLayout() { LayoutCore(); }
 
+        /* The value each field had when the dialog opened. Esc needs this to know whether there
+           is anything to undo: "the box has text in it" is not the same question, and every
+           one of these dialogs opens with its fields already filled in. */
+        private readonly Dictionary<JBTextBox, string> _initial = new Dictionary<JBTextBox, string>();
+
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
+            _initial.Clear();
+            foreach (Control c in _body.Controls)
+            {
+                var box = c as JBTextBox;
+                if (box != null) _initial[box] = box.Value ?? "";
+            }
             LayoutCore();
             CenterToParent();
         }
@@ -194,7 +212,10 @@ namespace JoeBrowser
             int footerH = Ui.S(56);
             _body.SetBounds(pad, Ui.S(56), Math.Max(Ui.S(100), w - pad * 2), Math.Max(Ui.S(60), h - Ui.S(56) - footerH));
 
-            int innerW = Math.Max(Ui.S(100), _body.Width - Ui.S(24));
+            /* _body is AutoScroll: when the rows are taller than the dialog a scrollbar appears
+               and takes 17 px from the client area. Laying the rows out against the full width
+               pushed their right edge - and the right edge of every field - underneath it. */
+            int innerW = Math.Max(Ui.S(100), _body.Width - Ui.S(24) - (_body.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0));
             int y = Ui.S(6);
             foreach (var r in _rows)
             {
@@ -217,8 +238,62 @@ namespace JoeBrowser
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            if (keyData == Keys.Escape) { DialogResult = DialogResult.Cancel; Close(); return true; }
+            if (keyData == Keys.Escape)
+            {
+                /* Esc used to close the dialog and throw away everything typed into it. Now the
+                   first Esc undoes the field the caret is in, if it differs from what the dialog
+                   opened with, and a second Esc closes. Nothing is lost by pressing Esc once. */
+                JBTextBox field = FocusedField();
+                if (field != null)
+                {
+                    string original;
+                    string typed = field.Value ?? "";
+                    if (_initial.TryGetValue(field, out original) && !string.Equals(original, typed, StringComparison.Ordinal))
+                    {
+                        field.Value = original;
+                        field.Box.SelectAll();
+                        _escHinted = true;
+                        Secondary.Text = "Press Esc again to close";
+                        Secondary.Invalidate();
+                        return true;
+                    }
+                }
+                DialogResult = DialogResult.Cancel;
+                Close();
+                return true;
+            }
+
+            /* Enter submits, from any single-line field. JBTextBox deliberately swallows Enter
+               (so a dialog cannot submit while the user is still typing a value), which also
+               meant the AcceptButton never saw it and every one of these dialogs had to be
+               finished with the mouse. */
+            if ((keyData == Keys.Enter || keyData == Keys.Return) && Primary.Enabled && Primary.Visible)
+            {
+                JBTextBox field = FocusedField();
+                /* Enter in a multi-line field inserts a newline and stays there; the dialog is
+                   submitted from the buttons or from any single-line field. A field can also be
+                   the body of a commit (a receipt, a store link) - those are single-line. */
+                if (field == null || !field.Multiline)
+                {
+                    OnPrimary();
+                    return true;
+                }
+            }
             return base.ProcessCmdKey(ref msg, keyData);
         }
+
+        /// <summary>The text field that owns the caret, if any, unwrapping the nested edit.</summary>
+        private JBTextBox FocusedField()
+        {
+            Control c = ActiveControl;
+            while (c is ContainerControl && ((ContainerControl)c).ActiveControl != null)
+                c = ((ContainerControl)c).ActiveControl;
+            var box = c as TextBox;
+            // JBTextBox hosts a real TextBox, and that is what actually has focus.
+            if (box != null) return box.Parent as JBTextBox;
+            return c as JBTextBox;
+        }
+
+        private bool _escHinted;
     }
 }

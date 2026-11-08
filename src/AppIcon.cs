@@ -71,8 +71,12 @@ namespace JoeBrowser
         {
             try
             {
-                using (var icon = Load(ref _large, 256))
-                using (var scaled = new Icon(icon, size, size))
+                /* The cached handle must not travel inside the using: disposing the temporary
+                   would take the cache entry with it and every later call would be painting a
+                   dead handle. */
+                Icon source = Load(ref _large, 256);
+                if (source == null) return null;
+                using (var scaled = new Icon(source, Math.Max(1, size), Math.Max(1, size)))
                     return scaled.ToBitmap();
             }
             catch { return null; }

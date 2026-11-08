@@ -18,16 +18,36 @@ namespace JoeBrowser
             /* Add/Remove Programs invokes the installed executable with --uninstall. This has
                to run before the single-instance mutex, because a running copy would otherwise
                just bring its window forward instead of removing anything. */
-            bool uninstall = false, silent = false;
+            /* Recognised arguments. Anything else is ignored here and forwarded meaningfully:
+               Chromium is launched by this app, never by passing its own switches to it, so an
+               unknown switch means the user mistyped something and should be told rather than
+               have the app start and silently ignore it. */
+            bool uninstall = false, silent = false, portable = false, help = false, unknown = false;
             if (args != null)
             {
                 foreach (string a in args)
                 {
                     if (a.Equals("--uninstall", StringComparison.OrdinalIgnoreCase) ||
                         a.Equals("/uninstall", StringComparison.OrdinalIgnoreCase)) uninstall = true;
-                    if (a.Equals("--silent", StringComparison.OrdinalIgnoreCase) ||
+                    else if (a.Equals("--silent", StringComparison.OrdinalIgnoreCase) ||
                         a.Equals("/silent", StringComparison.OrdinalIgnoreCase)) silent = true;
+                    else if (a.Equals("--portable", StringComparison.OrdinalIgnoreCase)) portable = true;
+                    else if (a.Equals("--help", StringComparison.OrdinalIgnoreCase) ||
+                             a.Equals("/help", StringComparison.OrdinalIgnoreCase) ||
+                             a.Equals("/?", StringComparison.OrdinalIgnoreCase)) help = true;
+                    else if (a.Length > 0 && (a[0] == '-' || a[0] == '/')) unknown = true;
                 }
+            }
+            if (help)
+            {
+                MessageBox.Show(
+                    "Joe Browser\r\n\r\n"
+                    + "  --portable     run from this folder without installing\r\n"
+                    + "  --uninstall    remove Joe Browser (profiles are kept)\r\n"
+                    + "  --silent       no prompts, for the uninstaller\r\n\r\n"
+                    + "Without an argument Joe Browser starts normally.",
+                    "Joe Browser", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
             }
             if (uninstall)
             {
@@ -45,12 +65,18 @@ namespace JoeBrowser
 
             // A second copy would hold the same profile store and settings at once, so bring the
             // running window forward instead. The mutex lives for the life of the process.
-            bool created;
-            var mutex = new Mutex(true, "Local\\JoeBrowser.SingleInstance", out created);
-            if (!created)
+            //
+            // The wait matters for the installer hand-off: it starts the installed copy while the
+            // copy that was just installed still holds this mutex, so the new process used to see
+            // "already running", focus a window that was about to close, and exit. The install
+            // looked like it did nothing. Waiting a few seconds lets the old process release the
+            // mutex and the real one start.
+            Mutex mutex = AcquireInstance(0);
+            if (mutex == null)
             {
                 FocusRunningWindow();
-                return;
+                mutex = AcquireInstance(6000);
+                if (mutex == null) return;
             }
 
             try { ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12; } catch { }
@@ -63,7 +89,21 @@ namespace JoeBrowser
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+
+            /* Registered before the first window exists. The install gate used to run with no
+               handler at all, so a failure while installing showed the raw .NET crash dialog -
+               the "unexpected error" users reported when the very first thing they did was
+               install the app. */
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += delegate(object s, System.Threading.ThreadExceptionEventArgs e)
+            {
+                Log.Error("UI thread exception", e.Exception);
+                ShowFatal(e.Exception);
+            };
+            AppDomain.CurrentDomain.UnhandledException += delegate(object s, UnhandledExceptionEventArgs e)
+            {
+                Log.Error("Unhandled exception", e.ExceptionObject as Exception);
+            };
 
             /* The display scale has to be known BEFORE any window is constructed. Every control
                position and size is computed with Ui.S() while the form is being built, but fonts
@@ -81,14 +121,35 @@ namespace JoeBrowser
 
             Theme.LoadFonts();
 
+            /* A data folder that cannot be written is the quiet cause of a whole family of
+               reports ("my profiles vanish", "settings never stick", "sign-in works but the
+               account is gone next launch"). Say it once, clearly, instead of failing later in
+               a dozen unrelated places. */
+            if (!AppPaths.IsWritable())
+            {
+                Log.Error("The data folder is not writable: " + AppPaths.Root);
+                try
+                {
+                    MessageBox.Show(
+                        "Joe Browser cannot write to its data folder:\n\n" + AppPaths.Root +
+                        "\n\nProfiles and settings cannot be saved until this is fixed. Check folder " +
+                        "permissions, or move the folder somewhere writable (for example out of OneDrive " +
+                        "or a redirected AppData).",
+                        "Joe Browser", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                catch { }
+            }
+
             /* Refuse to run as a loose file. Opening the download directly skipped the
                shortcuts, the Add/Remove Programs entry and in-place updates, and left a second
                copy of the product in Downloads. --portable is the deliberate escape hatch for
-               the test harness and for support work. */
-            bool portable = false;
-            if (args != null)
-                foreach (string a in args)
-                    if (a.Equals("--portable", StringComparison.OrdinalIgnoreCase)) portable = true;
+               the test harness and for support work; --help lists the switching options. */
+            if (unknown && !silent)
+            {
+                /* Say it once, then carry on: a stray switch should not stop the app from
+                   opening, but it should not be invisible either. */
+                Log.Info("Ignored unrecognised command line arguments.");
+            }
 
             if (!portable && !Installation.IsRunningInstalled())
             {
@@ -107,16 +168,6 @@ namespace JoeBrowser
                 }
                 return;
             }
-
-            Application.ThreadException += delegate(object s, System.Threading.ThreadExceptionEventArgs e)
-            {
-                Log.Error("UI thread exception", e.Exception);
-                ShowFatal(e.Exception);
-            };
-            AppDomain.CurrentDomain.UnhandledException += delegate(object s, UnhandledExceptionEventArgs e)
-            {
-                Log.Error("Unhandled exception", e.ExceptionObject as Exception);
-            };
 
             try
             {
@@ -174,6 +225,37 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>
+        /// Takes the single-instance mutex, retrying for up to <paramref name="waitMs"/>. Returns
+        /// null when another copy of Joe Browser still owns it.
+        /// </summary>
+        private static Mutex AcquireInstance(int waitMs)
+        {
+            const string name = "Local\\JoeBrowser.SingleInstance";
+            var deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(0, waitMs));
+            while (true)
+            {
+                bool created;
+                Mutex m = null;
+                try
+                {
+                    m = new Mutex(true, name, out created);
+                    if (created) return m;
+                }
+                catch (Exception ex)
+                {
+                    /* A mutex that cannot be created at all (a locked-down policy profile)
+                       should not stop the app from starting. The placeholder is not owned, so
+                       the ReleaseMutex in the caller's finally just throws and is ignored. */
+                    Log.Error("Single-instance mutex unavailable", ex);
+                    try { return new Mutex(); } catch { return null; }
+                }
+                try { m.Dispose(); } catch { }
+                if (DateTime.UtcNow >= deadline) return null;
+                System.Threading.Thread.Sleep(200);
+            }
+        }
+
         private static void FocusRunningWindow()
         {
             try
@@ -197,27 +279,70 @@ namespace JoeBrowser
             catch { }
         }
 
+        /// <summary>
+        /// The last-resort report. It is calm rather than alarming: the crash is already in the
+        /// log, the details are already on the clipboard, and the user is offered one action.
+        ///
+        /// Two things used to make this worse than the bug it reported. It asked "report it on
+        /// Telegram now?" before the user could copy anything or even read the message, and it
+        /// was rendered with the raw WinForms MessageBox, so the one dialog people are most
+        /// likely to screenshot was the only one that ignored the app's design.
+        /// </summary>
         private static void ShowFatal(Exception ex)
         {
             try
             {
                 Log.Error("Fatal error offered to the user", ex);
-                var choice = MessageBox.Show(
-                    "Joe Browser hit an unexpected error.\r\n\r\n" +
-                    (ex == null ? "" : ex.Message + "\r\n\r\n") +
-                    "Report it to the developer on Telegram now?",
-                    "Joe Browser",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Error);
-                if (choice == DialogResult.Yes)
+
+                string detail = ex == null ? "" : (ex.Message ?? "").Trim();
+                if (ex != null && ex.StackTrace != null)
+                    detail += "\n" + ex.StackTrace.Split('\n')[0].Trim();
+
+                /* Details on the clipboard before anything is asked, so a user who closes the
+                   dialog still has something to send. */
+                try { Report.CopyDetails(ex == null ? "" : ex.ToString()); } catch { }
+
+                string logFile = Log.CurrentFile();
+                string body = (string.IsNullOrEmpty(detail)
+                        ? "" : "Details (already copied to the clipboard):\n" + detail + "\n\n")
+                    + (logFile == null
+                        ? "The full report is in %APPDATA%\\JoeBrowser\\Logs."
+                        : "The full report is in " + logFile + ".");
+
+                bool send;
+                try
                 {
-                    // Details ride on the clipboard; the user only adds their own words.
-                    Report.CopyDetails(ex == null ? "" : ex.ToString());
-                    Report.OpenForm(null, ex == null ? "" :
-                        (ex.Message ?? "").Trim() + (ex.StackTrace == null ? "" : "\r\nat " + ex.StackTrace.Split('\n')[0].Trim()));
+                    send = ConfirmForm.Ask(null, "Joe Browser ran into a problem",
+                        "Something went wrong, and the window it happened in had to close. "
+                        + "Your profiles and settings are safe.",
+                        body, "Send a report", BtnKind.Primary);
+                }
+                catch
+                {
+                    /* The themed dialog needs the fonts and theme tokens; if the failure
+                       happened before those were ready there still has to be a dialog. */
+                    send = MessageBox.Show(
+                        "Joe Browser ran into a problem.\n\n" + body + "\n\nSend a report now?",
+                        "Joe Browser", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
+                }
+
+                if (send)
+                {
+                    try
+                    {
+                        Report.OpenForm(null, detail);
+                    }
+                    catch (Exception reportError)
+                    {
+                        Log.Error("Could not open the report window", reportError);
+                    }
                 }
             }
-            catch { }
+            catch
+            {
+                /* A crash dialog that crashes would leave the process unable to say anything
+                   at all, so this path is deliberately silent. */
+            }
         }
     }
 }

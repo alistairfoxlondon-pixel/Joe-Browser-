@@ -125,10 +125,26 @@ namespace JoeBrowser
         /// </summary>
         private static readonly Dictionary<string, double[][]> Screens = new Dictionary<string, double[][]>
         {
-            {"Windows 11", new double[][]{ new double[]{1920d,1080,1}, new double[]{2560,1440,1}, new double[]{1536,864,1.25}, new double[]{1366,768,1}, new double[]{1920,1200,1}, new double[]{1280,720,1} }},
-            {"Windows 10", new double[][]{ new double[]{1366d,768,1}, new double[]{1920,1080,1}, new double[]{1600,900,1}, new double[]{2560,1440,1}, new double[]{1440,900,1}, new double[]{1280,720,1} }},
-            {"macOS", new double[][]{ new double[]{1512d,982,2}, new double[]{1728,1117,2}, new double[]{1440,900,2}, new double[]{2560,1440,2}, new double[]{2304,1296,2} }},
-            {"Linux", new double[][]{ new double[]{1920d,1080,1}, new double[]{1366,768,1}, new double[]{2560,1440,1}, new double[]{1600,900,1}, new double[]{3840,2160,1} }},
+            {"Windows 11", new double[][]{
+                new double[]{1920d,1080,1}, new double[]{2560,1440,1}, new double[]{3840,2160,1.5},
+                new double[]{1536,864,1.25}, new double[]{1366,768,1}, new double[]{1920,1200,1},
+                new double[]{1280,720,1}, new double[]{1600,900,1}, new double[]{1440,900,1},
+                new double[]{2560,1600,1}, new double[]{3440,1440,1}, new double[]{1280,1024,1},
+                new double[]{2880,1800,1.5}, new double[]{1920,1080,1.25}, new double[]{1680,1050,1} }},
+            {"Windows 10", new double[][]{
+                new double[]{1366d,768,1}, new double[]{1920,1080,1}, new double[]{1600,900,1},
+                new double[]{2560,1440,1}, new double[]{1440,900,1}, new double[]{1280,720,1},
+                new double[]{1600,1200,1}, new double[]{1920,1200,1}, new double[]{1280,1024,1},
+                new double[]{1024,768,1}, new double[]{2560,1080,1}, new double[]{3840,2160,1.5} }},
+            {"macOS", new double[][]{
+                new double[]{1512d,982,2}, new double[]{1728,1117,2}, new double[]{1440,900,2},
+                new double[]{2560,1440,2}, new double[]{2304,1296,2}, new double[]{1680,1050,2},
+                new double[]{1920,1080,2}, new double[]{2560,1600,2}, new double[]{3024,1964,2},
+                new double[]{1440,960,2} }},
+            {"Linux", new double[][]{
+                new double[]{1920d,1080,1}, new double[]{1366,768,1}, new double[]{2560,1440,1},
+                new double[]{1600,900,1}, new double[]{3840,2160,1}, new double[]{1280,1024,1},
+                new double[]{1920,1200,1}, new double[]{1680,1050,1} }},
             {"Android", new double[][]{ new double[]{411d,915,2.625}, new double[]{427,952,3}, new double[]{411,891,3.5}, new double[]{393,851,2.75}, new double[]{360,780,3}, new double[]{411,869,3.5} }},
             {"iPhone", new double[][]{ new double[]{393d,852,3}, new double[]{390,844,3}, new double[]{430,932,3}, new double[]{420,912,3}, new double[]{375,812,3} }},
             {"iPad", new double[][]{ new double[]{820d,1180,2}, new double[]{1024,1366,2}, new double[]{1194,834,2}, new double[]{744,1133,2} }}
@@ -184,19 +200,35 @@ namespace JoeBrowser
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5080 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5070 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5070 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 5060 Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (NVIDIA)","ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 9070 XT Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 9070 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 7900 XTX Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 7800 XT Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 7700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 7600 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 6800 XT Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon 890M (Ryzen 9000 Series) Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon 780M (Ryzen 7000 Series) Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (AMD)","ANGLE (AMD, AMD Radeon Graphics (Raphael) Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) Arc(TM) B580 Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) Arc(TM) A770 Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) Arc(TM) A380 Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"},
                 new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"},
-                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) UHD Graphics 770 Direct3D11 vs_5_0 ps_5_0, D3D11)"}
+                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) UHD Graphics 770 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)"},
+                new[]{"Google Inc. (Intel)","ANGLE (Intel, Intel(R) HD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)"}
             }},
             {"macOS", new[]{
                 new[]{"Google Inc. (Apple)","ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)"},
@@ -372,6 +404,21 @@ namespace JoeBrowser
 
         public static void Regenerate(FingerprintConfig fp, string os, ProxyConfig proxy)
         {
+            Regenerate(fp, os, proxy, false);
+        }
+
+        /// <summary>
+        /// Rolls a new fingerprint.
+        ///
+        /// <paramref name="widePool"/> is the escalation used when a workspace is dense enough
+        /// that ordinary rolls keep landing on a GPU another profile already claims: the tier
+        /// bias is dropped so the older half of the pool is as likely as the new half. The
+        /// hardware stays plausible - it is the same list of real cards - but the overlap falls
+        /// sharply, which is what makes "unique in this workspace" achievable at 50 profiles
+        /// instead of only at 5.
+        /// </summary>
+        public static void Regenerate(FingerprintConfig fp, string os, ProxyConfig proxy, bool widePool)
+        {
             if (string.IsNullOrEmpty(os) || os == "System default") os = SystemOsName();
             fp.Seed = NewSeed();
             var r = new Random(fp.Seed);
@@ -390,7 +437,7 @@ namespace JoeBrowser
 
             string gpuKey = IsMac(os) ? "macOS" : (IsLinux(os) ? "Linux" : (IsAndroid(os) ? "Android" : (IsIos(os) ? "iOS" : "Windows")));
             var gpus = Gpus[gpuKey];
-            int tier = PickTier(gpus.Length, r);
+            int tier = widePool ? r.Next(gpus.Length) : PickTier(gpus.Length, r);
             /* An Android handset carries its own silicon, so the model chosen for the viewport
                wins over the roll; the pool index of that GPU then sets the device class. */
             string[] device = DeviceIdentity(fp);

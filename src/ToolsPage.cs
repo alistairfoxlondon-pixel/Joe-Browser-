@@ -61,9 +61,12 @@ namespace JoeBrowser
         public ToolsPage()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-                     ControlStyles.UserPaint, true);
+                     ControlStyles.UserPaint | ControlStyles.Selectable, true);
             BackColor = Theme.Bg;
-            TabStop = false;
+            /* Every tile is painted here rather than being a child control, so the page itself
+               has to be the tab stop - with TabStop false the whole Tools section was the one
+               part of the app a keyboard-only user could not reach at all. */
+            TabStop = true;
             Cursor = Cursors.Arrow;
 
             Add("batch", "layers", "tools.batch", "tools.batch.desc", "btn.create.many");
@@ -76,6 +79,7 @@ namespace JoeBrowser
             Add("trash", "trash", "tools.trash", "tools.trash.desc", "btn.restore");
             Add("shortcuts", "command", "tools.shortcuts", "tools.shortcuts.desc", "btn.view");
             Add("clean", "sync", "tools.clean", "tools.clean.desc", "btn.clean");
+            Add("audit", "fingerprint", "tools.audit", "tools.audit.desc", "btn.audit");
             Add("report", "error", "tools.report", "tools.report.desc", "btn.report");
         }
 
@@ -125,7 +129,76 @@ namespace JoeBrowser
             LayoutTiles();
         }
 
-        protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); }
+        /* ---- keyboard -------------------------------------------------------------
+           Arrow keys move a focus cursor over the tiles, Home/End jump to the first and last,
+           Enter or Space runs the focused tile. Everything the mouse can reach stays reachable
+           without it. */
+
+        private int _focusIndex = -1;
+
+        protected override void OnGotFocus(EventArgs e)
+        {
+            if (_focusIndex < 0 && _tiles.Count > 0)
+            {
+                _focusIndex = 0;
+                for (int i = 0; i < _tiles.Count; i++) _tiles[i].Hover = i == 0;
+            }
+            EnsureVisible();
+            Invalidate();
+            base.OnGotFocus(e);
+        }
+
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            return keyData == Keys.Left || keyData == Keys.Right || keyData == Keys.Up ||
+                   keyData == Keys.Down || keyData == Keys.Home || keyData == Keys.End ||
+                   keyData == Keys.Enter || keyData == Keys.Space || base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            int cols = Math.Max(1, ColumnCount(Math.Max(Ui.S(240), Width - Ui.S(Pad) * 2)));
+            switch (e.KeyCode)
+            {
+                case Keys.Right: MoveFocus(_focusIndex + 1); e.Handled = true; break;
+                case Keys.Left: MoveFocus(_focusIndex - 1); e.Handled = true; break;
+                case Keys.Down: MoveFocus(_focusIndex + cols); e.Handled = true; break;
+                case Keys.Up: MoveFocus(_focusIndex - cols); e.Handled = true; break;
+                case Keys.Home: MoveFocus(0); e.Handled = true; break;
+                case Keys.End: MoveFocus(_tiles.Count - 1); e.Handled = true; break;
+                case Keys.Enter:
+                case Keys.Space:
+                    if (_focusIndex >= 0 && _focusIndex < _tiles.Count) Raise(_tiles[_focusIndex].Key);
+                    e.Handled = true;
+                    break;
+            }
+            base.OnKeyDown(e);
+        }
+
+        private void MoveFocus(int index)
+        {
+            if (_tiles.Count == 0) return;
+            _focusIndex = Math.Max(0, Math.Min(_tiles.Count - 1, index));
+            // The focus cursor and the hover highlight are the same affordance: a tile must look
+            // live whether it was reached with the mouse or the keyboard.
+            for (int i = 0; i < _tiles.Count; i++) _tiles[i].Hover = i == _focusIndex;
+            EnsureVisible();
+            Invalidate();
+        }
+
+        /// <summary>Scrolls the focused tile just far enough to be fully on screen.</summary>
+        private void EnsureVisible()
+        {
+            if (_focusIndex < 0 || _focusIndex >= _tiles.Count || _maxScroll <= 0) return;
+            var r = _tiles[_focusIndex].Rect;
+            int want = _scroll;
+            if (r.Top < _scroll) want = (int)Math.Floor(r.Top) - Ui.S(Pad);
+            else if (r.Bottom > _scroll + Height) want = (int)Math.Ceiling(r.Bottom - Height) + Ui.S(Pad);
+            want = Math.Max(0, Math.Min(_maxScroll, want));
+            if (want != _scroll) { _scroll = want; Invalidate(); }
+        }
 
         private static int ColumnCount(float colW)
         {
@@ -234,7 +307,14 @@ namespace JoeBrowser
         {
             base.OnMouseDown(e);
             int hit = HitTest(e.Location);
-            if (hit >= 0) Raise(_tiles[hit].Key);
+            if (hit >= 0)
+            {
+                // A click parks the keyboard cursor on the tile it activated, so Enter afterwards
+                // repeats the obvious action instead of firing whatever was there before.
+                _focusIndex = hit;
+                Focus();
+                Raise(_tiles[hit].Key);
+            }
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -246,19 +326,28 @@ namespace JoeBrowser
             if (_tiles[0].Rect.IsEmpty) LayoutTiles();
 
             g.TranslateTransform(0, -_scroll);
+            foreach (var t in _tiles) PaintTile(g, t);
+            g.ResetTransform();
 
-            // Scrollbar, only when the grid is taller than the page.
+            /* The bar used to be drawn inside the translated space with the scroll offset added
+               back in, so it drifted a pixel per notch and could sit off either end of the page.
+               It belongs to the viewport: draw it after the transform is reset. */
             if (_maxScroll > 0)
             {
                 float track = Height;
                 float thumb = Math.Max(Ui.S(36), track * track / (track + _maxScroll));
                 float ty = (track - thumb) * (_scroll / (float)_maxScroll);
-                Ui.Fill(g, new RectangleF(Width - Ui.S(8), ty + _scroll, Ui.S(4), thumb),
-                    Ui.S(2), Theme.HoverStrong);
+                Ui.Fill(g, new RectangleF(Width - Ui.S(9), ty, Ui.S(5), thumb), Ui.S(2.5f), Theme.HoverStrong);
             }
 
-            foreach (var t in _tiles) PaintTile(g, t);
-            g.ResetTransform();
+            // The keyboard cursor is drawn after the transform is reset so the ring is never
+            // scaled by the scroll offset.
+            if (Focused && _focusIndex >= 0 && _focusIndex < _tiles.Count && Ui.FocusCues(this))
+            {
+                var fr = _tiles[_focusIndex].Rect;
+                var box = new RectangleF(fr.X + 0.5f, fr.Y + 0.5f - _scroll, fr.Width - 1.5f, fr.Height - 1.5f);
+                if (box.Bottom > 0 && box.Top < Height) Ui.FocusRing(g, box, Ui.S(8));
+            }
         }
 
         private void PaintTile(Graphics g, Tile t)

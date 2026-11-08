@@ -60,7 +60,7 @@ namespace JoeBrowser
         private int _payTicks;
         private bool _payBusy;
         private const int PayPollSeconds = 8;
-        private JBButton _emptyBtn, _aboutTelegram;
+        private JBButton _emptyBtn, _clearFilter, _aboutTelegram;
         private JBToast _toast;
 
         // Settings controls
@@ -310,10 +310,13 @@ namespace JoeBrowser
             _emptyBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("empty.action"), Radius = 4, Height = Ui.S(33) };
             _emptyBtn.Click += delegate
             {
-                if (_filter.Length > 0) { _search.Value = ""; _filter = ""; ApplyFilter(); }
+                if (_filter.Length > 0) { ClearSearch(); }
                 else NewProfile();
             };
+            _clearFilter = new JBButton { Kind = BtnKind.Soft, Icon = "close", Text = "Clear search", Radius = 4, Height = Ui.S(33), Visible = false };
+            _clearFilter.Click += delegate { ClearSearch(); };
             _emptyPanel.Controls.Add(_emptyBtn);
+            _emptyPanel.Controls.Add(_clearFilter);
 
             _toast = new JBToast();
 
@@ -425,8 +428,16 @@ namespace JoeBrowser
             var list = new List<LangItem>();
             foreach (var l in L10n.Languages)
             {
-                string subtitle = l.Native.Equals(l.English, StringComparison.OrdinalIgnoreCase)
-                    ? "" : l.Native;
+                /* Only languages with a real translation table are offered: the rest would save
+                   a preference and change nothing on screen. */
+                if (!L10n.IsTranslated(l.Key)) continue;
+                string subtitle = (l.Native.Equals(l.English, StringComparison.OrdinalIgnoreCase)
+                    ? "" : l.Native);
+                /* Say how complete the translation is: a half-translated interface without a
+                   word of warning reads as a broken app rather than a work in progress. */
+                int coverage = L10n.Coverage(l.Key);
+                if (l.Key != "en" && coverage < 100)
+                    subtitle = (subtitle.Length == 0 ? "" : subtitle + "  ·  ") + coverage + "% translated";
                 list.Add(new LangItem(l.Key, l.Flag, l.English, subtitle));
             }
             return list;
@@ -472,6 +483,9 @@ namespace JoeBrowser
             _toolsPage.ApplyText();
             _emptyPanel.Invalidate();
             _aboutColumn.Invalidate();
+            /* The empty state carries text too, and it is the first thing a new user sees: it
+               was the one place the new language did not reach until the window was resized. */
+            if (_clearFilter != null) _clearFilter.Text = "Clear search";
             FreezeRedraw(LayoutAll);
         }
 
@@ -495,6 +509,7 @@ namespace JoeBrowser
                     case "trash": RecycleBin(); break;
                     case "shortcuts": ShortcutHelp(); break;
                     case "clean": ClearCaches(); break;
+                    case "audit": AccountAudit(); break;
                     case "report": Report.OpenForm(this, ""); break;
                 }
             }
@@ -502,6 +517,25 @@ namespace JoeBrowser
             {
                 Log.Error("Tools action failed: " + key, ex);
                 Toast(ShortError(ex), ToastKind.Error);
+            }
+        }
+
+        /// <summary>
+        /// Finds profiles that belong to one account or one browser, and fixes the half of it
+        /// that is fixable. Opens without requiring Pro: an audit that says "you are linked" but
+        /// sits behind a paywall is worse than no audit, because the user cannot act on it.
+        /// </summary>
+        private void AccountAudit()
+        {
+            using (var dlg = new FingerprintAuditForm(_profiles, _store))
+            {
+                dlg.ShowDialog(this);
+                if (dlg.Fixed > 0)
+                {
+                    ReloadCards(true);
+                    Toast(dlg.Fixed + (dlg.Fixed == 1 ? " fingerprint re-rolled" : " fingerprints re-rolled"),
+                        ToastKind.Success);
+                }
             }
         }
 
@@ -557,7 +591,7 @@ namespace JoeBrowser
             string[] lines = proxyText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(x => x.Trim()).Where(x => x.Length > 0).ToArray();
 
-            int made = 0;
+            int made = 0, sharedFingerprints = 0;
             for (int i = 0; i < count; i++)
             {
                 var p = new Profile();
@@ -569,13 +603,25 @@ namespace JoeBrowser
                     if (proxy.Enabled) p.Proxy = proxy;
                 }
                 p.Tools.ProxyWatch = p.Proxy.Enabled;
-                FingerprintFactory.Regenerate(p.Fp, "System default", p.Proxy);
+                /* Every batch profile is made unique against the ones already in the workspace
+                   plus the ones this loop has just made: a batch of twenty used to be twenty
+                   independent random rolls, which reliably produced duplicate renderers. */
+                FingerprintIdentity.Comparison clash;
+                FingerprintIdentity.MakeUnique(p.Fp, "System default", p.Proxy, _profiles, out clash);
+                string kernelNote;
+                KernelDiversity.Assign(p, _profiles, out kernelNote);
                 _store.Save(p);
+                if (clash != null && clash.Relation == FingerprintIdentity.Relation.Linked)
+                    sharedFingerprints++;
                 made++;
             }
 
             ReloadCards(true);
-            Toast(made + " profiles created", ToastKind.Success);
+            if (sharedFingerprints > 0)
+                Toast(made + " profiles created \u00b7 " + sharedFingerprints +
+                      " share a strong signal with another profile", ToastKind.Warn);
+            else
+                Toast(made + " profiles created", ToastKind.Success);
         }
 
         /// <summary>Accepts scheme://user:pass@host:port, host:port and host:port:user:pass.</summary>
@@ -643,9 +689,31 @@ namespace JoeBrowser
                     Toast("Imported the first " + allowed + " \u2014 the plan is full", ToastKind.Info);
                 }
 
-                foreach (var p in list) _store.Save(p);
+                /* An imported file carries whatever fingerprints the exporting machine had, which
+                   is frequently a duplicate of the ones already here - the same JSON imported
+                   twice, or two files from one seller. Re-rolling the colliding ones keeps the
+                   "every profile is distinct" guarantee true after an import as well. */
+                int rerolled = 0;
+                foreach (var p in list)
+                {
+                    if (p.Fp == null) p.Fp = new FingerprintConfig();
+                    var worst = FingerprintIdentity.WorstMatch(p, _profiles);
+                    if (worst != null && worst.Relation != FingerprintIdentity.Relation.Distinct &&
+                        worst.Relation != FingerprintIdentity.Relation.Remote)
+                    {
+                        FingerprintIdentity.Comparison clash;
+                        FingerprintIdentity.MakeUnique(p.Fp, p.Fp.Os, p.Proxy, _profiles, out clash);
+                        rerolled++;
+                    }
+                    string kernelNote;
+                    if (!KernelDiversity.IsPinned(p)) KernelDiversity.Assign(p, _profiles, out kernelNote);
+                    _store.Save(p);
+                    _profiles.Add(p);
+                }
                 ReloadCards(true);
-                Toast(list.Count + " profiles imported · re-enter proxy passwords", ToastKind.Success);
+                Toast(rerolled > 0
+                    ? list.Count + " profiles imported · " + rerolled + " fingerprints re-rolled · re-enter proxy passwords"
+                    : list.Count + " profiles imported · re-enter proxy passwords", ToastKind.Success);
             }
         }
 
@@ -838,7 +906,12 @@ namespace JoeBrowser
             else Toast("Could not restore that profile", ToastKind.Error);
         }
 
-        /// <summary>Shortcut table shared by the help dialog and the About page.</summary>
+        /// <summary>
+        /// Shortcut table shared by the help dialog and the About page. A non-empty third column
+        /// starts a new group; the renderer prints it as a heading. Two of the old entries were
+        /// not shortcuts at all ("Right click", "On-page alert") and belonged nowhere near this
+        /// list, so they were removed rather than dressed up as keyboard commands.
+        /// </summary>
         private static readonly string[][] ShortcutRows =
         {
             new[] { "Ctrl + N", "New profile", "PROFILE LIST" },
@@ -847,12 +920,31 @@ namespace JoeBrowser
             new[] { "Ctrl + A", "Select every visible profile", "" },
             new[] { "F2", "Edit the focused profile", "" },
             new[] { "F5", "Reload profiles from disk", "" },
-            new[] { "Esc", "Clear search or selection", "" },
+            new[] { "Esc", "Clear the search, then the selection", "" },
             new[] { "Shift + click", "Select a range of profiles", "" },
-            new[] { "Ctrl + V", "Paste as human, typed like a person", "IN THE BROWSER" },
-            new[] { "Right click", "Restored on sites that block it", "" },
-            new[] { "On-page alert", "Proxy rotated or went offline", "" }
+            new[] { "Arrows", "Move between profile cards", "" },
+            new[] { "Enter", "Open the focused profile", "" },
+            new[] { "Shift + F10", "Open the card menu", "" },
+            new[] { "Tab", "Move through every control on the page", "EVERYWHERE" },
+            new[] { "Page Up/Down", "Scroll the page", "" },
+            new[] { "F4", "Open a dropdown list", "" },
+            new[] { "Enter", "Submit the dialog you are in", "" }
         };
+
+        /// <summary>
+        /// The same table with group headings folded in, so both renderers walk one list and
+        /// neither can silently drop the grouping.
+        /// </summary>
+        private static List<string[]> ShortcutDisplay()
+        {
+            var rows = new List<string[]>();
+            foreach (var r in ShortcutRows)
+            {
+                if (!string.IsNullOrEmpty(r[2])) rows.Add(new[] { "", r[2] });
+                rows.Add(new[] { r[0], r[1] });
+            }
+            return rows;
+        }
 
         private void ShortcutHelp()
         {
@@ -860,10 +952,11 @@ namespace JoeBrowser
             {
                 dlg.Secondary.Visible = false;
                 string text = "";
-                foreach (var s in ShortcutRows)
+                foreach (var s in ShortcutDisplay())
                 {
-                    if (s[2].Length > 0) text += (text.Length > 0 ? "\r\n\r\n" : "") + s[2] + "\r\n";
-                    text += s[0].PadRight(18) + s[1] + "\r\n";
+                    // A row with no key is a group heading.
+                    if (s[0].Length == 0) text += (text.Length > 0 ? "\r\n" : "") + s[1] + "\r\n";
+                    else text += s[0].PadRight(18) + s[1] + "\r\n";
                 }
                 dlg.AddReadOnlyText(text, 360);
                 dlg.ShowDialog(this);
@@ -1020,7 +1113,7 @@ namespace JoeBrowser
             }
         }
 
-        private async void CheckAllProxies()
+        private async System.Threading.Tasks.Task CheckAllProxiesCore()
         {
             if (_proxies.Count == 0) { Toast("Add a proxy first", ToastKind.Info); return; }
             _proxyPage.SetBusy(true, "Checking…");
@@ -1042,7 +1135,10 @@ namespace JoeBrowser
             finally { _proxyPage.SetBusy(false, ""); }
         }
 
-        private async void CheckProxy(int index)
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void CheckAllProxies() { Guard("CheckAllProxies", delegate { return CheckAllProxiesCore(); }); }
+
+        private async System.Threading.Tasks.Task CheckProxyCore(int index)
         {
             var e = ProxyAt(index);
             if (e == null) return;
@@ -1058,6 +1154,9 @@ namespace JoeBrowser
             }
             catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
         }
+
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void CheckProxy(int index) { Guard("CheckProxy", delegate { return CheckProxyCore(index); }); }
 
         private static void ApplyProxyResult(ProxyEntry e, ProxyCheckResult r)
         {
@@ -1080,12 +1179,13 @@ namespace JoeBrowser
         {
             var e = ProxyAt(index);
             if (e == null) return;
-            var p = new Profile();
-            p.Name = "Profile " + (_profiles.Count + 1).ToString("00");
-            p.Proxy = ProxyVault.Copy(e.Config);
-            p.Tools.ProxyWatch = true;
-            FingerprintFactory.Regenerate(p.Fp, "System default", p.Proxy);
-            using (var dlg = new EditorForm(p, true, _settings))
+            // Creating a profile from a proxy row obeys the same plan limit as the New button.
+            if (!AllowAnotherProfile()) return;
+            /* Opened with the proxy already set, so a proxy that has been checked once also
+               carries its country into the new fingerprint instead of generating a mismatch the
+               user has to notice and fix by hand. */
+            var p = SeedNewProfile("Profile " + (_profiles.Count + 1).ToString("00"), ProxyVault.Copy(e.Config));
+            using (var dlg = new EditorForm(p, true, _settings, 0, _profiles))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 _store.Save(dlg.Result);
@@ -1166,7 +1266,7 @@ namespace JoeBrowser
             try { return new Uri(url).Host; } catch { return url; }
         }
 
-        private async void BrowserAction(string key, string engine)
+        private async System.Threading.Tasks.Task BrowserActionCore(string key, string engine)
         {
             try
             {
@@ -1245,13 +1345,16 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void BrowserAction(string key, string engine) { Guard("BrowserAction", delegate { return BrowserActionCore(key, engine); }); }
+
         private void SaveExtensions()
         {
             ExtensionCatalog.Save(_extensions);
             _extensionPage.SetItems(_extensions);
         }
 
-        private async void AddExtensionByUrl()
+        private async System.Threading.Tasks.Task AddExtensionByUrlCore()
         {
             string url;
             using (var dlg = new ToolDialog("Add extension by store link", "Import", "Cancel", 560, 340))
@@ -1280,6 +1383,9 @@ namespace JoeBrowser
             catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
             finally { _extensionPage.SetBusy(false, ""); }
         }
+
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void AddExtensionByUrl() { Guard("AddExtensionByUrl", delegate { return AddExtensionByUrlCore(); }); }
 
         private void AddExtensionFolder()
         {
@@ -1362,7 +1468,14 @@ namespace JoeBrowser
                 if (string.IsNullOrEmpty(_setLang.Value)) return;
                 _settings.UiLanguage = _setLang.Value;
                 L10n.Set(_setLang.Value);
-                _store.SaveSettings(_settings);
+                try { _store.SaveSettings(_settings); }
+                catch (Exception ex) { Log.Error("Language preference not saved", ex); }
+                /* Say what the change means when the table is not finished, so the English
+                   words that remain do not look like a bug. */
+                int coverage = L10n.Coverage(_setLang.Value);
+                if (_setLang.Value != "en" && coverage < 100)
+                    Toast("Interface language set to " + L10n.NameOf(_setLang.Value) + " · "
+                        + coverage + "% translated, the rest stays in English", ToastKind.Info);
             };
 
             // Switches carry no caption of their own; the row title to the left is the label.
@@ -1424,10 +1537,11 @@ namespace JoeBrowser
             /* The Google client id is the only setting that cannot be pre-filled by the app,
                so it gets a guided setup and a button that actually runs the flow and reports
                what Google said. Without those two, a wrong id just looks like a dead button. */
-            _setGoogleGuide = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "Set up", Radius = 4, Height = Ui.S(33), Tip = "How to create the OAuth client id" };
+            _setGoogleGuide = new JBButton { Kind = BtnKind.Soft, Icon = "help", Text = "Set up", Radius = 4, Height = Ui.S(33), Tip = L10n.T("set.google.hint") };
             _setGoogleTest = new JBButton { Kind = BtnKind.Soft, Icon = "check", Text = "Test", Radius = 4, Height = Ui.S(33), Tip = "Run the real Google sign-in now" };
             _setGoogleGuide.Click += delegate { GoogleSetupHelp(); };
-            _setGoogleTest.Click += delegate { TestGoogleSignIn(); };            _setSignOut = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("set.row.signout"), Radius = 4, Height = Ui.S(33) };
+            _setGoogleTest.Click += delegate { TestGoogleSignIn(); };
+            _setSignOut = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("set.row.signout"), Radius = 4, Height = Ui.S(33) };
             _setSecurity.Click += delegate
             {
                 if (Session.Current == null) { Toast("Sign in first.", ToastKind.Error); return; }
@@ -1435,8 +1549,10 @@ namespace JoeBrowser
             };
             _setSignOut.Click += delegate
             {
-                if (MessageBox.Show(this, "Sign out of this device?\r\nYour profiles stay where they are.",
-                        "Sign out", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                if (!ConfirmForm.Ask(this, "Sign out",
+                        "Sign out of this device?",
+                        "Your profiles, proxies and sessions stay where they are and are available the next time you sign in.",
+                        "Sign out", BtnKind.Primary)) return;
                 Session.SignOut();
                 Application.Restart();
                 Environment.Exit(0);
@@ -1444,7 +1560,10 @@ namespace JoeBrowser
 
             var account = Card("set.account");
             Row(account, "set.row.signed", null, _setAccountWho);
-            Row(account, "set.row.google", new[] { Ui.S(360), Ui.S(96), Ui.S(84) }, _setGoogleId, _setGoogleGuide, _setGoogleTest);
+            /* The id is long (72+ characters) and the row also carries two buttons, so the
+               field asks for more room than the other rows and shrinks first when the window is
+               narrow - RowWidths already handles that for every JBTextBox. */
+            Row(account, "set.row.google", new[] { Ui.S(420), Ui.S(92), Ui.S(80) }, _setGoogleId, _setGoogleGuide, _setGoogleTest);
             Row(account, "set.row.gsecret", new[] { Ui.S(360) }, _setGoogleSecret);
             Row(account, "set.row.security", new[] { Ui.S(104), Ui.S(88) }, _setSecurity, _setSignOut);
 
@@ -1525,26 +1644,27 @@ namespace JoeBrowser
 
         private void GoogleSetupHelp()
         {
-            using (var dlg = new ToolDialog("Set up Google sign-in", "Open Google Cloud", "Close", 620, 470))
+            /* Same dialog as the first-run button, so the instructions can never drift apart
+               from what the code actually does. */
+            if (GoogleSetupDialog.Ensure(this, _setGoogleId.Value))
             {
-                dlg.AddNote("1.  Create a project \u2014 any name.");
-                dlg.AddNote("2.  OAuth consent screen \u2192 External \u2192 add your address as a test user.");
-                dlg.AddNote("3.  Credentials \u2192 Create credentials \u2192 OAuth client ID \u2192 Desktop app.");
-                dlg.AddNote("4.  Paste the client ID and secret here.");
-                if (dlg.ShowDialog(this) == DialogResult.OK)
-                    OpenUrl(GoogleSignIn.ConsoleCredentialsUrl);
+                _setGoogleId.Value = GoogleSignIn.ClientId();
+                _setGoogleSecret.Value = GoogleSignIn.SavedClientSecret();
             }
         }
 
-        private async void TestGoogleSignIn()
+        private async System.Threading.Tasks.Task TestGoogleSignInCore()
         {
-            string id = (_setGoogleId.Value ?? "").Trim();
+            /* Normalised, not trimmed: a paste from the console commonly carries a trailing
+               space or the "id:secret" pair, and the un-cleaned value used to reach Google as
+               an invalid client. */
+            string id = GoogleSignIn.NormalizeClientId(_setGoogleId.Value);
             if (!GoogleSignIn.LooksValid(id))
             {
-                MessageBox.Show(this,
-                    "Paste a Google OAuth client id first. It looks like\r\n\r\n" +
-                    "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com",
-                    "Test Google sign-in", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ConfirmForm.Tell(this, "Test Google sign-in",
+                    "Paste a Google OAuth client id first. It looks like",
+                    "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com"
+                    + "\n\nOr use \"Set up\" and Joe Browser will walk through creating one.");
                 _setGoogleId.Box.Focus();
                 return;
             }
@@ -1553,7 +1673,8 @@ namespace JoeBrowser
                saved before the flow starts rather than after it succeeds. */
             _settings.GoogleClientId = id;
             _settings.GoogleClientSecret = (_setGoogleSecret.Value ?? "").Trim();
-            try { _store.SaveSettings(_settings); } catch { }
+            try { _store.SaveSettings(_settings); }
+            catch (Exception ex) { Log.Error("Google client id not saved", ex); }
 
             _setGoogleTest.Enabled = false;
             _setGoogleTest.Text = "Testing\u2026";
@@ -1573,17 +1694,19 @@ namespace JoeBrowser
             if (result.Ok)
             {
                 Toast("Google sign-in works \u2014 " + result.Identity.Email, ToastKind.Success);
-                MessageBox.Show(this,
-                    "Google sign-in works.\r\n\r\nSigned in as: " + result.Identity.Email +
-                    (string.IsNullOrEmpty(result.Identity.Name) ? "" : "\r\nName: " + result.Identity.Name),
-                    "Test Google sign-in", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ConfirmForm.Tell(this, "Test Google sign-in",
+                    "Google sign-in works. Signed in as " + result.Identity.Email + ".",
+                    string.IsNullOrEmpty(result.Identity.Name) ? null : "Name: " + result.Identity.Name);
             }
             else
             {
-                MessageBox.Show(this, result.Message + "\r\n\r\nError code: " + result.Code,
-                    "Test Google sign-in", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ConfirmForm.Tell(this, "Test Google sign-in", result.Message,
+                    "Error code: " + result.Code);
             }
         }
+
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void TestGoogleSignIn() { Guard("TestGoogleSignIn", delegate { return TestGoogleSignInCore(); }); }
 
         /* ------------------------------------------------------------------ *
          * Plan, limits and crypto payment.
@@ -1656,11 +1779,22 @@ namespace JoeBrowser
 
         private void PlanAction(string key)
         {
-            if (key == "copy")
+            if (key == "copy" || key == "copyamount")
             {
                 var inv = _upgradePage.Current;
                 if (inv == null) return;
-                try { Clipboard.SetText(inv.Coin.Address); Toast("Address copied", ToastKind.Success); }
+                /* Send exactly this amount: the number the user would otherwise retype from the
+                   screen, rounded to the coin's own precision so the clipboard value is the one
+                   the invoice is actually matched against. */
+                string text = key == "copyamount"
+                    ? Invoice.Fmt(inv.Amount)
+                    : inv.Coin.Address;
+                try
+                {
+                    Clipboard.SetText(text);
+                    Toast(key == "copyamount" ? "Amount copied  ·  " + text + " " + inv.Coin.Symbol
+                                              : "Address copied", ToastKind.Success);
+                }
                 catch (Exception ex) { Log.Error("Clipboard", ex); Toast("Could not copy", ToastKind.Error); }
                 return;
             }
@@ -1724,8 +1858,8 @@ namespace JoeBrowser
                 bool credited;
                 string message = Referral.Claim(box.Value, out credited);
                 RefreshPlanState();
-                MessageBox.Show(this, message, credited ? "Referral claimed" : "Referral",
-                    MessageBoxButtons.OK, credited ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                ConfirmForm.Tell(this, credited ? "Referral claimed" : "Referral",
+                    credited ? "Referral credit added." : "That receipt could not be used.", message);
             }
         }
 
@@ -1836,15 +1970,13 @@ namespace JoeBrowser
             var history = Plan.History();
             if (Plan.IsPro)
             {
-                MessageBox.Show(this, "Pro is active.\r\n\r\n" + Plan.Summary() +
-                    (history.Count > 0 ? "\r\n\r\nLast payment: " + history[history.Count - 1] : ""),
-                    "Plan", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ConfirmForm.Tell(this, "Plan", "Pro is active on this Windows user.",
+                    Plan.Summary() + (history.Count > 0 ? "\n\nLast payment: " + history[history.Count - 1] : ""));
                 return;
             }
-            MessageBox.Show(this,
-                "Pro is tied to this Windows user.\r\n\r\nReinstall and sign in to the same account to get it back. " +
-                "A transaction can never unlock twice.",
-                "Restore a purchase", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ConfirmForm.Tell(this, "Restore a purchase",
+                "Pro is tied to this Windows user.",
+                "Reinstall and sign in to the same account to get it back. A transaction can never unlock twice.");
         }
 
         private void UpdateBrowserInfo()
@@ -1863,15 +1995,36 @@ namespace JoeBrowser
             string url = _setStartUrl.Value.Trim();
             if (!string.IsNullOrEmpty(url) && !url.StartsWith("http://") && !url.StartsWith("https://") && !url.StartsWith("about:"))
                 url = "https://" + url;
+            if (url.Length > 0 && !url.StartsWith("about:", StringComparison.Ordinal))
+            {
+                /* "https://" with nothing after it, or a space in the host, would be saved and
+                   then silently open a blank tab every launch. Reject it where it was typed. */
+                Uri parsed;
+                if (!Uri.TryCreate(url, UriKind.Absolute, out parsed) || string.IsNullOrEmpty(parsed.Host))
+                {
+                    Toast("That start page is not a usable address. Try https://example.com", ToastKind.Warn);
+                    _setStartUrl.Box.Focus();
+                    _setStartUrl.Box.SelectAll();
+                    return;
+                }
+                url = parsed.AbsoluteUri;
+            }
+            /* The field shows what was stored, not what was typed: without this a save that
+               normalised "google.com" left the box looking unsaved. */
+            if (_setStartUrl.Value != url) _setStartUrl.Value = url;
             _settings.DefaultStartUrl = string.IsNullOrEmpty(url) ? "https://www.google.com" : url;
             _settings.ThemeMode = Theme.Dark ? 1 : 2;
             _settings.DefaultGroup = (_setDefaultGroup.Value ?? "").Trim();
-            string clientId = (_setGoogleId.Value ?? "").Trim();
+            /* Normalised rather than trimmed: a paste from the console usually carries quotes,
+               a trailing space or the "id:secret" pair, and the raw value reached Google as an
+               invalid client. */
+            string clientId = GoogleSignIn.NormalizeClientId(_setGoogleId.Value);
             /* A client id that is not a client id produces an opaque "invalid_client" from
                Google later. Catch it at the point where it was typed instead. */
-            if (clientId.Length > 0 && !clientId.EndsWith(".apps.googleusercontent.com", StringComparison.OrdinalIgnoreCase))
+            if (clientId.Length > 0 && !GoogleSignIn.LooksValid(clientId))
             {
-                Toast("That does not look like a Google OAuth client id (it ends with .apps.googleusercontent.com)", ToastKind.Warn);
+                Toast("That does not look like a Google OAuth client id: the part before .apps.googleusercontent.com "
+                    + "starts with the project number, e.g. 123456789012-abc123.", ToastKind.Warn);
                 _setGoogleId.Box.Focus();
                 _setGoogleId.Box.SelectAll();
                 return;
@@ -1882,8 +2035,18 @@ namespace JoeBrowser
             _settings.EnableCustomExtensions = _setCustomExt.Checked;
             _settings.UseTrash = _setTrash.Checked;
             if (!string.IsNullOrEmpty(_setLang.Value)) _settings.UiLanguage = _setLang.Value;
-            _store.SaveSettings(_settings);
-            Toast("Settings saved", ToastKind.Success);
+            try
+            {
+                _store.SaveSettings(_settings);
+                Toast("Settings saved", ToastKind.Success);
+            }
+            catch (Exception ex)
+            {
+                /* A green "Settings saved" toast over a disk that refused the write is how a
+                   user loses their configuration and never finds out. */
+                Log.Error("Settings not saved", ex);
+                Toast("Settings could not be saved: " + ex.Message, ToastKind.Error);
+            }
         }
 
         private void ToggleTheme()
@@ -2012,8 +2175,30 @@ namespace JoeBrowser
             LayoutBulk();
 
             _emptyPanel.SetBounds(_host.Left, _host.Top, _host.Width, _host.Height);
-            int emptyW = _emptyBtn.PreferredWidth(Ui.S(160));
-            _emptyBtn.SetBounds((_emptyPanel.Width - emptyW) / 2, _emptyPanel.Height / 2 + Ui.S(52), emptyW, Ui.S(33));
+            int emptyW;
+            /* When a search caused the empty list the panel offers "Clear search" next to the
+               create action instead of hiding the way back. */
+            bool searching = _filter.Length > 0;
+            _emptyBtn.Text = searching ? "New profile" : L10n.T("empty.action");
+            _emptyBtn.Kind = searching ? BtnKind.Soft : BtnKind.Primary;
+            emptyW = _emptyBtn.PreferredWidth(Ui.S(160));
+            if (emptyW < Ui.S(40)) emptyW = Ui.S(160);
+            int extraW = searching ? _clearFilter.PreferredWidth(Ui.S(140)) + Ui.S(10) : 0;
+            int startX = (_emptyPanel.Width - (emptyW + extraW)) / 2;
+            int btnY = _emptyPanel.Height / 2 + Ui.S(52);
+            if (searching)
+            {
+                _clearFilter.Kind = BtnKind.Primary;
+                _clearFilter.SetBounds(startX, btnY, extraW - Ui.S(10), Ui.S(33));
+                _clearFilter.Visible = true;
+                _emptyBtn.SetBounds(startX + extraW, btnY, emptyW, Ui.S(33));
+            }
+            else
+            {
+                _clearFilter.Visible = false;
+                _emptyBtn.SetBounds(startX, btnY, emptyW, Ui.S(33));
+            }
+            _emptyBtn.Invalidate();
 
             int pageH = Math.Max(1, h - headerH);
             _settingsPage.SetBounds(contentX, headerH, contentW, pageH);
@@ -2034,6 +2219,24 @@ namespace JoeBrowser
 
             ResumeLayout(false);
             Invalidate();
+        }
+
+        /// <summary>
+        /// Puts the layers back in their fixed order, bottom to top: page content, then the
+        /// toast, then the caption buttons. Called after anything that changes what is on top -
+        /// a page switch, a toast, the bulk bar - so a transient message can never end up under
+        /// a control it is supposed to float above.
+        /// </summary>
+        private void Restack()
+        {
+            try
+            {
+                if (_toast != null) _toast.BringToFront();
+                if (_minBtn != null) _minBtn.BringToFront();
+                if (_maxBtn != null) _maxBtn.BringToFront();
+                if (_closeBtn != null) _closeBtn.BringToFront();
+            }
+            catch { }
         }
 
         private void LayoutSettings()
@@ -2208,9 +2411,15 @@ namespace JoeBrowser
             _saveSettings.Visible = page == 4;
             _themeSwitch.Visible = true;
 
+            /* The newly visible page has to come forward over the other page containers...
+               and then the fixed chrome has to be put back on top of everything. Every page
+               that is not showing stays Visible=false but keeps its z-order slot above the
+               toast, so without the second step the answer to a save, a proxy test or a Google
+               sign-in was hidden behind an invisible page on every screen but Profiles, and the
+               user saw nothing happen at all. */
             Control[] pages = { _host, _emptyPanel, _proxyPage, _extensionPage, _browsersPage, _settingsPage, _toolsPage, _aboutPage, _upgradePage };
             foreach (var p in pages) if (p.Visible) p.BringToFront();
-            _toast.BringToFront();
+            Restack();
 
             if (page == 1)
             {
@@ -2256,7 +2465,10 @@ namespace JoeBrowser
 
         private void ReloadCards(bool fromDisk)
         {
-            if (fromDisk || _profiles == null || _profiles.Count == 0)
+            /* A zero-count reload used to re-read the store on every call, so deleting the
+               last profile hit the disk twice in a row for no reason. From-disk is the explicit
+               signal for "the store may have changed". */
+            if (fromDisk || _profiles == null)
                 _profiles = _store.LoadAll();
             ApplySort();
 
@@ -2289,8 +2501,27 @@ namespace JoeBrowser
                 _grid.Controls.Add(card);
                 _cards[id] = card;
             }
+
+            /* Cards are rebuilt from scratch, so any selection that pointed at a profile which
+               no longer exists has to go before the filter walks it. This was the crash: a
+               picked profile was deleted, ReloadCards dropped its card, and ApplyFilter then
+               indexed _cards with the stale id - KeyNotFoundException, reported to the user as
+               "Joe Browser hit an unexpected error" every time a picked profile was deleted. */
+            PrunePicks();
             ApplyFilter();
             Invalidate();
+        }
+
+        /// <summary>
+        /// Drops selection entries whose card no longer exists, and an anchor that points at
+        /// nothing. Every read of _picks goes through this first, because a delete, a filter
+        /// change and a bulk action can each remove a card under it.
+        /// </summary>
+        private void PrunePicks()
+        {
+            for (int i = _picks.Count - 1; i >= 0; i--)
+                if (!_cards.ContainsKey(_picks[i])) _picks.RemoveAt(i);
+            if (_pickAnchor != null && !_cards.ContainsKey(_pickAnchor)) _pickAnchor = null;
         }
 
         private void ApplyFilter()
@@ -2310,18 +2541,35 @@ namespace JoeBrowser
                 kv.Value.Visible = hit;
                 if (hit) shown++;
             }
+            /* Only selections that are still on screen survive a filter change. A pick whose
+               card has been unloaded is dropped too, rather than trusted - see PrunePicks. */
             for (int i = _picks.Count - 1; i >= 0; i--)
-                if (!_cards[_picks[i]].Visible) _picks.RemoveAt(i);
+            {
+                ProfileCard c;
+                if (!_cards.TryGetValue(_picks[i], out c) || !c.Visible) _picks.RemoveAt(i);
+            }
             if (_picks.Count == 0) _pickAnchor = null;
-            _grid.LayoutGrid();
-            _host.SyncExtent();
             _emptyPanel.Visible = _page == 0 && shown == 0;
             SyncPicks();
+            /* Z-order first, then layout: raising the host after the grid was measured but
+               before the page that owns it was raised left the stacked "no profiles" panel on
+               top of the first card whenever a filter emptied and then refilled the list. */
             if (_emptyPanel.Visible) _emptyPanel.BringToFront();
             else if (shown > 0 && _page == 0) _host.BringToFront();
-            _toast.BringToFront();
+            _grid.LayoutGrid();
+            _host.SyncExtent();
+            Restack();
             _emptyPanel.Invalidate();
             Invalidate();
+        }
+
+        /// <summary>One place that undoes a search, used by Esc, the empty panel and the filter chip.</summary>
+        private void ClearSearch()
+        {
+            if (_search != null) _search.Value = "";
+            _filter = "";
+            ApplyFilter();
+            if (_search != null && _search.Visible) { try { _search.Box.Focus(); } catch { } }
         }
 
         private void EmptyPaint(object sender, PaintEventArgs e)
@@ -2346,12 +2594,36 @@ namespace JoeBrowser
             Ui.Text(g, sub, Theme.Small, Theme.TextDim, 0, br.Bottom + Ui.S(44), w, "center", 2);
         }
 
+        /// <summary>
+        /// The single way a profile is born: a fresh identity that is provably unlike everything
+        /// already in the workspace, on a browser build the workspace has not used yet.
+        ///
+        /// Every creation path goes through this - the New button, batch create, duplicating with
+        /// a proxy, importing a list - because the alternative is what the app used to do: four
+        /// different call sites each rolling their own random fingerprint, three of which forgot
+        /// to check anything.
+        /// </summary>
+        private Profile SeedNewProfile(string name, ProxyConfig proxy)
+        {
+            var p = new Profile();
+            if (!string.IsNullOrEmpty(name)) p.Name = name;
+            if (proxy != null && proxy.Enabled) p.Proxy = proxy;
+            p.Tools.ProxyWatch = p.Proxy.Enabled;
+            FingerprintIdentity.Comparison clash;
+            FingerprintIdentity.MakeUnique(p.Fp, "System default", p.Proxy, _profiles, out clash);
+            string note;
+            KernelDiversity.Assign(p, _profiles, out note);
+            return p;
+        }
+
         private void NewProfile()
         {
             if (!AllowAnotherProfile()) return;
-            var p = new Profile();
-            FingerprintFactory.Regenerate(p.Fp, "System default", null);
-            using (var dlg = new EditorForm(p, true, _settings))
+            /* A new profile is generated unique against the workspace before the editor opens,
+               so the chips the user sees are the truth: rolling here and de-duplicating on save
+               would show one fingerprint and store another. */
+            var p = SeedNewProfile(null, null);
+            using (var dlg = new EditorForm(p, true, _settings, 0, _profiles))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 _store.Save(dlg.Result);
@@ -2360,7 +2632,7 @@ namespace JoeBrowser
             }
         }
 
-        private async void EditProfile(string id, int tab = 0)
+        private async System.Threading.Tasks.Task EditProfileCore(string id, int tab = 0)
         {
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
@@ -2383,6 +2655,9 @@ namespace JoeBrowser
                 else Toast("Profile updated", ToastKind.Success);
             }
         }
+
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void EditProfile(string id, int tab = 0) { Guard("EditProfile", delegate { return EditProfileCore(id, tab); }); }
 
         /// <summary>Quick rename, so changing the label never means opening the whole editor.</summary>
         private void RenameProfile(string id)
@@ -2414,7 +2689,7 @@ namespace JoeBrowser
         /// Clears this profile's cache - or its cache and cookies when it is closed. An open
         /// profile is cleaned through the browser itself, so the tab survives.
         /// </summary>
-        private async void ClearProfileData(string id)
+        private async System.Threading.Tasks.Task ClearProfileDataCore(string id)
         {
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
@@ -2442,8 +2717,11 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void ClearProfileData(string id) { Guard("ClearProfileData", delegate { return ClearProfileDataCore(id); }); }
+
         /// <summary>Reads the live tab back and reports what a fingerprint page would see.</summary>
-        private async void RunLeakTest(string id)
+        private async System.Threading.Tasks.Task RunLeakTestCore(string id)
         {
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
@@ -2468,6 +2746,9 @@ namespace JoeBrowser
             else Toast(result.Verdict, ToastKind.Warn);
         }
 
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void RunLeakTest(string id) { Guard("RunLeakTest", delegate { return RunLeakTestCore(id); }); }
+
         private void DuplicateProfile(string id) { DuplicateProfile(id, true); }
         private void DuplicateProfile(string id, bool announce)
         {
@@ -2479,13 +2760,25 @@ namespace JoeBrowser
             var copy = p.Copy(true);
             copy.Name = p.Name + " copy";
             copy.Proxy.Password = p.Proxy.Password;
-            FingerprintFactory.Regenerate(copy.Fp, copy.Fp.Os, copy.Proxy);
+            /* The copy starts from the source's fingerprint settings and then re-rolls, so the
+               OS and locale family still read as the same kind of machine while no surface is
+               shared. Duplicating used to leave every surface identical. */
+            FingerprintIdentity.Comparison clash;
+            FingerprintIdentity.MakeUnique(copy.Fp, copy.Fp.Os, copy.Proxy, _profiles, out clash);
+            string kernelNote;
+            bool pinned = KernelDiversity.AssignDifferent(copy, p, _profiles, out kernelNote);
+            string warning = null;
+            if (!pinned) warning = kernelNote;
+            else if (clash != null && clash.Relation == FingerprintIdentity.Relation.Linked)
+                warning = clash.Summary;
             try
             {
                 _store.Save(copy);
                 if (!announce) return;
                 ReloadCards(true);
-                Toast("Profile duplicated", ToastKind.Success);
+                Toast(warning == null ? "Profile duplicated \u00b7 new fingerprint and kernel"
+                    : "Profile duplicated \u00b7 " + warning,
+                    warning == null ? ToastKind.Success : ToastKind.Warn);
             }
             catch (Exception ex)
             {
@@ -2558,6 +2851,7 @@ namespace JoeBrowser
 
         private void TogglePick(string id, bool extend)
         {
+            PrunePicks();
             var order = VisibleCards();
             int idx = order.FindIndex(c => c.Model.Id == id);
             if (idx < 0) return;
@@ -2595,6 +2889,7 @@ namespace JoeBrowser
 
         private void SyncPicks()
         {
+            PrunePicks();
             foreach (var kv in _cards) kv.Value.Picked = _picks.Contains(kv.Key);
             LayoutBulk();
             _grid.Invalidate();
@@ -2603,6 +2898,7 @@ namespace JoeBrowser
         private void LayoutBulk()
         {
             if (_bulk == null || _host == null) return;
+            PrunePicks();
             if (_picks.Count < 2 || _page != 0) { _bulk.Visible = false; return; }
 
             _bulkCount.Text = _picks.Count + " selected";
@@ -2621,6 +2917,7 @@ namespace JoeBrowser
                 Math.Max(_host.Top + Ui.S(6), _host.Bottom - height - Ui.S(16)), width, height);
             _bulk.BringToFront();
             _bulk.Visible = true;
+            Restack();   // the toast and the caption buttons stay above the bulk action bar
         }
 
         private void BulkOpen()
@@ -2673,6 +2970,9 @@ namespace JoeBrowser
                 trash ? "You can restore them from Tools & data → Recycle bin."
                       : "Proxy settings stored in them are removed too."))
                 return;
+            /* Each DeleteProfile(..., false) takes its card out of the grid, so the grid is
+               never rebuilt once per item. Profiles loaded from disk still need one reload to
+               pick up anything the store rewrote. */
             foreach (var p in list) DeleteProfile(p.Id, false);
             ReloadCards(true);
             ClearPicks();
@@ -2691,7 +2991,7 @@ namespace JoeBrowser
                     ? "Move \"" + p.Name + "\" to the recycle bin?"
                     : "Delete \"" + p.Name + "\" and all of its browsing data? This cannot be undone.",
                 useTrash ? "Browsing data and cookies are kept so a restore is complete."
-                         : p.Proxy.Enabled ? "The linked proxy settings are removed too." : null))
+                         : (p.Proxy != null && p.Proxy.Enabled) ? "The linked proxy settings are removed too." : null))
                 return;
 
             BrowserSession s;
@@ -2700,11 +3000,25 @@ namespace JoeBrowser
                 _sessions.Remove(id);
                 try { s.Close(); } catch { }
             }
+            /* The selection must not keep pointing at the profile that is going away; the card
+               it refers to disappears on the next reload. */
+            _picks.Remove(id);
+            if (_pickAnchor == id) _pickAnchor = null;
+            _launching.Remove(id);
+
             try
             {
                 _store.Delete(p, useTrash);
                 _profiles = _store.LoadAll();
-                if (!ask) return;
+                PrunePicks();
+                if (!ask)
+                {
+                    /* Called from the bulk bar: the caller reloads and clears the selection
+                       once, so a per-item reload here would rebuild every card N times. */
+                    RemoveCard(id);
+                    SyncPicks();
+                    return;
+                }
                 ReloadCards(false);
                 Toast(useTrash ? "Moved to the recycle bin" : "Profile deleted", ToastKind.Success);
             }
@@ -2713,6 +3027,21 @@ namespace JoeBrowser
                 Log.Error("Delete failed", ex);
                 Toast("Could not delete the profile", ToastKind.Error);
             }
+        }
+
+        /// <summary>Takes one card out of the grid without rebuilding the rest.</summary>
+        private void RemoveCard(string id)
+        {
+            ProfileCard card;
+            if (!_cards.TryGetValue(id, out card)) return;
+            _cards.Remove(id);
+            _grid.Controls.Remove(card);
+            try { card.Dispose(); } catch { }
+            _grid.LayoutGrid();
+            _host.SyncExtent();
+            _emptyPanel.Visible = _page == 0 && _cards.Count == 0;
+            if (_emptyPanel.Visible) _emptyPanel.BringToFront();
+            _grid.Invalidate();
         }
 
         private void FocusSession(string id)
@@ -2731,7 +3060,7 @@ namespace JoeBrowser
             Toast("Browser closed", ToastKind.Info);
         }
 
-        private async void OpenProfile(string id)
+        private async System.Threading.Tasks.Task OpenProfileCore(string id)
         {
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
@@ -2824,6 +3153,9 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void OpenProfile(string id) { Guard("OpenProfile", delegate { return OpenProfileCore(id); }); }
+
         private async Task<bool> DownloadBrowserAsync(string engine)
         {
             string label = BrowserFetcher.Label(engine);
@@ -2841,23 +3173,33 @@ namespace JoeBrowser
             {
                 string exe = await BrowserFetcher.InstallAsync(engine,
                     (pct, msg) => dlg.UpdateProgress(pct, msg), dlg.Token).ConfigureAwait(true);
-                dlg.Close();
+                /* Every close below is guarded: the user can close the progress window while the
+                   fetch is still running, and disposing it twice threw out of an awaited
+                   continuation - a hard crash for pressing the window's own X. */
+                CloseQuietly(dlg);
                 UpdateBrowserInfo();
                 Toast(label + " is ready", ToastKind.Success);
                 return true;
             }
             catch (OperationCanceledException)
             {
-                dlg.Close();
+                CloseQuietly(dlg);
                 Toast("Download cancelled", ToastKind.Info);
             }
             catch (Exception ex)
             {
-                dlg.Close();
+                CloseQuietly(dlg);
                 Log.Error(label + " download failed", ex);
                 Toast(ShortError(ex), ToastKind.Error);
             }
             return false;
+        }
+
+        /// <summary>Closes a window the user may already have closed themselves.</summary>
+        private static void CloseQuietly(Form form)
+        {
+            if (form == null) return;
+            try { if (!form.IsDisposed) form.Close(); } catch { }
         }
 
         private static string ShortError(Exception ex)
@@ -2906,7 +3248,49 @@ namespace JoeBrowser
 
         private void Toast(string message, ToastKind kind)
         {
-            try { _toast.Show(message, kind); } catch { }
+            try
+            {
+                _toast.Show(message, kind);
+                Restack();
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Runs an async handler so a failed await cannot reach the global "unexpected error"
+        /// dialog. Before this every one of these was <c>async void</c>: a network hiccup in a
+        /// proxy check or a missing kernel folder during launch threw away the user's whole
+        /// session and showed a crash box with no context.
+        /// </summary>
+        private void Guard(string action, Func<System.Threading.Tasks.Task> work)
+        {
+            System.Threading.Tasks.Task task;
+            try { task = work(); }
+            catch (Exception ex) { Fail(action, ex); return; }
+            if (task == null) return;
+
+            task.ContinueWith(delegate(System.Threading.Tasks.Task t)
+            {
+                Exception ex = t.Exception == null ? null : t.Exception.GetBaseException();
+                if (ex == null) return;
+                if (IsDisposed || Disposing) { Log.Error(action, ex); return; }
+                try
+                {
+                    BeginInvoke(new Action(delegate { if (!IsDisposed) Fail(action, ex); }));
+                }
+                catch { Log.Error(action, ex); }
+            }, System.Threading.Tasks.TaskScheduler.Default);
+        }
+
+        private void Fail(string action, Exception ex)
+        {
+            Log.Error(action, ex);
+            string hint = ex is UnauthorizedAccessException
+                ? " A file or folder is locked - close any Joe Browser browsers and try again."
+                : ex is System.IO.IOException
+                    ? " A file could not be read or written."
+                    : "";
+            Toast("That did not work: " + ex.Message + hint, ToastKind.Error);
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -2924,7 +3308,11 @@ namespace JoeBrowser
                     _settings.WinWidth = Math.Max(1000, (int)Math.Round(restore.Width / (double)Ui.Scale));
                     _settings.WinHeight = Math.Max(660, (int)Math.Round(restore.Height / (double)Ui.Scale));
                 }
-                _store.SaveSettings(_settings);
+                /* Closing the window is not the moment to lose the geometry and the
+                   preferences with it: a locked or read-only settings.json used to throw out of
+                   OnFormClosing, which can stop the window from closing at all. */
+                try { _store.SaveSettings(_settings); }
+                catch (Exception ex) { Log.Error("Settings not saved on exit", ex); }
 
                 foreach (var s in _sessions.Values.ToList())
                 {
@@ -2938,6 +3326,8 @@ namespace JoeBrowser
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            /* Keyboard-cue tracking lives in JBForm.ProcessCmdKey and covers this window too;
+               it is deliberately not duplicated here. */
             if (keyData == (Keys.Control | Keys.N)) { NewProfile(); return true; }
             if (keyData == (Keys.Control | Keys.F) || keyData == (Keys.Control | Keys.K))
             {
@@ -2950,13 +3340,7 @@ namespace JoeBrowser
             if (keyData == (Keys.Control | Keys.O) && _page == 0) { CycleSort(); return true; }
             if (keyData == (Keys.Control | Keys.A) && _page == 0) { SelectAllVisible(); return true; }
             if (keyData == Keys.Escape && _page == 0 && _picks.Count > 0) { ClearPicks(); return true; }
-            if (keyData == Keys.Escape && _page == 0 && _filter.Length > 0)
-            {
-                _search.Value = "";
-                _filter = "";
-                ApplyFilter();
-                return true;
-            }
+            if (keyData == Keys.Escape && _page == 0 && _filter.Length > 0) { ClearSearch(); return true; }
             if (_page == 0 && (keyData == Keys.Left || keyData == Keys.Right || keyData == Keys.Up || keyData == Keys.Down))
             {
                 var order = VisibleCards();
@@ -2971,6 +3355,18 @@ namespace JoeBrowser
             {
                 var focused = ActiveControl as ProfileCard;
                 if (focused != null && focused.Model != null) { EditProfile(focused.Model.Id); return true; }
+            }
+            /* Shift+F10 is the second standard context-menu key, after the Apps key the card
+               already handles. Without it the menu was unreachable on keyboards that have no
+               Apps key - which is most laptops. */
+            if (keyData == (Keys.Shift | Keys.F10) && _page == 0)
+            {
+                var focused = ActiveControl as ProfileCard;
+                if (focused != null)
+                {
+                    focused.ShowMenuKey();
+                    return true;
+                }
             }
             return base.ProcessCmdKey(ref msg, keyData);
         }
@@ -3049,18 +3445,29 @@ namespace JoeBrowser
             float scSect = afterTiles + Ui.S(10);
             Ui.Text(g, L10n.T("about.shortcuts"), Theme.Micro, Theme.TextFaint, x + Ui.S(2), scSect, colW - Ui.S(4));
 
+            var shortcuts = ShortcutDisplay();
             int scCols = colW >= Ui.S(900) ? 2 : 1;
-            int perCol = (int)Math.Ceiling(ShortcutRows.Length / (double)scCols);
+            int perCol = (int)Math.Ceiling(shortcuts.Count / (double)scCols);
             float rowH = Ui.S(38);
             var sc = new RectangleF(x, scSect + Ui.S(26), colW, perCol * rowH + Ui.S(14));
             Ui.Fill(g, sc, Ui.S(8), Theme.Panel);
             Ui.Stroke(g, sc, Ui.S(8), Theme.Line, 1f);
 
             float halfW = colW / scCols;
-            for (int i = 0; i < ShortcutRows.Length; i++)
+            for (int i = 0; i < shortcuts.Count; i++)
             {
                 int col = i / perCol, line = i % perCol;
                 float ry = sc.Y + Ui.S(7) + line * rowH;
+                float kx = sc.X + col * halfW + Ui.S(18);
+                float cy = ry + (rowH - Ui.S(24)) / 2f;
+
+                // A row with no key is a heading, not a shortcut: no chip, no divider above it.
+                if (shortcuts[i][0].Length == 0)
+                {
+                    Ui.Text(g, shortcuts[i][1], Theme.Micro, Theme.TextFaint, kx, cy, halfW - Ui.S(36));
+                    continue;
+                }
+
                 if (line > 0)
                     using (var p = new Pen(Theme.Line))
                     {
@@ -3068,15 +3475,13 @@ namespace JoeBrowser
                         g.DrawLine(p, x + col * halfW + Ui.S(16), dy, x + (col + 1) * halfW - Ui.S(16), dy);
                     }
 
-                float kx = sc.X + col * halfW + Ui.S(18);
-                float cy = ry + (rowH - Ui.S(24)) / 2f;
-                int keyW = (int)Math.Ceiling(Ui.Measure(g, ShortcutRows[i][0], Theme.Caption).Width) + Ui.S(18);
+                int keyW = (int)Math.Ceiling(Ui.Measure(g, shortcuts[i][0], Theme.Caption).Width) + Ui.S(18);
                 var chipR = new RectangleF(kx, cy, keyW, Ui.S(24));
                 Ui.Fill(g, chipR, Ui.S(4), Theme.Card);
                 Ui.Stroke(g, chipR, Ui.S(4), Theme.Line, 1f);
-                Ui.Text(g, ShortcutRows[i][0], Theme.Caption, Theme.Text, chipR.X, chipR.Y, chipR.Width, "center");
+                Ui.Text(g, shortcuts[i][0], Theme.Caption, Theme.Text, chipR.X, chipR.Y, chipR.Width, "center");
 
-                Ui.Text(g, ShortcutRows[i][1], Theme.Small, Theme.TextDim, chipR.Right + Ui.S(12),
+                Ui.Text(g, shortcuts[i][1], Theme.Small, Theme.TextDim, chipR.Right + Ui.S(12),
                     ry + (rowH - Theme.Small.GetHeight(g)) / 2f,
                     sc.X + (col + 1) * halfW - (chipR.Right + Ui.S(30)));
             }

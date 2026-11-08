@@ -11,6 +11,20 @@ namespace JoeBrowser
         public static void Info(string message) { Write("INFO", message, null); }
         public static void Error(string message, Exception ex = null) { Write("ERROR", message, ex); }
 
+        /// <summary>
+        /// Where the log is, for the "open the log" affordance in the report window and for the
+        /// support instructions. Null when logging has never succeeded.
+        /// </summary>
+        public static string CurrentFile()
+        {
+            try
+            {
+                string file = Path.Combine(AppPaths.Logs, "joebrowser-" + DateTime.Now.ToString("yyyy-MM-dd") + ".log");
+                return File.Exists(file) ? file : (File.Exists(file + ".1") ? file + ".1" : null);
+            }
+            catch { return null; }
+        }
+
         private static void Write(string level, string message, Exception ex)
         {
             try
@@ -25,8 +39,16 @@ namespace JoeBrowser
                     sb.AppendLine();
                     File.AppendAllText(file, sb.ToString(), Encoding.UTF8);
 
+                    /* Rotation DELETED the file with the day's whole history in it, so the one
+                       moment a log matters - a user hitting the same error over and over - was
+                       the moment it was thrown away. Keep the previous part as .1 instead. */
                     var info = new FileInfo(file);
-                    if (info.Exists && info.Length > 4 * 1024 * 1024) info.Delete();
+                    if (info.Exists && info.Length > 4 * 1024 * 1024)
+                    {
+                        string previous = file + ".1";
+                        try { if (File.Exists(previous)) File.Delete(previous); } catch { }
+                        try { File.Move(file, previous); } catch { }
+                    }
                 }
             }
             catch { }

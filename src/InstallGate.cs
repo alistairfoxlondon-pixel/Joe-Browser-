@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace JoeBrowser
@@ -21,7 +22,7 @@ namespace JoeBrowser
         private readonly JBButton _install;
         private readonly JBButton _cancel;
         private readonly JBLabel _status;
-        private readonly CheckBox _desktop;
+        private readonly JBToggle _desktop;
         private bool _working;
 
         public InstallGate()
@@ -54,14 +55,15 @@ namespace JoeBrowser
             };
             body.Wrap = true;
 
-            _desktop = new CheckBox
+            /* A JBToggle rather than a WinForms CheckBox: this window is the first thing a new
+               user sees, and an unstyled system checkbox rendered with the default font was the
+               one control on it that belonged to a different application. */
+            _desktop = new JBToggle
             {
                 Text = "Create a desktop shortcut",
                 Checked = true,
-                AutoSize = false,
-                Size = new Size(Ui.S(300), Ui.S(24)),
-                Location = new Point(Ui.S(42), Ui.S(282)),
-                ForeColor = Theme.Text
+                Size = new Size(Ui.S(300), Ui.S(26)),
+                Location = new Point(Ui.S(40), Ui.S(280))
             };
 
             _status = new JBLabel
@@ -128,7 +130,21 @@ namespace JoeBrowser
             }
         }
 
-        private void DoInstall()
+        /// <summary>
+        /// The gate is a borderless window with no other way to close it except "Not now", so it
+        /// must also be openable and installable entirely from the keyboard.
+        /// </summary>
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if ((keyData == Keys.Enter || keyData == Keys.Return) && _install.Enabled && !_working)
+            {
+                DoInstall();
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        private async void DoInstall()
         {
             if (_working) return;
             _working = true;
@@ -136,38 +152,77 @@ namespace JoeBrowser
             _cancel.Enabled = false;
             _install.Text = "Installing\u2026";
             _status.Visible = true;
+            _status.ForeColor = Theme.TextFaint;
             _status.Text = "Copying to " + Installation.DefaultDir();
-            Application.DoEvents();
+            _status.Invalidate();
+            _install.Invalidate();
 
-            string error;
-            bool ok = Installation.SelfInstall(_desktop.Checked, out error);
-            if (!ok)
+            try
             {
+                /* The copy used to run on the UI thread with a single DoEvents() in the middle,
+                   so the window could not repaint, could not be moved, and showed "not
+                   responding" for the whole install. It also meant a failure inside
+                   SelfInstall happened on the message loop rather than in a try - which is why
+                   installing could end in the generic crash dialog. */
+                string failure = await Task.Run(new Func<string>(delegate
+                {
+                    string error;
+                    bool ok = Installation.SelfInstall(_desktop.Checked, out error);
+                    return ok ? null : (string.IsNullOrEmpty(error) ? "unknown error" : error);
+                }));
+                string error = failure;
+                bool ok = error == null;
+
+                if (!ok)
+                {
+                    _working = false;
+                    _install.Enabled = true;
+                    _cancel.Enabled = true;
+                    _install.Text = "Install now";
+                    _status.ForeColor = Theme.Danger;
+                    _status.Text = "Install failed: " + error;
+                    _status.Invalidate();
+                    _install.Invalidate();
+                    Log.Error("Install gate failed: " + error);
+                    return;
+                }
+
+                _status.ForeColor = Theme.Success;
+                _status.Text = "Installed. Starting Joe Browser\u2026";
+                _status.Invalidate();
+
+                /* Give the window a moment to show the success line before it disappears and
+                   hand over to the installed copy. Both are cheap and they remove the feeling
+                   that nothing happened. */
+                await Task.Delay(350);
+
+                /* The window can be closed while that delay runs - the user has been told the
+                   install finished - so the last two steps must not touch a disposed form. */
+                if (IsDisposed || Disposing) return;
+                try
+                {
+                    string exe = Path.Combine(Installation.InstalledDir(), "JoeBrowser.exe");
+                    Process.Start(new ProcessStartInfo(exe)
+                    {
+                        UseShellExecute = true,
+                        WorkingDirectory = Installation.InstalledDir()
+                    });
+                }
+                catch (Exception ex) { Log.Error("Could not start the installed copy", ex); }
+
+                Close();
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Install failed", ex);
                 _working = false;
                 _install.Enabled = true;
                 _cancel.Enabled = true;
                 _install.Text = "Install now";
                 _status.ForeColor = Theme.Danger;
-                _status.Text = "Install failed: " + error;
-                return;
+                _status.Text = "Install failed: " + ex.Message;
+                _status.Invalidate();
             }
-
-            _status.ForeColor = Theme.Success;
-            _status.Text = "Installed. Starting Joe Browser\u2026";
-            Application.DoEvents();
-
-            try
-            {
-                string exe = Path.Combine(Installation.InstalledDir(), "JoeBrowser.exe");
-                Process.Start(new ProcessStartInfo(exe)
-                {
-                    UseShellExecute = true,
-                    WorkingDirectory = Installation.InstalledDir()
-                });
-            }
-            catch { }
-
-            Close();
         }
     }
 }

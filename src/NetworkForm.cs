@@ -122,7 +122,7 @@ namespace JoeBrowser
             return null;
         }
 
-        private async void RunCheck()
+        private async System.Threading.Tasks.Task RunCheckCore()
         {
             if (_busy) return;
             _busy = true;
@@ -135,6 +135,11 @@ namespace JoeBrowser
             {
                 var cfg = SelectedProxy();
                 _report = await NetCheck.CheckAsync(cfg).ConfigureAwait(true);
+            /* The window is opened by the user and checks immediately, so a check against a slow
+               proxy could finish after they already closed it. The host handle is gone by then
+               and the following SetBounds/Invalidate calls throw ObjectDisposedException inside
+               an awaited continuation, which is a hard crash with no dialog. */
+            if (IsDisposed || Disposing || !IsHandleCreated) return;
             }
             catch (Exception ex)
             {
@@ -147,6 +152,9 @@ namespace JoeBrowser
             LayoutCore();
             Invalidate();
         }
+
+        /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>
+        private void RunCheck() { Guarded.Run("RunCheck", this, delegate { return RunCheckCore(); }); }
 
         private void Apply()
         {

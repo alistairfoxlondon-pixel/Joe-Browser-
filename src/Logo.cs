@@ -78,6 +78,21 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>The mark reduced to a tile and the letter, for 16-19 px surfaces.</summary>
+        private static void DrawCompact(Graphics g, RectangleF box)
+        {
+            using (var tile = Ui.Round(box, box.Width * 0.22f))
+            using (var brush = new LinearGradientBrush(
+                new PointF(box.Left, box.Top), new PointF(box.Left, box.Bottom),
+                Color.FromArgb(0x3A, 0xA6, 0xFF), Color.FromArgb(0x14, 0x5A, 0xC0)))
+            {
+                brush.GammaCorrection = true;
+                g.FillPath(brush, tile);
+            }
+            var glyph = new RectangleF(box.X, box.Y, box.Width, box.Height);
+            JPath(g, glyph, Color.White, 0.22f);
+        }
+
         public static void Draw(Graphics g, RectangleF box)
         {
             if (g == null || box.Width < 3 || box.Height < 3) return;
@@ -88,6 +103,12 @@ namespace JoeBrowser
             try
             {
                 bool small = box.Width < 32;
+
+                /* At 16 px the shield's bottom point and shoulders turn to mud, and the glyph
+                   has no room left to read as a "J". A plain rounded tile with the letter is
+                   the same mark, just tuned for the size it is actually drawn at - which is the
+                   whole difference between a crisp taskbar icon and a coloured smudge. */
+                if (box.Width < 20) { DrawCompact(g, box); return; }
 
                 using (var path = Shield(box))
                 {

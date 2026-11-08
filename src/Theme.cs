@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -138,6 +139,17 @@ namespace JoeBrowser
         private static readonly List<string> _installed = new List<string>();
         private static readonly List<string> _privateInstalled = new List<string>();
 
+        /* GDI+ keeps a FontFamily created from a PrivateFontCollection alive only while that
+           collection is alive. A collection built in a local variable is collected as soon as
+           LoadFonts returns, and every later Font built from the family throws or paints
+           nothing - which is exactly "the icons are missing". Every collection therefore has
+           to stay reachable for the life of the process. */
+        private static readonly List<PrivateFontCollection> _fontCollections = new List<PrivateFontCollection>();
+
+        private static bool _fontsLoaded;
+        private static bool _fontsDirResolved;
+        private static string _fontsDir;
+
         [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
         private static extern int AddFontResourceEx(string lpszFilename, int fl, IntPtr pdv);
         [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
@@ -150,6 +162,12 @@ namespace JoeBrowser
 
         public static void LoadFonts()
         {
+            /* Settings dialogs and the diagnostic tools can ask for this more than once.
+               Re-registering every face each time leaks GDI handles and makes the icon cache
+               inconsistent, so the whole load is done exactly once per process. */
+            if (_fontsLoaded) return;
+            _fontsLoaded = true;
+
             LoadIconFont();
 
             /* DevToys (and every WinUI 3 app) sets its type in Segoe UI Variable, the optical
@@ -268,9 +286,18 @@ namespace JoeBrowser
                reference UI uses and is right for large surfaces; the solid one is used at
                24 px and below, where an outline stroke resamples into grey mush. */
             _iconFamily = LoadFace("MaterialIconsOutlined-Regular.otf", "MaterialIconsOutlined-Regular.ttf")
-                       ?? LoadFace("MaterialIcons-Regular.ttf", "MaterialIcons-Regular.otf");
+                       ?? LoadFace("MaterialIcons-Regular.ttf", "MaterialIcons-Regular.otf")
+                       /* A stripped build with no fonts at all still works when the user has
+                          Material Icons installed system-wide (a designer's PC, typically). */
+                       ?? TryFamily("Material Icons Outlined")
+                       ?? TryFamily("Material Icons");
             _iconFamilySolid = LoadFace("MaterialIcons-Regular.ttf", "MaterialIcons-Regular.otf")
+                            ?? TryFamily("Material Icons")
                             ?? _iconFamily;
+
+            if (_iconFamily == null)
+                Log.Error("The Material icon font could not be loaded from " + (FontsDir() ?? "(no fonts folder)") +
+                          ". Icons will be drawn as placeholders.");
         }
 
         private static FontFamily LoadFace(string first, string second)
@@ -284,9 +311,16 @@ namespace JoeBrowser
                 _privateInstalled.Add(path);
                 var pfc = new PrivateFontCollection();
                 pfc.AddFontFile(path);
-                return pfc.Families.Length > 0 ? pfc.Families[0] : null;
+                if (pfc.Families.Length == 0) return null;
+                /* Held for the life of the process: see _fontCollections. */
+                _fontCollections.Add(pfc);
+                return pfc.Families[0];
             }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                Log.Error("Cannot load font " + Path.GetFileName(path), ex);
+                return null;
+            }
         }
 
         public static Font IconFont(float px)
@@ -348,19 +382,114 @@ namespace JoeBrowser
         /// </summary>
         internal static string FontsOverride = null;
 
+        /// <summary>
+        /// Where the bundled faces live. Three places, in order: the harness override, a
+        /// <c>fonts</c> folder beside the executable (the portable dist layout), and - because
+        /// the installer ships a single executable - the copies extracted from the embedded
+        /// resources into the app data folder. The last one is what makes the icons appear in
+        /// an installed build; before it existed, an installed Joe Browser had no fonts folder
+        /// and drew no icons at all.
+        /// </summary>
         private static string FontsDir()
         {
             if (!string.IsNullOrEmpty(FontsOverride) && Directory.Exists(FontsOverride))
                 return FontsOverride;
+            if (_fontsDirResolved) return _fontsDir;
+            _fontsDirResolved = true;
 
             string dir = null;
             try { dir = Path.GetDirectoryName(Application.ExecutablePath); } catch { }
-            if (dir == null) return null;
-            foreach (string sub in new[] { "fonts", "" })
+            if (dir != null)
             {
-                string folder = Path.Combine(dir, sub);
-                if (Directory.Exists(folder)) return folder;
+                foreach (string sub in new[] { "fonts", "" })
+                {
+                    string folder = Path.Combine(dir, sub);
+                    if (HasIconFont(folder)) return _fontsDir = folder;
+                }
             }
+
+            _fontsDir = InstallEmbeddedFonts();
+            return _fontsDir;
+        }
+
+        private static bool HasIconFont(string folder)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return false;
+                return File.Exists(Path.Combine(folder, "MaterialIcons-Regular.ttf"))
+                    || File.Exists(Path.Combine(folder, "MaterialIconsOutlined-Regular.otf"))
+                    || File.Exists(Path.Combine(folder, "MaterialIconsOutlined-Regular.ttf"))
+                    || File.Exists(Path.Combine(folder, "OpenSans-Regular.ttf"));
+            }
+            catch { return false; }
+        }
+
+        /// <summary>The resource prefix build.ps1 uses when embedding the faces.</summary>
+        private const string FontResourcePrefix = "JoeBrowser.fonts.";
+
+        /// <summary>
+        /// Writes the fonts carried inside the executable to
+        /// <c>%APPDATA%\JoeBrowser\fonts</c> (or the portable data root) and returns that
+        /// folder. A file is only rewritten when its length does not match the resource, so a
+        /// normal launch costs a few stat calls and no copying.
+        /// </summary>
+        private static string InstallEmbeddedFonts()
+        {
+            try
+            {
+                Assembly asm = Assembly.GetExecutingAssembly();
+                string[] names = asm.GetManifestResourceNames();
+                if (names == null || names.Length == 0) return FindFontsOnDisk();
+
+                string folder = Path.Combine(AppPaths.Root, "fonts");
+                bool wrote = false;
+                foreach (string name in names)
+                {
+                    if (string.IsNullOrEmpty(name) ||
+                        name.IndexOf(FontResourcePrefix, StringComparison.Ordinal) != 0) continue;
+
+                    string file = name.Substring(FontResourcePrefix.Length);
+                    if (file.IndexOfAny(new[] { '/', '\\' }) >= 0 || file.Length == 0) continue;
+
+                    using (Stream s = asm.GetManifestResourceStream(name))
+                    {
+                        if (s == null) continue;
+                        try
+                        {
+                            Directory.CreateDirectory(folder);
+                            string dest = Path.Combine(folder, file);
+                            if (File.Exists(dest) && new FileInfo(dest).Length == s.Length) { wrote = true; continue; }
+
+                            /* Write beside the target and move into place, so a crash halfway
+                               through can never leave a truncated font that GDI+ then refuses. */
+                            string tmp = dest + "." + ProcessId() + ".tmp";
+                            using (var f = File.Create(tmp)) s.CopyTo(f);
+                            try { File.Delete(dest); } catch { }
+                            File.Move(tmp, dest);
+                            wrote = true;
+                        }
+                        catch (Exception ex) { Log.Error("Cannot extract bundled font " + file, ex); }
+                    }
+                }
+                if (wrote) return folder;
+            }
+            catch (Exception ex) { Log.Error("Cannot extract bundled fonts", ex); }
+
+            return FindFontsOnDisk();
+        }
+
+        /// <summary>Last resort: a fonts folder the user or a previous build left behind.</summary>
+        private static string FindFontsOnDisk()
+        {
+            string[] candidates =
+            {
+                Path.Combine(AppPaths.Root, "fonts"),
+                Path.Combine(Path.GetTempPath(), "JoeBrowser", "fonts"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "JoeBrowser", "fonts")
+            };
+            foreach (string c in candidates)
+                if (HasIconFont(c)) return c;
             return null;
         }
 
@@ -376,6 +505,13 @@ namespace JoeBrowser
         {
             try
             {
+                /* The extracted copies already live in a folder GDI+ may keep open: it is
+                   written once per update, never per launch. Copying them to TEMP again would
+                   cost a few megabytes of disk churn on every start for no benefit. */
+                string root = AppPaths.Root;
+                if (!string.IsNullOrEmpty(root) &&
+                    path.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return path;
+
                 string dir = Path.Combine(Path.GetTempPath(), "JoeBrowser", "fonts", ProcessId());
                 Directory.CreateDirectory(dir);
                 string dst = Path.Combine(dir, Path.GetFileName(path));
@@ -424,6 +560,12 @@ namespace JoeBrowser
             }
             _installed.Clear();
             _privateInstalled.Clear();
+            /* A second LoadFonts (the diagnostic harness does this) must actually reload, and
+               must look at the disk again rather than remember the previous answer. */
+            _iconFonts.Clear();
+            _fontsLoaded = false;
+            _fontsDirResolved = false;
+            _fontsDir = null;
         }
 
         private static readonly Dictionary<long, Font> FontCache = new Dictionary<long, Font>();
@@ -657,6 +799,37 @@ namespace JoeBrowser
         {
             var ring = new RectangleF(r.X - S(1.5f), r.Y - S(1.5f), r.Width + S(3f), r.Height + S(3f));
             Stroke(g, ring, radius + S(1.5f), Theme.Text, S(1f));
+        }
+
+        /// <summary>
+        /// True while the user is driving the app with the keyboard, i.e. after a Tab or an
+        /// arrow key and until the next mouse click.
+        ///
+        /// Every custom control used <c>Focused &amp;&amp; ShowFocusCues</c>. Control.ShowFocusCues
+        /// is a process-wide flag that Windows reports as FALSE when a touch keyboard is
+        /// attached, in tablet posture and in some remote sessions - so on those machines the
+        /// app drew no focus ring anywhere and looked unkeyboardable. Keeping our own flag
+        /// makes the cue independent of that, and it behaves the way Windows itself does:
+        /// visible after a key press, gone as soon as the mouse is used again.
+        /// </summary>
+        public static bool KeyboardCuesForced;
+
+        /// <summary>Whether a focus indicator should be drawn for this control right now.</summary>
+        public static bool FocusCues(Control c)
+        {
+            if (c == null || !c.Focused) return false;
+            return c.ShowFocusCues || KeyboardCuesForced;
+        }
+
+        /// <summary>Called for the keys that move focus; ignored for ordinary typing.</summary>
+        public static void NoteKey(Keys keyData)
+        {
+            Keys code = keyData & Keys.KeyCode;
+            if (code == Keys.Tab || code == Keys.Left || code == Keys.Right ||
+                code == Keys.Up || code == Keys.Down || code == Keys.Home || code == Keys.End ||
+                code == Keys.PageUp || code == Keys.PageDown || code == Keys.Enter ||
+                code == Keys.Space)
+                KeyboardCuesForced = true;
         }
 
         public static void Text(Graphics g, string text, Font font, Color color, float x, float y,

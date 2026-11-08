@@ -182,7 +182,7 @@ namespace JoeBrowser
             Icons.Draw(g, _open ? "chevron-up" : "chevron-down",
                 new RectangleF(Width - c - Ui.S(10), (Height - c) / 2f, c, c),
                 _open || _hover ? Theme.Text : Theme.TextDim);
-            if (Focused && ShowFocusCues) Ui.FocusRing(g, r, rad);
+            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, rad);
         }
 
         /// <summary>Searchable owner-drawn popup. Kept as a nested class so the picker owns it.</summary>
@@ -256,7 +256,10 @@ namespace JoeBrowser
                 Filter();
                 for (int i = 0; i < _visible.Count; i++) if (_visible[i] == selected) { _hi = i; break; }
                 if (_hi < 0) _hi = _visible.Count > 0 ? 0 : -1;
-                Deactivate += delegate { ClosePopup(); };
+                Deactivate += delegate
+                {
+                    if (!_cancel) ClosePopup();
+                };
             }
 
             private int RowHeight { get { return Ui.S(38); } }
@@ -265,6 +268,18 @@ namespace JoeBrowser
             {
                 try { if (!IsDisposed) Close(); } catch { }
             }
+
+            /// <summary>Closes and puts the caret back on the field the popup belongs to.</summary>
+            private void Cancel()
+            {
+                _cancel = true;
+                ClosePopup();
+                try { if (_owner != null && _owner.Visible) _owner.Focus(); } catch { }
+            }
+
+            /* Set when the popup is dismissed rather than committed: moving focus back to the
+               picker inside Deactivate is what made "click another field" jump back here. */
+            private bool _cancel;
 
             private void Filter()
             {
@@ -287,7 +302,7 @@ namespace JoeBrowser
 
             private void SearchKeyDown(object sender, KeyEventArgs e)
             {
-                if (e.KeyCode == Keys.Escape) { Close(); e.Handled = true; }
+                if (e.KeyCode == Keys.Escape) { Cancel(); e.Handled = true; }
                 else if (e.KeyCode == Keys.Enter) { Pick(_hi); e.Handled = true; }
                 else if (e.KeyCode == Keys.Down) { MoveHighlight(1); e.Handled = true; }
                 else if (e.KeyCode == Keys.Up) { MoveHighlight(-1); e.Handled = true; }
@@ -369,6 +384,17 @@ namespace JoeBrowser
                     float pos = (track - thumb) * (_scroll / (float)Math.Max(1, _visible.Count - VisibleRows));
                     Ui.Fill(g, new RectangleF(w - Ui.S(7), pos, Ui.S(4), thumb), Ui.S(2), Theme.Line);
                 }
+
+                /* A search that matches nothing used to leave a blank white box with no
+                   explanation, which read as a broken picker rather than "no such language". */
+                if (_visible.Count == 0)
+                {
+                    string none = string.IsNullOrWhiteSpace(_search.Text)
+                        ? "No languages available."
+                        : "No language matches \u201c" + _search.Text.Trim() + "\u201d.";
+                    Ui.Text(g, none, Theme.Body, Theme.TextFaint, 0,
+                        (_list.Height - Theme.Body.GetHeight(g)) / 2f, w, "center");
+                }
             }
 
             protected override void OnPaint(PaintEventArgs e)
@@ -379,7 +405,7 @@ namespace JoeBrowser
 
             protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
             {
-                if (keyData == Keys.Escape) { Close(); return true; }
+                if (keyData == Keys.Escape) { Cancel(); return true; }
                 return base.ProcessCmdKey(ref msg, keyData);
             }
 

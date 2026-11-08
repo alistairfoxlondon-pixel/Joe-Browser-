@@ -167,6 +167,17 @@ namespace JoeBrowser
             base.OnKeyDown(e);
         }
 
+        /// <summary>
+        /// Opens the row menu from the keyboard. Public because Shift+F10 is resolved by the
+        /// window's command-key pass, not by the card: the card never constructs that key
+        /// sequence itself.
+        /// </summary>
+        public void ShowMenuKey()
+        {
+            if (Model == null) return;
+            try { ShowMenu(); } catch { }
+        }
+
         private void ShowMenu()
         {
             if (_menu != null) { _menu.Dispose(); _menu = null; }
@@ -228,7 +239,7 @@ namespace JoeBrowser
             if (!proxyWrapped) PaintTags(g);
             PaintActions(g);
 
-            if (Focused && ShowFocusCues) Ui.FocusRing(g, r, rad);
+            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, rad);
         }
 
         private void PaintHeader(Graphics g, RectangleF r)
