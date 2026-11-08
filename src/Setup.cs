@@ -346,8 +346,16 @@ namespace JoeBrowser.Setup
             CancelButton = cancel;
         }
 
-        private void DoInstall()
+        /// <summary>
+        /// True once the install finished. The button changes to "Close" at that point, and
+        /// because the original Click handler was never removed, pressing it ran a second full
+        /// install before closing - so the success path re-installed the app from itself.
+        /// </summary>
+        private bool _done;
+
+        private async void DoInstall()
         {
+            if (_done) { Close(); return; }
             string dir = _path.Text.Trim();
             if (dir.Length == 0)
             {
@@ -385,13 +393,22 @@ namespace JoeBrowser.Setup
             Application.DoEvents();
 
             InstallResult result;
-            try { result = Installer.Install(dir, _desktop.Checked, _launch.Checked); }
+            try
+            {
+                /* Off the UI thread: the copy plus the shortcut and registry work used to block
+                   the message loop behind a single DoEvents(), so the window showed "not
+                   responding" for the whole install - which on a first run reads as a hang. */
+                bool desk = _desktop.Checked, launch = _launch.Checked;
+                result = await System.Threading.Tasks.Task.Run(new Func<InstallResult>(
+                    delegate { return Installer.Install(dir, desk, launch); }));
+            }
             catch (Exception ex)
             {
                 /* Install already catches its own failures; this is the belt-and-braces case
                    so a surprise never escapes as an unhandled-exception dialog during setup. */
                 result = new InstallResult { Ok = false, Error = ex.Message, Dir = dir };
             }
+            if (IsDisposed) return;
             _progress.Style = ProgressBarStyle.Continuous;
             _progress.Value = 100;
 
@@ -403,7 +420,7 @@ namespace JoeBrowser.Setup
                    itself while the user is still reading where things went. */
                 _install.Text = "Close";
                 _install.Enabled = true;
-                _install.Click += delegate { Close(); };
+                _done = true;   // the existing handler now closes instead of reinstalling
                 ExitCode = 0;
             }
             else
