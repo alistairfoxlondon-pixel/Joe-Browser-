@@ -181,7 +181,31 @@ jobs:
             Requirements: any installed Chromium-based browser or Firefox. The Browsers page can
             install Chrome, Brave or Chromium for you.
 
-            ### What is new in 1.4.2
+            ### What is new in 1.4.3
+
+            **A changed proxy covers every connection, not just new ones.** Each socket the
+            local relay opens is now tagged with the proxy it was made through and is closed
+            when that proxy changes, so a page cannot keep talking over the old exit after the
+            user has picked a new one. A profile that opened with no proxy has no relay to
+            re-point at all, and the page now says the change is saved for the next open
+            instead of calling it live.
+
+            **The default extensions are listed from the first start.** The three built in
+            tools were written to disk on start but only added to the library when the
+            Extensions page was first opened, so a profile launched from a fresh install could
+            run with no trace of them in the list. They are listed on every start now, and the
+            download that fetches the two store extensions stays off the startup path.
+
+            **Eleven more sentences lost their hyphen.** The speed labels in the profile editor
+            and the welcome line in the installer still used a dash where a comma belongs, and
+            the DNS resolver geography is now recognised by country name rather than by
+            splitting the service's answer on a hyphen.
+
+            **The self test checks the build spread.** Eight profiles made in a row must not
+            share a browser build when more than one is installed, which was the last part of
+            the uniqueness rule that only a person could check.
+
+            ### What was new in 1.4.2
 
             **Import an extension from a file.** A store link and an unpacked folder covered
             neither an extension downloaded elsewhere nor a store package saved to disk, and
