@@ -221,7 +221,7 @@ namespace JoeBrowser
                         gate.ShowDialog();
                         /* The signed-in account is the only reliable signal: the dialog result
                            is Cancel whenever the window is closed by any other path. */
-                        if (gate.SignedIn == null) return;
+                        if (gate.SignedIn == null) return 0;
                         Session.Open(gate.SignedIn);
                     }
                 }
@@ -235,11 +235,11 @@ namespace JoeBrowser
                         using (var ask = new AskDialog("Joe Browser is locked",
                                    "Enter your PIN to unlock Joe Browser.", "PIN", true))
                         {
-                            if (ask.ShowDialog() != DialogResult.OK) return;
+                            if (ask.ShowDialog() != DialogResult.OK) return 0;
                             ok = Accounts.VerifyPin(Session.Current.Email, ask.Value);
                         }
                     }
-                    if (!ok) return;
+                    if (!ok) return 0;
                 }
                 Application.Run(new MainForm());
             }
@@ -254,6 +254,7 @@ namespace JoeBrowser
                 try { mutex.ReleaseMutex(); } catch { }
                 try { mutex.Dispose(); } catch { }
             }
+            return 0;
         }
 
         /// <summary>
