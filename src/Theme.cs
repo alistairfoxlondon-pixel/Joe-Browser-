@@ -891,6 +891,37 @@ namespace JoeBrowser
                 new Rectangle((int)Math.Round(x), (int)Math.Round(y), w, h), color, f);
         }
 
+        /// <summary>
+        /// Splits text into lines that fit the width, the way the drawing code will lay them out.
+        /// A centred label that is too narrow for its sentence needs its own height: drawn on one
+        /// line it was cut off with an ellipsis, and the words it dropped were the end of the
+        /// sentence the user needed to read. Wrapping is separate from MeasureText's WordBreak,
+        /// which reports a height for a single batch of text and cannot be asked for the lines.
+        /// </summary>
+        public static List<string> WrapLines(Graphics g, string text, Font font, float maxWidth)
+        {
+            var lines = new List<string>();
+            if (string.IsNullOrEmpty(text)) return lines;
+            if (maxWidth <= 0) { lines.Add(text); return lines; }
+
+            foreach (var para in text.Replace("\r", "").Split('\n'))
+            {
+                var words = para.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (words.Length == 0) { lines.Add(""); continue; }
+                var line = words[0];
+                for (int i = 1; i < words.Length; i++)
+                {
+                    var candidate = line + " " + words[i];
+                    // The two pixel allowance matches Text's own width padding, so a line that
+                    // measures as exactly the width is not reported as one that does not fit.
+                    if (Measure(g, candidate, font).Width <= maxWidth + S(2)) line = candidate;
+                    else { lines.Add(line); line = words[i]; }
+                }
+                lines.Add(line);
+            }
+            return lines;
+        }
+
         public static SizeF Measure(Graphics g, string text, Font font)
         {
             if (string.IsNullOrEmpty(text)) return SizeF.Empty;

@@ -396,10 +396,16 @@ namespace JoeBrowser
             catch (Exception ex) { Log.Error("Cannot save extension library", ex); }
         }
 
-        /// <summary>Folders that are switched on and really contain a manifest.</summary>
+        /// <summary>
+        /// Folders that are switched on and really contain a manifest. Two entries pointing at
+        /// one folder - an import followed by the same file, or a folder the user copied in - used
+        /// to be passed to the browser twice; Chromium then refuses the whole list and says
+        /// nothing, so every extension in the profile silently disappeared.
+        /// </summary>
         public static List<string> EnabledFolders()
         {
             var result = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var e in Load())
             {
                 if (!e.Enabled || string.IsNullOrEmpty(e.Folder)) continue;
@@ -407,7 +413,7 @@ namespace JoeBrowser
                 try
                 {
                     if (Directory.Exists(e.Folder) && File.Exists(Path.Combine(e.Folder, "manifest.json")))
-                        if (!result.Contains(e.Folder)) result.Add(e.Folder);
+                        if (seen.Add(Path.GetFullPath(e.Folder).TrimEnd('\\'))) result.Add(e.Folder);
                 }
                 catch { }
             }
@@ -453,6 +459,9 @@ namespace JoeBrowser
             if (string.IsNullOrEmpty(id))
                 throw new InvalidOperationException("That is not a Chrome Web Store extension link. Paste the full extension URL or its 32-character id.");
 
+            /* The folder is named after the store id, so asking for the same extension twice
+               finds the same place. That only works if nothing destroys it before the new copy
+               is complete, which is what the staging folder below is for. */
             Directory.CreateDirectory(ImportedRoot);
             string target = Path.Combine(ImportedRoot, id);
             string crx = Path.Combine(ImportedRoot, id + ".crx");
@@ -503,13 +512,34 @@ namespace JoeBrowser
                 }
                 File.WriteAllBytes(zip, Slice(raw, start));
 
+                /* Unpack beside the target and swap at the end. The old build deleted the
+                   installed copy first and then extracted, so a zip that failed halfway - a
+                   truncated download, a package with a bad entry - left the user with nothing
+                   where the working extension used to be. */
+                string staging = target + ".new";
+                if (Directory.Exists(staging)) Directory.Delete(staging, true);
+                Directory.CreateDirectory(staging);
+                using (var archive = ZipFile.OpenRead(zip)) archive.ExtractToDirectory(staging);
+
+                string manifest = Path.Combine(staging, "manifest.json");
+                if (!File.Exists(manifest))
+                {
+                    try { Directory.Delete(staging, true); } catch { }
+                    throw new InvalidOperationException("The downloaded package has no manifest.json, so Chromium cannot load it.");
+                }
                 if (Directory.Exists(target)) Directory.Delete(target, true);
                 Directory.CreateDirectory(target);
-                using (var archive = ZipFile.OpenRead(zip)) archive.ExtractToDirectory(target);
-
-                string manifest = Path.Combine(target, "manifest.json");
-                if (!File.Exists(manifest))
-                    throw new InvalidOperationException("The downloaded package has no manifest.json, so Chromium cannot load it.");
+                /* Move file by file rather than Directory.Move: the download folder and the
+                   extensions folder can sit on different volumes. */
+                foreach (string file in Directory.GetFiles(staging, "*", SearchOption.AllDirectories))
+                {
+                    string rel = file.Substring(staging.Length).TrimStart('\\');
+                    string dest = Path.Combine(target, rel);
+                    string dir = Path.GetDirectoryName(dest);
+                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                    File.Copy(file, dest, true);
+                }
+                try { Directory.Delete(staging, true); } catch { }
 
                 string name = NameFromManifest(manifest) ?? id;
                 string version = VersionFromManifest(manifest) ?? "";
@@ -534,6 +564,43 @@ namespace JoeBrowser
             {
                 TryDelete(crx);
                 TryDelete(zip);
+            }
+        }
+
+        /// <summary>Library folder already holding this extension, or empty.</summary>
+        private static string FolderForId(string id)
+        {
+            if (string.IsNullOrEmpty(id) || !Directory.Exists(ImportedRoot)) return "";
+            foreach (string dir in Directory.GetDirectories(ImportedRoot))
+            {
+                if (string.Equals(Path.GetFileName(dir), id, StringComparison.OrdinalIgnoreCase)) return dir;
+            }
+            return "";
+        }
+
+        /// <summary>
+        /// The store id a package proves about itself. Only a manifest key can prove one, so a
+        /// package without a key answers empty and is imported under a fresh folder.
+        /// </summary>
+        private static string IdFromPackage(byte[] raw)
+        {
+            if (raw == null) return "";
+            int start = FindZipStart(raw);
+            if (start < 0) return "";
+            string probe = Path.Combine(Path.GetTempPath(), "joe-probe-" + Guid.NewGuid().ToString("N") + ".zip");
+            string dir = Path.Combine(Path.GetTempPath(), "joe-probe-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                File.WriteAllBytes(probe, Slice(raw, start));
+                Directory.CreateDirectory(dir);
+                using (var archive = ZipFile.OpenRead(probe)) archive.ExtractToDirectory(dir);
+                return IdFromFolder(dir);
+            }
+            catch { return ""; }
+            finally
+            {
+                TryDelete(probe);
+                try { Directory.Delete(dir, true); } catch { }
             }
         }
 
@@ -590,6 +657,26 @@ namespace JoeBrowser
                 throw new InvalidOperationException("That folder has no manifest.json. Unpack the extension first (it must contain manifest.json at its root).");
 
             string name = NameFromManifest(manifest) ?? new DirectoryInfo(folder).Name;
+            string known = IdFromFolder(folder);
+            string existing = FolderForId(known);
+            if (existing.Length > 0)
+            {
+                /* The library already holds this extension. Copying it again would hand
+                   Chromium the same extension twice under two paths, which it refuses to load
+                   at all. Refresh the copy that is already there instead. */
+                CopyTree(folder, existing);
+                return new ExtensionItem
+                {
+                    Name = name,
+                    Folder = existing,
+                    Enabled = true,
+                    Source = "folder",
+                    StoreUrl = StoreUrlForId(known),
+                    Version = VersionFromManifest(Path.Combine(existing, "manifest.json")),
+                    Icon = IconFromFolder(existing),
+                    StoreId = known
+                };
+            }
             string safe = Guid.NewGuid().ToString("N").Substring(0, 12);
             string target = Path.Combine(ImportedRoot, safe);
             Directory.CreateDirectory(ImportedRoot);
@@ -627,12 +714,45 @@ namespace JoeBrowser
             Directory.CreateDirectory(ImportedRoot);
             string safe = Guid.NewGuid().ToString("N").Substring(0, 12);
             string target = Path.Combine(ImportedRoot, safe);
+            /* A package for an extension the library already holds reloads that folder, so the
+               user can update an import instead of ending up with two copies. */
+            string existing = FolderForId(IdFromPackage(raw));
+            if (existing.Length > 0) target = existing;
             string temp = Path.Combine(ImportedRoot, safe + ".zip");
             try
             {
                 File.WriteAllBytes(temp, Slice(raw, start));
+                /* Same rule as the store path: unpack first, replace second, so a bad package
+                   cannot take away the copy that was working. */
+                string staging = target + ".new";
+                if (Directory.Exists(staging)) Directory.Delete(staging, true);
+                Directory.CreateDirectory(staging);
+                using (var archive = ZipFile.OpenRead(temp)) archive.ExtractToDirectory(staging);
+
+                /* The package has to prove it holds an extension before the installed copy is
+                   touched, or a zip of the wrong thing would take the working one with it. */
+                if (!File.Exists(Path.Combine(staging, "manifest.json")))
+                {
+                    string[] subs = Directory.GetDirectories(staging);
+                    if (subs.Length != 1 || !File.Exists(Path.Combine(subs[0], "manifest.json")))
+                    {
+                        try { Directory.Delete(staging, true); } catch { }
+                        throw new InvalidOperationException(
+                            "The package has no manifest.json, so Chromium cannot load it. Use the store link instead.");
+                    }
+                }
+
+                if (Directory.Exists(target)) Directory.Delete(target, true);
                 Directory.CreateDirectory(target);
-                using (var archive = ZipFile.OpenRead(temp)) archive.ExtractToDirectory(target);
+                foreach (string file in Directory.GetFiles(staging, "*", SearchOption.AllDirectories))
+                {
+                    string rel = file.Substring(staging.Length).TrimStart('\\');
+                    string dest = Path.Combine(target, rel);
+                    string dir = Path.GetDirectoryName(dest);
+                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                    File.Copy(file, dest, true);
+                }
+                try { Directory.Delete(staging, true); } catch { }
 
                 /* A zip usually wraps the extension in one folder, and the browser will not load
                    it unless manifest.json is at the root of what it is given. */
