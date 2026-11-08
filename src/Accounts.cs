@@ -36,6 +36,12 @@ namespace JoeBrowser
 
         public static string File { get { return Path.Combine(AppPaths.Root, "accounts.json"); } }
 
+        /// <summary>
+        /// Every account on this PC, for the Account page. The passwords are hashes and stay in
+        /// the object, but nothing outside this class ever shows or exports them.
+        /// </summary>
+        public static List<Account> LoadAll() { return Load(); }
+
         private static List<Account> Load()
         {
             try

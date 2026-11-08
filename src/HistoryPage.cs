@@ -282,7 +282,7 @@ namespace JoeBrowser
                 if (Entry.Hop)
                 {
                     float ic = Ui.S(13);
-                    Icons.Draw(g, "arrow.right", new RectangleF(Ui.S(12), (Height - ic) / 2f, ic, ic), Theme.TextFaint);
+                    Icons.Draw(g, "arrow-right", new RectangleF(Ui.S(12), (Height - ic) / 2f, ic, ic), Theme.TextFaint);
                 }
 
                 float left = Ui.S(34);

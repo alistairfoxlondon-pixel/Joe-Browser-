@@ -50,6 +50,7 @@ namespace JoeBrowser
         private JBGrid _grid;
         private Panel _settingsPage, _aboutPage, _emptyPanel;
         private HistoryPage _historyPage;
+        private AccountPage _accountPage;
         private Panel _aboutColumn;
         private JBScrollHost _aboutHost;
         private ToolsPage _toolsPage;
@@ -352,6 +353,14 @@ namespace JoeBrowser
 
             /* History opens on the last profile that was opened, which is the one a user is
                most likely to have forgotten a URL in. */
+            _accountPage = new AccountPage { Visible = false };
+            _accountPage.SignOutRequested += delegate { SignOut(); };
+            _accountPage.SwitchRequested += delegate { SwitchAccount(); };
+            _accountPage.PinRequested += delegate { ShowSecurity(); };
+            _accountPage.TwoFactorRequested += delegate { ShowSecurity(); };
+            _accountPage.ManagePlanRequested += delegate { SetPage(7); };
+            _accountPage.DeleteAccountRequested += delegate(object sender, string email) { RemoveAccount(email); };
+
             _historyPage = new HistoryPage { Visible = false };
             _historyPage.Back += delegate { SetPage(0); };
             _historyPage.ClearRequested += delegate { ClearHistory(); };
@@ -411,6 +420,7 @@ namespace JoeBrowser
             Controls.Add(_browsersPage);
             Controls.Add(_upgradePage);
             Controls.Add(_historyPage);
+            Controls.Add(_accountPage);
             Controls.Add(_aboutPage);
             Controls.Add(_toast);
             Controls.Add(_minBtn);
@@ -2494,6 +2504,43 @@ namespace JoeBrowser
             }
         }
 
+        private void SignOut()
+        {
+            if (!ConfirmForm.Ask(this, L10n.T("acct.signout"), L10n.T("acct.signout.confirm"),
+                L10n.T("acct.signout.detail"), L10n.T("acct.signout"), BtnKind.Primary)) return;
+            Session.SignOut();
+            Application.Restart();
+            Environment.Exit(0);
+        }
+
+        private void SwitchAccount()
+        {
+            if (ConfirmForm.Ask(this, L10n.T("acct.switch.title"), L10n.T("acct.switch.body"), null,
+                L10n.T("acct.switch"), BtnKind.Primary))
+                SignOut();
+        }
+
+        private void ShowSecurity()
+        {
+            if (Session.Current == null) { Toast(L10n.T("acct.signedout"), ToastKind.Error); return; }
+            using (var dlg = new SecurityDialog(Session.Current.Email)) dlg.ShowDialog(this);
+            _accountPage.Reload();
+        }
+
+        private void RemoveAccount(string email)
+        {
+            if (string.Equals(email, Session.Current == null ? null : Session.Current.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                Toast(L10n.T("acct.switch.body"), ToastKind.Error);
+                return;
+            }
+            if (!ConfirmForm.Ask(this, L10n.T("acct.remove.title"), L10n.T("acct.remove.body"),
+                L10n.T("acct.remove.detail"), L10n.T("acct.remove"), BtnKind.Danger)) return;
+            Accounts.Delete(email);
+            _accountPage.Reload();
+            Toast(email + " " + L10n.T("acct.switched"), ToastKind.Info);
+        }
+
         /// <summary>The profile whose history is showing, or the most recently used one.</summary>
         private string _historyProfileId;
 
@@ -2574,6 +2621,8 @@ namespace JoeBrowser
             _upgradePage.Visible = page == 7;
             _historyPage.Visible = page == 8;
             if (page == 8) RefreshHistory();
+            _accountPage.Visible = page == 9;
+            if (page == 9) _accountPage.Reload();
             _search.Visible = profiles;
             _sortBtn.Visible = profiles;
             _newBtn.Visible = profiles;
@@ -2586,7 +2635,7 @@ namespace JoeBrowser
                toast, so without the second step the answer to a save, a proxy test or a Google
                sign-in was hidden behind an invisible page on every screen but Profiles, and the
                user saw nothing happen at all. */
-            Control[] pages = { _host, _emptyPanel, _proxyPage, _extensionPage, _browsersPage, _settingsPage, _toolsPage, _aboutPage, _upgradePage, _historyPage };
+            Control[] pages = { _host, _emptyPanel, _proxyPage, _extensionPage, _browsersPage, _settingsPage, _toolsPage, _aboutPage, _upgradePage, _historyPage, _accountPage };
             foreach (var p in pages) if (p.Visible) p.BringToFront();
             Restack();
 
