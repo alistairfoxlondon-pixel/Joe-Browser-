@@ -290,6 +290,13 @@ namespace JoeBrowser
                 float left = Ui.S(34);
                 float w = Width - left - Ui.S(96);
                 string title = string.IsNullOrEmpty(Entry.Title) ? Host(Entry.Url) : Entry.Title;
+                /* The mark sits on every row: the history is per profile, so the name is not the
+                   interesting part of the row and a column of repeats is wasted width. */
+                float mk = Ui.S(14);
+                BrowserMark.Draw(g, new RectangleF(left, (Height - mk) / 2f, mk, mk),
+                    BrowserMark.KindFor(_page.Profile));
+                left += mk + Ui.S(8);
+                w -= mk + Ui.S(8);
                 Ui.Text(g, title, Theme.Body, sel ? Theme.AccentText : Theme.Text, left, Ui.S(9), w);
 
                 /* The host, then the rest of the path, so a long URL still shows where it went. */
