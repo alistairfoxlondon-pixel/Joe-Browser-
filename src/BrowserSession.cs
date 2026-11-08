@@ -34,6 +34,8 @@ namespace JoeBrowser
         private readonly HashSet<string> _workerStamped = new HashSet<string>();
         /// <summary>Installed browser build, e.g. "156.0.4314.58". The UA string cannot carry it.</summary>
         private string _browserFullVersion;
+        private bool _browserIsBrave;
+        private bool _browserIsEdge;
         private string _primarySession;
         private int _navCount;
         private readonly object _scriptState = new object();
@@ -121,6 +123,8 @@ namespace JoeBrowser
                 throw new InvalidOperationException("No browser found.\r\n\r\nInstall Google Chrome, Microsoft Edge, Brave or Firefox, or set a browser path in Settings.");
             s.Browser = browser;
             s._browserFullVersion = browser.Version;
+            s._browserIsBrave = browser.IsBrave;
+            s._browserIsEdge = browser.IsEdge;
 
             var fp = profile.Fp ?? new FingerprintConfig();
             /* Last line of defence before the script is injected. A profile edited by hand, or
@@ -1019,7 +1023,7 @@ namespace JoeBrowser
             return BuildUaMetadata(fp, await ReadRealClientHintsAsync(session).ConfigureAwait(false), _browserFullVersion);
         }
 
-        private static Dictionary<string, object> BuildUaMetadata(FingerprintConfig fp, Dictionary<string, object> real, string installedFull)
+        private Dictionary<string, object> BuildUaMetadata(FingerprintConfig fp, Dictionary<string, object> real, string installedFull)
         {
             int major = 131;
             string full = null;
@@ -1038,7 +1042,14 @@ namespace JoeBrowser
 
             bool edge = (fp.Brand ?? "").Equals("Edge", StringComparison.OrdinalIgnoreCase);
             bool android = FingerprintFactory.IsAndroid(fp.Os);
-            string brandName = edge ? "Microsoft Edge" : "Google Chrome";
+            /* The hint list has to name the browser the page is actually talking to, not the one
+               the user agent string imitates. Brave keeps Chrome's user agent word for word and
+               puts its own name only here, and the reverse holds for Edge: a real Edge that
+               reports Google Chrome is a mismatch, because everything else Edge exposes (its
+               own extension store, its escape hatch pages) still says Edge. */
+            string brandName = edge || _browserIsEdge ? "Microsoft Edge"
+                : _browserIsBrave ? "Brave"
+                : "Google Chrome";
 
             // The GREASE brand ("Not_A Brand", "Not;A=Brand", …) and its version rotate with the
             // Chromium release, so copying the live value beats hard-coding a stale one.

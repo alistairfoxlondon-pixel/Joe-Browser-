@@ -279,6 +279,61 @@ namespace JoeBrowser
   getter(NP, 'webdriver', false);
   getter(NP, 'doNotTrack', F.dnt);
 
+  /* ---- automation leftovers a bot checker reads first ---- */
+  /* Every one of these exists only when a browser is driven by a framework. They are cheap to
+     look for, so a page looks: window.webdriver, the document's own webdriver flag, Playwright's
+     bindings, the __driver_evaluate family, and the Chromium devtools marker. A profile must not
+     carry any of them, and deleting is done through the prototype where the value lives so the
+     deletion itself does not leave a fresh own-property behind. */
+  try { delete Document.prototype.$cdc_asdjflasutopfhvcZLmcfl_; } catch (e) {}
+  try { delete Document.prototype.$wdc_; } catch (e) {}
+  try { delete window.__webdriver_evaluate; } catch (e) {}
+  try { delete window.__selenium_evaluate; } catch (e) {}
+  try { delete window.__webdriver_script_fn; } catch (e) {}
+  try { delete window.__driver_evaluate; } catch (e) {}
+  try { delete window.__lastWatirAlert; } catch (e) {}
+  try { delete window.__playwright; } catch (e) {}
+  try { delete window.__pw_manual; } catch (e) {}
+  try { delete window.__puppeteer_evaluation_script__; } catch (e) {}
+  try { delete window.callPhantom; } catch (e) {}
+  try { delete window._phantom; } catch (e) {}
+  /* Only a Node-style Buffer is a leftover. A page that bundles one onto window owns it, and
+     removing that would break the page rather than hide anything. */
+  try {
+    if (window.Buffer && typeof window.Buffer.from === 'function' && typeof window.Buffer.alloc === 'function')
+      delete window.Buffer;
+  } catch (e) {}
+
+  /* A devtools session that is attached makes Chromium print a warning line at the top of the
+     console, and it also makes this symbol live. Running browsers here are never under devtools,
+     so the symbol is removed when it is there at all. */
+  try {
+    if (window.devtools) { try { delete window.devtools; } catch (e) { window.devtools = undefined; } }
+  } catch (e) {}
+
+  /* Headless builds leave their own fingerprints in the WebGL context list and in the amount of
+     GPU information they report. The renderer and vendor are already overridden by the profile;
+     what is added here is the SwiftShader marker that appears when a headless build falls back to
+     software rendering, and the empty extension list that only a headless context returns. */
+  try {
+    var __jbBad = /swiftshader|llvmpipe|software|mesa offscreen|angle \(google, vulkan/i;
+    var __jbRE = WebGLRenderingContext.prototype.getExtension;
+    WebGLRenderingContext.prototype.getExtension = mark(function getExtension(name) {
+      var out = __jbRE.apply(this, arguments);
+      /* A headless context answers getExtension for the debug renderer info with a software
+         adapter even when getParameter has already been overridden. Reporting nothing is what a
+         machine without the extension does, and it matches the hardware renderer the profile
+         claims. */
+      if (out && name && /WEBGL_debug_renderer_info/i.test(String(name))) {
+        try {
+          var vendor = this.getParameter(out.UNMASKED_VENDOR_WEBGL);
+          if (vendor && __jbBad.test(String(vendor))) return null;
+        } catch (e) {}
+      }
+      return out;
+    }, 'getExtension', 1);
+  } catch (e) {}
+
   function emptyList(tag) {
     /* Built on the real interface prototype, not on Array: a phone still answers
        navigator.plugins instanceof PluginArray === true, and an Array fails that check
