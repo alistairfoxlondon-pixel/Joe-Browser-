@@ -23,7 +23,7 @@ namespace JoeBrowser
         private readonly JBScrollHost _host;
         private readonly List<ExtensionRow> _rows = new List<ExtensionRow>();
         private readonly List<RecommendCard> _cards = new List<RecommendCard>();
-        private JBButton _addUrl, _addFolder, _openFolder;
+        private JBButton _addUrl, _addFolder, _addFile, _openFolder;
         private JBLabel _section;
         private JBPanel _empty;
         private bool _layingOut;
@@ -44,9 +44,14 @@ namespace JoeBrowser
             /* The header band above already names the page; no second title here. */
             _addUrl = MakeButton("Add by store link", "link", BtnKind.Primary, "url");
             _addFolder = MakeButton("Add unpacked folder", "folder", BtnKind.Soft, "folder");
+            /* The three ways an extension arrives: a store link, a downloaded .crx or .zip, and
+               a folder that is already unpacked. Chrome removed the first two in 137, which is
+               why an import path has to be built rather than assumed. */
+            _addFile = MakeButton("Import .crx or .zip", "download", BtnKind.Soft, "file");
             _openFolder = MakeButton("Open folder", "external", BtnKind.Soft, "openfolder");
             _column.Controls.Add(_addUrl);
             _column.Controls.Add(_addFolder);
+            _column.Controls.Add(_addFile);
             _column.Controls.Add(_openFolder);
 
             _empty = new JBPanel();
@@ -161,13 +166,18 @@ namespace JoeBrowser
                 int pad = Ui.S(28);
                 int inner = Math.Max(Ui.S(280), _host.Width - Ui.S(10) - pad * 2);
 
-                int b1 = _addUrl.PreferredWidth(Ui.S(150));
-                int b2 = _addFolder.PreferredWidth(Ui.S(160));
-                int b3 = _openFolder.PreferredWidth(Ui.S(130));
+                /* Four buttons on one line when they fit and wrapped onto two when they do not,
+                   rather than a row that runs off the right edge of a narrow window. */
                 int by = Ui.S(6);
-                _addUrl.SetBounds(pad, by, b1, Ui.S(33));
-                _addFolder.SetBounds(pad + b1 + Ui.S(10), by, b2, Ui.S(33));
-                _openFolder.SetBounds(pad + b1 + b2 + Ui.S(20), by, b3, Ui.S(33));
+                int bx = pad;
+                JBButton[] actions = { _addUrl, _addFolder, _addFile, _openFolder };
+                foreach (var b in actions)
+                {
+                    int bw = b.PreferredWidth(Ui.S(150));
+                    if (bx > pad && bx + bw > pad + inner) { bx = pad; by += Ui.S(33) + Ui.S(8); }
+                    b.SetBounds(bx, by, bw, Ui.S(33));
+                    bx += bw + Ui.S(10);
+                }
 
                 int y = by + Ui.S(33) + Ui.S(22);
                 _empty.Visible = Items.Count == 0;
@@ -279,7 +289,10 @@ namespace JoeBrowser
             float mid = Height / 2f;
             string name = string.IsNullOrWhiteSpace(Item.Name) ? "Extension" : Item.Name;
             Ui.Text(g, name, Theme.H3, Theme.Text, x, mid - Ui.S(15), Math.Max(Ui.S(120), StoreRect.Left - x - Ui.S(16)));
-            string source = Item.Source == "url" ? "Chrome Web Store" : Item.Source == "builtin" ? "Built in" : "Unpacked folder";
+            string source = Item.Source == "url" ? "Chrome Web Store"
+                : Item.Source == "builtin" ? "Built in"
+                : Item.Source == "file" ? "Imported file"
+                : "Unpacked folder";
             string detail = source + (string.IsNullOrWhiteSpace(Item.Version) ? "" : "  ·  v" + Item.Version);
             Ui.Text(g, detail, Theme.Caption, Theme.TextFaint, x, mid + Ui.S(3), Math.Max(Ui.S(120), StoreRect.Left - x - Ui.S(16)));
 

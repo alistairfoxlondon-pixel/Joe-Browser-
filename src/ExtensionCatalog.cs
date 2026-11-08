@@ -371,6 +371,72 @@ namespace JoeBrowser
             };
         }
 
+        /// <summary>
+        /// Imports a downloaded extension as a file: a .crx from the Chrome Web Store, a zip of an
+        /// unpacked extension, or a zip of the store package. The store is not reachable from some
+        /// networks and an extension can also arrive as a file from elsewhere, so this is the path
+        /// for "I already have it" - the same one Chrome itself removed in 137.
+        /// </summary>
+        public static ExtensionItem ImportFromFile(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                throw new InvalidOperationException("Choose an existing .crx or .zip file.");
+
+            byte[] raw = File.ReadAllBytes(path);
+            int start = FindZipStart(raw);
+            if (start < 0)
+                throw new InvalidOperationException("That file is not a packed extension. A .crx or .zip is expected.");
+
+            Directory.CreateDirectory(ImportedRoot);
+            string safe = Guid.NewGuid().ToString("N").Substring(0, 12);
+            string target = Path.Combine(ImportedRoot, safe);
+            string temp = Path.Combine(ImportedRoot, safe + ".zip");
+            try
+            {
+                File.WriteAllBytes(temp, Slice(raw, start));
+                Directory.CreateDirectory(target);
+                using (var archive = ZipFile.OpenRead(temp)) archive.ExtractToDirectory(target);
+
+                /* A zip usually wraps the extension in one folder, and the browser will not load
+                   it unless manifest.json is at the root of what it is given. */
+                string manifest = Path.Combine(target, "manifest.json");
+                if (!File.Exists(manifest))
+                {
+                    string[] dirs = Directory.GetDirectories(target);
+                    if (dirs.Length == 1 && File.Exists(Path.Combine(dirs[0], "manifest.json")))
+                        manifest = Path.Combine(dirs[0], "manifest.json");
+                }
+                if (!File.Exists(manifest))
+                    throw new InvalidOperationException(
+                        "The package has no manifest.json, so Chromium cannot load it. Use the store link instead.");
+
+                string root = Path.GetDirectoryName(manifest);
+                string name = NameFromManifest(manifest) ?? Path.GetFileNameWithoutExtension(path);
+                string version = VersionFromManifest(manifest) ?? "";
+                if (!string.Equals(root, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    /* Move the single inner folder up rather than rewriting every path. */
+                    foreach (string f in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
+                    {
+                        string rel = f.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar);
+                        string dest = Path.Combine(target, rel);
+                        Directory.CreateDirectory(Path.GetDirectoryName(dest));
+                        File.Copy(f, dest, true);
+                    }
+                    try { Directory.Delete(root, true); } catch { }
+                }
+                return new ExtensionItem
+                {
+                    Name = name,
+                    Folder = target,
+                    Enabled = true,
+                    Source = "file",
+                    Version = version
+                };
+            }
+            finally { TryDelete(temp); }
+        }
+
         private static void CopyTree(string from, string to)
         {
             Directory.CreateDirectory(to);

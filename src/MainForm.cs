@@ -1321,6 +1321,7 @@ namespace JoeBrowser
                 {
                     case "url": AddExtensionByUrl(); break;
                     case "folder": AddExtensionFolder(); break;
+                    case "file": AddExtensionFile(); break;
                     case "openfolder": OpenExtensionFolder(); break;
                     case "toggle": ToggleExtension(index); break;
                     case "delete": DeleteExtension(index); break;
@@ -1460,6 +1461,27 @@ namespace JoeBrowser
 
         /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
         private void AddExtensionByUrl() { Guard("AddExtensionByUrl", delegate { return AddExtensionByUrlCore(); }); }
+
+        private void AddExtensionFile()
+        {
+            using (var ofd = new OpenFileDialog
+            {
+                Title = "Import an extension",
+                Filter = "Packed extension (*.crx;*.zip)|*.crx;*.zip|All files (*.*)|*.*",
+                CheckFileExists = true
+            })
+            {
+                if (ofd.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    var item = ExtensionCatalog.ImportFromFile(ofd.FileName);
+                    _extensions.Add(item);
+                    SaveExtensions();
+                    Toast("\"" + item.Name + "\" added to all Chromium profiles", ToastKind.Success);
+                }
+                catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
+            }
+        }
 
         private void AddExtensionFolder()
         {
