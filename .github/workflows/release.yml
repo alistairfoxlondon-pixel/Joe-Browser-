@@ -181,7 +181,38 @@ jobs:
             Requirements: any installed Chromium-based browser or Firefox. The Browsers page can
             install Chrome, Brave or Chromium for you.
 
-            ### What is new in 1.4.0
+            ### What is new in 1.4.1
+
+            **Text can be selected again.** The tool that restores selection was gated behind the
+            right click switch and only unlocked `html` and `body`, which does nothing for the
+            container a site actually blocks, so a page that refused selection kept refusing it.
+            Selection is now unlocked everywhere and unconditionally. In the app itself, the labels
+            that carry a path, a kernel list or an error can be selected and copied as well.
+
+            **The WebGL vendor is checked, not just the renderer.** The fingerprint check read the
+            renderer and never the vendor, which is half of the pair a checker reports. It now
+            reads both, compares the vendor to the GPU the profile claims, and verifies that the
+            vendor and the renderer name the same manufacturer.
+
+            **Chrome build numbers that could have shipped.** The synthesised version was a hash,
+            so it put out builds like 132.0.6325.213, a number no Chrome has ever had. Build
+            branches now come from a real table and rise with the major version as real ones do.
+
+            **Bot check leftovers removed.** The Selenium and Playwright globals, the document
+            marker, a devtools object, a Node style Buffer and a software WebGL vendor reported
+            behind the renderer are all removed when present. `window.chrome` is created when it is
+            missing, with the shape real Chrome has and without inventing an extension id.
+
+            **Client hints name the browser you are actually in.** A Brave or Edge window reported
+            Google Chrome in its brand list, which is the one place Brave names itself and so the
+            one contradiction such a page can see.
+
+            **A logo per extension, and a second browser build offered.** The three built in
+            extensions had the same picture with a different letter; each now has its own artwork
+            at three sizes. On a PC with one browser build, the first new profile now offers to
+            download another so profiles stop sharing a version.
+
+            ### What was new in 1.4.0
 
             **Browsing history, per profile.** Every page a profile visits is recorded with the
             exact address, including the redirect hops a browser passes through on the way there,
