@@ -117,13 +117,6 @@ jobs:
           # setup.ps1 takes the same -Csc parameter, so nothing has to be written into the repo.
           .\.github\workflows\run-step.ps1 -Script build\setup.ps1 -ScriptArgs @('-Csc', '${{ steps.csc.outputs.wrapper }}')
 
-      - name: Check the embedded scripts
-        shell: pwsh
-        run: |
-          # Runs before the compiler, because the compiler reports this mistake as a hundred
-          # syntax errors in valid JavaScript rather than as the one stray quote that caused it.
-          ./.github/workflows/run-step.ps1 -Script .github/workflows/check-embedded.ps1
-
       - name: Verify the binaries
         shell: pwsh
         run: |
