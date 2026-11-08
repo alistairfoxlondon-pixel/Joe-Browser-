@@ -2927,7 +2927,31 @@ namespace JoeBrowser
                 ReloadCards(true);
                 Toast("Profile created", ToastKind.Success);
             }
+            if (KernelDiversity.Available().Count == 0)
+                OfferKernelForNewProfiles();
         }
+
+        /// <summary>
+        /// Asked once, when the workspace has no second build. Every new profile must carry a
+        /// browser version of its own, and on a machine with one installed browser that is
+        /// impossible however the identity is rolled, so the app offers the thing that makes it
+        /// possible instead of quietly producing profiles that share a version - which is what
+        /// the fingerprint check reports as a match with the host browser.
+        /// </summary>
+        private void OfferKernelForNewProfiles()
+        {
+            if (_kernelAsked) return;
+            _kernelAsked = true;
+            bool go = ConfirmForm.Ask(this, "Give every profile its own browser version",
+                "Only one browser build is installed on this PC.",
+                "New profiles then share its version, which is the first thing a fingerprint test " +
+                "compares against your own browser. Joe Browser can download another build and " +
+                "spread new profiles across them.",
+                "Download a second build", BtnKind.Primary);
+            if (go) SetPage(3);
+        }
+
+        private bool _kernelAsked;
 
         private async System.Threading.Tasks.Task EditProfileCore(string id, int tab = 0)
         {
