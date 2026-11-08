@@ -93,8 +93,23 @@ namespace JoeBrowser
         /// <summary>Re-reads the disk. Cheap enough to run on every visit to the page.</summary>
         public void Rescan()
         {
-            var found = BrowserLocator.FindAll();
-            foreach (var e in _engines) e.Found = FindInstalled(found, e.Key);
+            bool ok = true;
+            List<BrowserInfo> found;
+            try { found = BrowserLocator.FindAll(); }
+            catch (Exception ex)
+            {
+                /* Detection runs on whatever Windows will let us read. When it throws, every
+                   engine used to end up "Not installed" - the app then offered to download a
+                   browser the user already had. Say "could not check" instead. */
+                Log.Error("Browser detection failed", ex);
+                found = new List<BrowserInfo>();
+                ok = false;
+            }
+            foreach (var e in _engines)
+            {
+                e.Found = FindInstalled(found, e.Key);
+                e.Checked = ok || e.Found != null;
+            }
             foreach (var r in _rows) { r.Apply(); r.Invalidate(); }
             LayoutCore();
         }
@@ -224,6 +239,13 @@ namespace JoeBrowser
 
         public bool Installed { get { return Found != null && Found.Found; } }
         public string Version { get { return Found == null ? "" : Found.Version ?? ""; } }
+
+        /// <summary>
+        /// False when this engine's detection could not run at all, as opposed to having run and
+        /// found nothing. The row must not say "Not installed" for the former: it is a claim
+        /// about the user's PC that a failed probe cannot support.
+        /// </summary>
+        public bool Checked = true;
     }
 
     /// <summary>A single engine card: mark, name, status line and one contextual action.</summary>
@@ -265,6 +287,13 @@ namespace JoeBrowser
                 _action.Kind = BtnKind.Soft;
                 _action.Icon = "folder";
                 _action.Text = "Show file";
+            }
+            else if (!Info.Checked)
+            {
+                /* Unknown, not missing: the honest action is to look again. */
+                _action.Kind = BtnKind.Soft;
+                _action.Icon = "refresh";
+                _action.Text = "Re-scan";
             }
             else if (Info.CanDownload)
             {
@@ -320,12 +349,20 @@ namespace JoeBrowser
             Color dotColor = Busy ? Theme.Accent : Info.Installed ? Theme.Success : Theme.TextFaint;
             using (var b = new SolidBrush(dotColor)) g.FillEllipse(b, dr);
 
+            /* "Not installed" is a claim about the user's PC. When the detector itself could not
+               run, saying so is the difference between "install a browser" and "this app is
+               broken" - and it stops a Download from being offered for something already there. */
             string status = Busy
                 ? (string.IsNullOrEmpty(BusyText) ? "Working\u2026" : BusyText)
                 : Info.Installed
                     ? (string.IsNullOrEmpty(Info.Version) ? "Installed" : "Installed  \u00b7  " + ShortVersion(Info.Version))
-                    : "Not installed";
-            Ui.Text(g, status, Theme.Caption, Busy ? Theme.Accent : Theme.TextDim, dr.Right + Ui.S(8), mid - Ui.S(6), tw - dot - Ui.S(8));
+                    : !Info.Checked ? "Could not check \u2014 re-scan" : "Not installed";
+            /* Theme has no warning colour of its own, so the amber the toasts use is mixed in
+               place; a plain faint grey would read as another "not installed". */
+            Color statusInk = Busy ? Theme.Accent
+                : Info.Installed || Info.Checked ? Theme.TextDim
+                : Ui.Blend(Theme.TextDim, Color.FromArgb(0xF2, 0xA8, 0x1B), 0.75f);
+            Ui.Text(g, status, Theme.Caption, statusInk, dr.Right + Ui.S(8), mid - Ui.S(6), tw - dot - Ui.S(8));
 
             Ui.Text(g, Info.Desc, Theme.Caption, Theme.TextFaint, x, mid + Ui.S(12), tw, "left", 1);
         }
