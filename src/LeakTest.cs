@@ -97,6 +97,11 @@ namespace JoeBrowser
     else {
       var e = g.getExtension('WEBGL_debug_renderer_info');
       o.gl = e ? (g.getParameter(e.UNMASKED_VENDOR_WEBGL) + ' | ' + g.getParameter(e.UNMASKED_RENDERER_WEBGL)) : 'no-ext';
+      /* Vendor and renderer are reported separately as well: the check has to compare the
+         renderer exactly, and matching a substring across a joined string turns one wrong card
+         into a pass whenever two of them share a suffix. */
+      o.glVendor = e ? String(g.getParameter(e.UNMASKED_VENDOR_WEBGL)) : '';
+      o.glRenderer = e ? String(g.getParameter(e.UNMASKED_RENDERER_WEBGL)) : '';
     }
   } catch (e) { o.gl = 'error'; }
   try {
@@ -209,8 +214,9 @@ new Promise(function (resolve) {
 
             string platform = Str(d, "platform");
             bool platOk = string.IsNullOrEmpty(fp.Platform) || platform == fp.Platform;
-            result.Items.Add(new LeakItem("Platform", platOk,
-                platOk ? platform : "Expected " + fp.Platform + ", got " + platform));
+            result.Items.Add(new LeakItem("Platform", platOk && platform.Length > 0,
+                platform.Length == 0 ? "The page did not report navigator.platform"
+                    : (platOk ? platform : "Expected " + fp.Platform + ", got " + platform)));
 
             int cores = Int(d, "cores");
             result.Items.Add(new LeakItem("CPU cores", cores == fp.Cores,
@@ -243,10 +249,16 @@ new Promise(function (resolve) {
 
             // --- graphics -----------------------------------------------------------
             string gl = Str(d, "gl");
-            bool glOk = gl.IndexOf("|", StringComparison.Ordinal) > 0 &&
-                        (string.IsNullOrEmpty(fp.WebGlRenderer) || gl.IndexOf(fp.WebGlRenderer, StringComparison.Ordinal) >= 0);
+            string gotRenderer = Str(d, "glRenderer");
+            bool glOk = gotRenderer.Length > 0 &&
+                        (string.IsNullOrEmpty(fp.WebGlRenderer) ||
+                         string.Equals(gotRenderer, fp.WebGlRenderer, StringComparison.Ordinal));
+            /* The row shows what the page answered, not what was expected: a pass that echoes the
+               expectation is indistinguishable from a check that never ran. */
             result.Items.Add(new LeakItem("WebGL renderer", glOk,
-                glOk ? gl : (gl == "none" ? "No WebGL context at all" : "Expected " + fp.WebGlRenderer)));
+                gotRenderer.Length > 0
+                    ? gotRenderer + (glOk ? "" : "  (expected " + fp.WebGlRenderer + ")")
+                    : (gl == "none" ? "No WebGL context at all" : "Could not read the renderer (" + gl + ")")));
 
             long canvas = Long(d, "canvas");
             result.Items.Add(new LeakItem("Canvas readable", canvas > 0,
