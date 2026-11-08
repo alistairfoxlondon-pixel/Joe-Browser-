@@ -139,14 +139,17 @@ jobs:
                  -RedirectStandardOutput 'selftest.out' -RedirectStandardError 'selftest.err'
             if (-not $p.WaitForExit(60000)) {
               $p.Kill()
-              throw "::error::" + "$f --selftest hung for 60 seconds"
+              Write-Host "::error title=Self-test hung::$f did not exit within 60 seconds"
+              throw "$f --selftest hung"
             }
             $said = @(Get-Content 'selftest.out', 'selftest.err' -ErrorAction SilentlyContinue) -join ' / '
             Write-Host "$f --selftest exit=$($p.ExitCode) said=$said"
             if ($p.ExitCode -ne 0) {
-              # The reason has to reach the annotation: the raw step log is not readable from
-              # the environment that maintains this repo, and "exit code 1" explains nothing.
-              throw "::error title=Self-test failed::$f exited with $($p.ExitCode). $said"
+              # ::error has to be written to the log to become an annotation; a thrown message
+              # does not. The raw step log is not readable from the environment that maintains
+              # this repository, so this is the only place the reason can surface.
+              Write-Host "::error title=Self-test failed::$f exited with $($p.ExitCode). $said"
+              throw "$f --selftest exited with $($p.ExitCode)"
             }
           }
           Write-Host 'Smoke test passed: both binaries start and can read their configuration.'
