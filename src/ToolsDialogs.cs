@@ -17,7 +17,10 @@ namespace JoeBrowser
         {
             public Control Label;
             public Control Field;
+            /// <summary>The height asked for. Treated as a minimum for a wrapping note, which
+            /// grows to hold what it is given rather than printing over the row below.</summary>
             public int Height;
+            public bool Wrap;
         }
 
         private readonly JBLabel _title;
@@ -101,7 +104,7 @@ namespace JoeBrowser
             var l = new JBLabel(LabelRole.Faint, text);
             l.Wrap = true;
             l.TextAlign = ContentAlignment.TopLeft;
-            AddRow(null, l, Ui.S(34));
+            AddRow(null, l, Ui.S(34), true);
             return l;
         }
 
@@ -198,9 +201,14 @@ namespace JoeBrowser
 
         public void AddRow(Control label, Control field, int height)
         {
+            AddRow(label, field, height, false);
+        }
+
+        public void AddRow(Control label, Control field, int height, bool wrap)
+        {
             if (label != null) _body.Controls.Add(label);
             if (field != null) _body.Controls.Add(field);
-            _rows.Add(new Row { Label = label, Field = field, Height = height });
+            _rows.Add(new Row { Label = label, Field = field, Height = height, Wrap = wrap });
         }
 
         /// <summary>Call after adding every row if you added controls directly to Body.</summary>
@@ -261,11 +269,15 @@ namespace JoeBrowser
             int y = Ui.S(6);
             foreach (var r in _rows)
             {
-                if (r.Label != null && r.Field == null)
-                    r.Label.SetBounds(0, y, innerW, r.Height);
-                else if (r.Field != null)
-                    r.Field.SetBounds(0, y, innerW, r.Height);
-                y += r.Height + Ui.S(9);
+                int h = r.Height;
+                Control c = r.Label ?? r.Field;
+                /* A note is written as one line but wraps when the dialog is narrow, and the row
+                   used to keep the height of one line: the second line was drawn over whatever
+                   followed it, which is how a paragraph of explanation ended up on top of the
+                   field the user was meant to fill in. */
+                if (r.Wrap && c != null) h = Math.Max(h, WrappedHeight(c, innerW));
+                if (c != null) c.SetBounds(0, y, innerW, h);
+                y += h + Ui.S(9);
             }
             _content.SetBounds(0, 0, Math.Max(Ui.S(100), _body.Width), y + Ui.S(6));
             _body.SyncExtent();
@@ -277,6 +289,24 @@ namespace JoeBrowser
                 Secondary.SetBounds(Primary.Left - Ui.S(8) - sw, h - Ui.S(16) - Ui.S(33), sw, Ui.S(33));
             ResumeLayout(false);
             Invalidate();
+        }
+
+        /// <summary>Height a wrapping label needs at this width, measured with its own font.</summary>
+        private static int WrappedHeight(Control c, int width)
+        {
+            var l = c as JBLabel;
+            if (l == null) return c.Height;
+            try
+            {
+                Font f = l.Font ?? Theme.Caption;
+                int line = Math.Max(Ui.S(16), (int)Math.Ceiling(f.GetHeight()));
+                if (string.IsNullOrEmpty(l.Text)) return line;
+                Size sz = TextRenderer.MeasureText(l.Text, f, new Size(Math.Max(Ui.S(60), width), int.MaxValue),
+                    TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
+                int lines = Math.Max(1, (int)Math.Round(sz.Height / (double)line));
+                return line * Math.Min(6, lines) + Ui.S(4);
+            }
+            catch { return c.Height; }
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
