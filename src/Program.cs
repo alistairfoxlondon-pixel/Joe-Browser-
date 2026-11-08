@@ -321,6 +321,13 @@ namespace JoeBrowser
                    update never leaves stale manifests or scripts behind. Writes only files
                    whose content actually changed. */
                 ExtensionManager.EnsureAll();
+                /* Three of the brief's named defaults already exist as first party extensions -
+                   paste as human, enable right click, proxy watch - and are written above. What
+                   was missing is that the extensions page never learned about them on a machine
+                   that had never opened it: EnsureDefaults only ran when the page was built, so
+                   a profile launched straight from a fresh install had the folders on disk and
+                   the catalog listing them as absent. Listing is cheap and idempotent. */
+                try { ExtensionCatalog.EnsureDefaults(); } catch (Exception ex) { Log.Error("Default extensions", ex); }
                 /* The account gate only appears until the first account exists. After that the
                    app remembers the sign-in for this Windows user (DPAPI-protected session
                    marker), so daily use stays a double-click. */
