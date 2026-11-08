@@ -1346,6 +1346,9 @@ namespace JoeBrowser
                still on screen and build a second one on the same tick, so the list flickered and
                could be left ownerless. The open popup owns that gesture: the click closes it. */
             if (_open) { CloseMenu(); return; }
+            /* A menu closed by the last gesture is disposed on a posted message, so _menu may
+               still be live here. Disposing it again is safe (the flag is already set) and keeps
+               the field from naming a window that no longer exists. */
             if (_menu != null) { try { _menu.Dispose(); } catch { } _menu = null; }
             _menu = JBMenu.Create();
             _menu.Font = Font;
