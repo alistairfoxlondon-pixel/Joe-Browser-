@@ -120,7 +120,12 @@ namespace JoeBrowser
                 _column.Controls.Add(row);
             }
 
-            _title.Text = Profile == null ? L10n.T("history.title") : Profile.Name;
+            /* Which profile is showing has to be visible on the page, not only in the sidebar:
+               the same page serves every profile and the last opened one is not always the one
+               the user meant to look at. */
+            _title.Text = Profile == null
+                ? L10n.T("history.title")
+                : Profile.Name + "  \u00b7  " + L10n.T("history.title");
             int hops = 0;
             foreach (var e in all) if (e.Hop) hops++;
             _subtitle.Text = all.Count == 0

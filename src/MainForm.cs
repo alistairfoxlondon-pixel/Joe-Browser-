@@ -3508,6 +3508,13 @@ namespace JoeBrowser
                     _cards[id].Invalidate();
                 }
                 Toast("\u201c" + p.Name + "\u201d is ready", ToastKind.Success);
+                /* A phone profile is the device the page sees, not a phone. Everything the page
+                   can read is emulated and consistent; what cannot be emulated on a Windows PC is
+                   the hardware underneath, so a user testing one should be told once rather than
+                   left to assume a phone is being faked completely. */
+                if (p.Fp != null && FingerprintFactory.IsMobileOs(p.Fp.Os))
+                    Toast("The page sees " + p.Fp.Os + ". The window runs on this PC, so hardware " +
+                          "level checks still belong to it.", ToastKind.Info);
                 if (session.IsFirefox && p.Fp != null && !FingerprintFactory.IsWindowsTarget(p.Fp.Os))
                     Toast("Firefox cannot spoof " + p.Fp.Os + ". WebGL, timezone and screen stay real.", ToastKind.Error);
                 Invalidate();
