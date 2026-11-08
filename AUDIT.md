@@ -510,3 +510,120 @@ does, because the worst UX defect is a screen that confidently states something 
 * Brace/paren/bracket balance clean; no duplicate member declarations.
 * Needs a Windows run: open a country dropdown and read the flags, open a profile card menu,
   switch the interface language to German and back.
+
+# Round 5 — Fingerprint uniqueness, kernel diversity, account linkage
+
+The question this round answers is the one the previous four passes never asked: **is a
+fingerprint actually different from the others, and can the app prove it?**
+
+Before this round the answer was no, and the reason was structural rather than a bug:
+
+* `FingerprintFactory.Regenerate` is pure randomness over small pools — about a dozen Windows
+  GPUs and a fixed screen list. Thirty profiles on that pool collide by arithmetic, not by
+  accident; a simulation of the real tables showed **33 pairs sharing a strong surface at
+  n=30** with no de-duplication at all.
+* `Profile.Copy(true)` copied `KernelEngine`/`KernelVersion` verbatim, so a duplicate shared the
+  source's browser build as well as its fingerprint settings — one machine opened twice.
+* New profiles were created with `KernelVersion = ""` (the installed browser), so *no* kernel
+  diversity existed in any workspace, whatever was installed.
+* Four different creation paths (New, batch, duplicate-with-proxy, import) each rolled their own
+  random fingerprint and none of them compared the result with anything.
+
+## What a fingerprint is now
+
+| Layer | File | What it does |
+|---|---|---|
+| Surfaces | `FingerprintIdentity.cs` | splits a profile into the 12 parts an anti-detect service reads, each hashed to a 10-character signature |
+| Comparison | `FingerprintIdentity.Compare` | weighted overlap plus a relation: Identical / Linked / Related / Remote / Distinct |
+| Uniqueness | `FingerprintIdentity.MakeUnique` | rolls up to 12 times, escalates to a wider GPU pool, then deterministically moves the renderer to one the workspace has not used |
+| Kernels | `KernelDiversity.cs` | new profiles take the least-used installed build; duplicates take a different build than their source |
+| Detection | `FingerprintAudit.cs` | clusters profiles that read as one browser, finds profiles behind one proxy address, reports kernel spread |
+| Surface | `FingerprintAuditForm` | Tools › Account audit — what collides, why, and one button that fixes the fixable half |
+
+## Calibration — the part that decides whether this is useful or noise
+
+The first cut described a pair as "Linked" whenever they shared a surface weighted 4 or more.
+That is wrong in a way that only shows up at scale: **millions of machines have an RTX 3060**, and
+a workspace of fifty profiles on thirty-three renderers cannot avoid repeating one. A warning that
+fires on the normal case is a warning people learn to ignore.
+
+The rules now:
+
+* A shared **user agent, timezone or language** is reported and weighted but can never on its own
+  make a pair Linked — those three are *derived* from the OS, the browser build and the proxy's
+  country, so sharing them is expected, not suspicious.
+* `Linked` requires **65% weighted overlap**; `Related` requires 40%, or three strong surfaces.
+  One shared surface is never an accusation.
+* `Identical` is reserved for every surface matching.
+* A cluster that is only `Remote` is not reported at all.
+
+Simulated against the real pools with these rules: **0 false flags at 5, 10, 30 and 50 profiles,
+maximum pairwise overlap 38%**, and 48 honest flags at 100 profiles — where 33 renderers genuinely
+cannot be spread further. That is the point at which the app tells the truth instead of claiming
+uniqueness it cannot deliver.
+
+## Kernel diversity
+
+The user's requirement was a *different kernel version for every new profile*. That is the harder
+half, because a fingerprint can be re-rolled at will and a kernel only exists if a build was
+downloaded. The rule is graded and honest:
+
+1. Profiles are only pinned to a build when **more than one build is installed**. Pinning the only
+   installed build is not diversity, and it breaks the day that build is removed.
+2. Among installed builds, the new profile takes the **least-used** one; a duplicate takes a build
+   *different from its source*.
+3. With one build — the default install — the profile stays on the "installed browser" sentinel and
+   both the toast and the audit say so, pointing at the Browsers page.
+4. Settings now shows installed vs in-use builds, and the audit reports when every profile is on one
+   binary.
+
+## Account linkage
+
+Two different questions, two different answers, because only one of them is fixable:
+
+* **One browser?** Fingerprint clusters (above). Fixable: re-roll.
+* **One account?** The network. Two profiles behind one proxy endpoint share an exit IP, and that
+  groups accounts regardless of canvas noise. Reported as its own finding, with no "fix" button —
+  a button that cannot change the outcome is worse than an explanation.
+
+Profiles on this PC's own connection are one line in the summary rather than a finding each, so a
+fresh install does not open with a wall of red before the user has had a chance to add a proxy.
+
+## Every creation path now goes through one door
+
+`MainForm.SeedNewProfile` is the only way a profile is born, and batch/duplicate/import each
+de-duplicate against the profiles they are still building — not just the ones on disk, which is how
+batch profile 3 used to collide with batch profile 2.
+
+## Visibility
+
+A guarantee nobody can check is not a guarantee:
+
+* Every profile card carries its short signature; two cards with the same ten characters are a
+  collision the user can see across the grid, with a tooltip naming the audit.
+* The list header says how many profiles share a fingerprint.
+* The editor's "New fingerprint" and "Random identity" report a clash instead of clearing the error
+  line and pretending.
+* The editor explains what pinning a build means — that a pinned profile stops following the
+  installed browser's updates — which was previously only discoverable months later.
+
+## Performance
+
+* `Compare` gained surface-map overloads: the audit and the uniqueness loop build each map once
+  instead of O(n²) times.
+* `KernelDiversity.Available()` is cached and invalidated by install/delete; a 100-profile batch
+  used to walk the kernels folder 100 times.
+* Audit rows measure their own height from the text instead of guessing a fixed one.
+
+## Verification of this pass
+
+* Pools parsed out of the source and the retry loop re-implemented in Python: 0 unresolved
+  collisions at 5/10/30/50 profiles, 33 renderers and 15 screens.
+* Similarity rules simulated at 5/10/30/50/100 profiles: no false flags below 100.
+* Every new API call checked against the declaring class (members, overloads, argument types).
+* Brace/paren/bracket balance clean across all 62 source files.
+* Needs a Windows run: create 20 profiles and confirm every card signature is distinct; duplicate a
+  profile and confirm both the signature and the kernel in Settings change; delete a kernel and
+  confirm the pinned profile still opens on the installed browser; run Tools › Account audit on a
+  workspace with two hand-edited JSON copies and confirm they are clustered as Linked and that Fix
+  separates them.
