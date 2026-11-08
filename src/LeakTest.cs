@@ -204,7 +204,7 @@ new Promise(function (resolve) {
 
             bool chromeObj = Bool(d, "chrome");
             result.Items.Add(new LeakItem("Browser object", chromeObj,
-                chromeObj ? "window.chrome is present" : "window.chrome is missing - Chromium always exposes it"));
+                chromeObj ? "window.chrome is present" : "window.chrome is missing, and Chromium always exposes it"));
 
             // --- identity -----------------------------------------------------------
             string ua = Str(d, "ua");

@@ -208,7 +208,7 @@ namespace JoeBrowser
             if (Report.OpenTelegram(_what.Value))
                 Close();
             else
-                _status.Text = "Telegram could not be opened - the details were copied instead";
+                _status.Text = "Telegram could not be opened, so the details were copied instead";
         }
 
         protected override void OnLoad(EventArgs e)

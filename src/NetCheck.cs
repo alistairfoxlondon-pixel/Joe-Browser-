@@ -114,14 +114,14 @@ namespace JoeBrowser
                 }
 
                 if (seen.Count > 1)
-                    report.Warnings.Add("The lookup services disagree about the exit IP - the connection may be rotating.");
+                    report.Warnings.Add("The lookup services disagree about the exit IP. The connection may be rotating.");
 
                 report.Ok = report.Ip.Length > 0;
                 report.LatencyMs = (int)sw.ElapsedMilliseconds;
 
                 if (Math.Abs(report.ClockSkewSeconds) > 120)
                     report.Warnings.Add("This PC's clock is " + Math.Abs(report.ClockSkewSeconds) +
-                                        " s off the internet time - pages that compare it with the date header will notice.");
+                                        " s off the internet time, and pages that compare it with the date header will notice.");
 
                 var dns = Resolver(proxy, viaProxy);
                 if (dns != null)

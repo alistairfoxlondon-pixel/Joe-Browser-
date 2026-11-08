@@ -209,7 +209,7 @@ namespace JoeBrowser
                 lt.InvokeMember("WorkingDirectory", System.Reflection.BindingFlags.SetProperty, null, link, new object[] { workDir });
                 lt.InvokeMember("IconLocation", System.Reflection.BindingFlags.SetProperty, null, link, new object[] { target + ",0" });
                 lt.InvokeMember("Description", System.Reflection.BindingFlags.SetProperty, null, link,
-                    new object[] { "Joe Browser - anti-detect browser workspace" });
+                    new object[] { "Joe Browser anti detect browser workspace" });
                 lt.InvokeMember("Save", System.Reflection.BindingFlags.InvokeMethod, null, link, null);
             }
             catch { }

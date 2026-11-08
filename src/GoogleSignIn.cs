@@ -191,7 +191,7 @@ namespace JoeBrowser
                     "No Google client id is configured yet. Joe Browser can walk you through creating one in two minutes.");
             if (!LooksValid(clientId))
                 return GoogleResult.Fail("bad_client_id",
-                    "That is not a Google OAuth client id. It ends with .apps.googleusercontent.com - copy it again from the console.");
+                    "That is not a Google OAuth client id. It ends with .apps.googleusercontent.com, so copy it again from the console.");
 
             TcpListener listener = null;
             try

@@ -216,6 +216,11 @@ namespace JoeBrowser
             string s = url.Trim();
             // A raw id is also accepted.
             if (s.Length == 32 && IsId(s)) return s.ToLowerInvariant();
+            /* Only the query is cut here, never the fragment or the whole URL: a Web Store link
+               pasted from the address bar ends in a long slug plus "/<id>", and an older build
+               split the string on every colon as well, which chopped "https:" into "https" and
+               left nothing to match. An id is 32 characters from a-p, so searching the path
+               segments from the end finds it whatever slug the store put in front. */
             int q = s.IndexOf('?');
             if (q > 0) s = s.Substring(0, q);
             string[] bits = s.Split(new[] { '/', '=', '&', '#', ':' }, StringSplitOptions.RemoveEmptyEntries);

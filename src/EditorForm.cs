@@ -658,7 +658,7 @@ namespace JoeBrowser
             bool show = firefox && foreign;
             _fpWarn.Visible = show;
             if (!show) return;
-            _fpWarn.Text = "Firefox cannot mask screen, WebGL or timezone - use Chrome, Edge or Brave for " + _fp.Os + ".";
+            _fpWarn.Text = "Firefox cannot mask screen, WebGL or timezone. Use Chrome, Edge or Brave for " + _fp.Os + ".";
             _fpWarn.SetBounds(x, y, w, Ui.S(26));
         }
 
@@ -864,7 +864,7 @@ namespace JoeBrowser
             "Relaxed - 90 to 240 ms per key",
             "Natural - 38 to 135 ms per key",
             "Fast - 18 to 60 ms per key",
-            "Instant - no delay"
+            "Instant, no delay"
         };
         private static readonly int[] IntervalValues = { 30, 60, 120, 300, 600 };
         private static readonly string[] IntervalLabels =
@@ -903,7 +903,7 @@ namespace JoeBrowser
             _customExt = Txt(_tabTools, _tools.CustomExtensions, "C:\\extensions\\my-extension", null, true, 76);
 
             _lblExtHint = new JBLabel(LabelRole.Faint,
-                "Tools are injected directly \u2014 no extension install needed. Extra folders are optional unpacked extensions.");
+                "Tools are injected directly, so no extension install is needed. Extra folders are optional unpacked extensions.");
             _lblExtHint.Wrap = true;
             _lblExtHint.TextAlign = ContentAlignment.TopLeft;
             _tabTools.Controls.Add(_lblExtHint);

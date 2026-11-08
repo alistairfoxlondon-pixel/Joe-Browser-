@@ -75,7 +75,8 @@ namespace JoeBrowser
         private JBTextBox _setGoogleSecret;
         private JBButton _setSecurity, _setSignOut, _setGoogleGuide, _setGoogleTest;
         private JBLangPicker _setLang;
-        private JBToggle _setExtensions, _setCustomExt, _setTrash;
+        private JBToggle _setExtensions, _setCustomExt, _setTrash, _setHistory;
+        private JBButton _setClearHistory;
         private Panel _settingsColumn;
         private JBScrollHost _settingsHost;
         private readonly List<SetCard> _setCards = new List<SetCard>();
@@ -165,7 +166,7 @@ namespace JoeBrowser
                 {
                     Log.Info("Low disk space: " + DiskSpace.Human(free) + " free.");
                     Toast("Only " + DiskSpace.Human(free) + " free on this drive. Browsers need room "
-                          + "for their cache - free some space to avoid failed launches.",
+                          + "for their cache. Free some space to avoid failed launches.",
                           ToastKind.Warn);
                 }
             }
@@ -757,7 +758,7 @@ namespace JoeBrowser
                 if (allowed < list.Count)
                 {
                     list = list.Take(allowed).ToList();
-                    Toast("Imported the first " + allowed + " \u2014 the plan is full", ToastKind.Info);
+                    Toast("Imported the first " + allowed + ". The plan is full", ToastKind.Info);
                 }
 
                 /* An imported file carries whatever fingerprints the exporting machine had, which
@@ -1553,9 +1554,11 @@ namespace JoeBrowser
             _setExtensions = new JBToggle { Checked = _settings.EnableExtensions };
             _setCustomExt = new JBToggle { Checked = _settings.EnableCustomExtensions };
             _setTrash = new JBToggle { Checked = _settings.UseTrash };
+            _setHistory = new JBToggle { Checked = _settings.HistoryEnabled };
             _setExtensions.CheckedChanged += delegate { _settings.EnableExtensions = _setExtensions.Checked; };
             _setCustomExt.CheckedChanged += delegate { _settings.EnableCustomExtensions = _setCustomExt.Checked; };
             _setTrash.CheckedChanged += delegate { _settings.UseTrash = _setTrash.Checked; };
+            _setHistory.CheckedChanged += delegate { _settings.HistoryEnabled = _setHistory.Checked; };
 
             _setBrowse.Click += delegate { BrowseBrowser(); };
             _setDetect.Click += delegate { _setBrowserPath.Value = ""; UpdateBrowserInfo(); };
@@ -1592,6 +1595,11 @@ namespace JoeBrowser
             Row(storage, "set.row.data", new[] { Ui.S(96) }, _setOpenData, _setStoragePath);
             Row(storage, "set.row.cache", new[] { Ui.S(120) }, _setClearCache);
             Row(storage, "set.row.build", new[] { Ui.S(110) }, _setDownload);
+            /* History off means nothing new is recorded; what is already there stays until the
+               user clears it, because turning recording off should not quietly delete evidence. */
+            _setClearHistory = new JBButton { Kind = BtnKind.Soft, Icon = "trash", Text = L10n.T("set.clearhistory"), Radius = 4, Height = Ui.S(33) };
+            _setClearHistory.Click += delegate { ClearAllHistory(); };
+            Row(storage, "set.row.history", new[] { Ui.S(46), Ui.S(120) }, _setHistory, _setClearHistory);
 
             /* The one line to the developer when anything looks wrong. It opens Telegram with
                the user's own words; the technical details ride on the clipboard. */
@@ -1772,7 +1780,7 @@ namespace JoeBrowser
 
             if (result.Ok)
             {
-                Toast("Google sign-in works \u2014 " + result.Identity.Email, ToastKind.Success);
+                Toast("Google sign-in works, " + result.Identity.Email, ToastKind.Success);
                 ConfirmForm.Tell(this, "Test Google sign-in",
                     "Google sign-in works. Signed in as " + result.Identity.Email + ".",
                     string.IsNullOrEmpty(result.Identity.Name) ? null : "Name: " + result.Identity.Name);
@@ -1892,7 +1900,7 @@ namespace JoeBrowser
                 try
                 {
                     Clipboard.SetText(Referral.Invite());
-                    Toast("Invite copied \u2014 your code is " + Referral.MyCode, ToastKind.Success);
+                    Toast("Invite copied. Your code is " + Referral.MyCode, ToastKind.Success);
                 }
                 catch (Exception ex) { Log.Error("Clipboard", ex); Toast("Could not copy", ToastKind.Error); }
                 return;
@@ -2034,7 +2042,7 @@ namespace JoeBrowser
                 _upgradePage.SetStatus("Payment confirmed. Pro is active until " +
                     (Plan.Until.HasValue ? Plan.Until.Value.ToLocalTime().ToString("d MMMM") : "next month") + ".",
                     Theme.Success);
-                Toast("Payment confirmed \u2014 Pro unlocked", ToastKind.Success);
+                Toast("Payment confirmed. Pro unlocked", ToastKind.Success);
                 Invalidate();
                 OfferReferralReceipt(inv, result.TxId);
                 return;
@@ -2113,6 +2121,7 @@ namespace JoeBrowser
             _settings.EnableExtensions = _setExtensions.Checked;
             _settings.EnableCustomExtensions = _setCustomExt.Checked;
             _settings.UseTrash = _setTrash.Checked;
+            _settings.HistoryEnabled = _setHistory.Checked;
             if (!string.IsNullOrEmpty(_setLang.Value)) _settings.UiLanguage = _setLang.Value;
             try
             {
@@ -2561,6 +2570,16 @@ namespace JoeBrowser
             _historyPage.Show(HistoryTarget());
         }
 
+        /// <summary>Wipes history for every profile of the signed-in account.</summary>
+        private void ClearAllHistory()
+        {
+            if (!ConfirmForm.Ask(this, L10n.T("history.confirmall.title"), L10n.T("history.confirmall.body"),
+                L10n.T("history.confirmall.detail"), L10n.T("set.clearhistory"), BtnKind.Danger)) return;
+            int n = HistoryStore.ClearAll();
+            if (_historyPage != null) _historyPage.Rebuild();
+            Toast(n + " " + L10n.T("history.cleared"), ToastKind.Success);
+        }
+
         private void ClearHistory()
         {
             var p = HistoryTarget();
@@ -2674,6 +2693,7 @@ namespace JoeBrowser
                 _setExtensions.Checked = _settings.EnableExtensions;
                 _setCustomExt.Checked = _settings.EnableCustomExtensions;
                 _setTrash.Checked = _settings.UseTrash;
+                _setHistory.Checked = _settings.HistoryEnabled;
                 _setLang.Value = string.IsNullOrEmpty(_settings.UiLanguage) ? "en" : _settings.UiLanguage;
                 UpdateBrowserInfo();
             }
@@ -3404,7 +3424,7 @@ namespace JoeBrowser
                         BeginInvoke(new Action(delegate
                         {
                             Toast("Proxy " + endpoint + " stopped responding. \u201c" + p.Name +
-                                  "\u201d is now on a direct connection \u2014 the real IP is visible.", ToastKind.Error);
+                                  "\u201d is now on a direct connection, so the real IP is visible.", ToastKind.Error);
                         }));
                     }
                     catch { }
@@ -3417,7 +3437,7 @@ namespace JoeBrowser
                 }
                 Toast("\u201c" + p.Name + "\u201d is ready", ToastKind.Success);
                 if (session.IsFirefox && p.Fp != null && !FingerprintFactory.IsWindowsTarget(p.Fp.Os))
-                    Toast("Firefox cannot spoof " + p.Fp.Os + " \u2014 WebGL, timezone and screen stay real.", ToastKind.Error);
+                    Toast("Firefox cannot spoof " + p.Fp.Os + ". WebGL, timezone and screen stay real.", ToastKind.Error);
                 Invalidate();
             }
             catch (Exception ex)
@@ -3444,7 +3464,7 @@ namespace JoeBrowser
                        simply press Open again. */
                     long freed = DiskSpace.AutoCleanCaches();
                     Toast(freed > 0
-                        ? "The disk was full \u2014 " + DiskSpace.Human(freed) + " of cache was cleared. Try opening the profile again."
+                        ? "The disk was full. " + DiskSpace.Human(freed) + " of cache was cleared. Try opening the profile again."
                         : "The disk is full. Free some space or clear cached files in Settings.", ToastKind.Error);
                 }
                 else
@@ -3595,7 +3615,7 @@ namespace JoeBrowser
         {
             Log.Error(action, ex);
             string hint = ex is UnauthorizedAccessException
-                ? " A file or folder is locked - close any Joe Browser browsers and try again."
+                ? " A file or folder is locked. Close any Joe Browser browsers and try again."
                 : ex is System.IO.IOException
                     ? " A file could not be read or written."
                     : "";

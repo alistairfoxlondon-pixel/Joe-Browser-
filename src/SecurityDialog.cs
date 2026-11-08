@@ -18,7 +18,7 @@ namespace JoeBrowser
         public SecurityDialog(string email)
         {
             _email = email;
-            Text = "Security - Joe Browser";
+            Text = "Security, Joe Browser";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterScreen;
             MaximizeBox = false;
@@ -43,7 +43,7 @@ namespace JoeBrowser
 
             var secretLabel = new JBLabel
             {
-                Text = "Scan the code with Google Authenticator, Authy or any TOTP app - or enter the key by hand:",
+                Text = "Scan the code with Google Authenticator, Authy or any TOTP app, or enter the key by hand:",
                 AutoSize = false,
                 Size = new Size(Ui.S(320), Ui.S(40)),
                 Location = new Point(left + Ui.S(196), Ui.S(186)),
