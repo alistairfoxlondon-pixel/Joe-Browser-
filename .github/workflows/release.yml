@@ -181,7 +181,14 @@ jobs:
             Requirements: any installed Chromium-based browser or Firefox. The Browsers page can
             install Chrome, Brave or Chromium for you.
 
-            ### What is new in 1.4.3
+            ### What is new in 1.4.4
+
+            **A proxy edited onto an open profile is saved with its own clock.** Matching the
+            clock to the proxy was only done at launch, so a proxy added in the editor could be
+            stored with the previous exit's timezone attached. The locale is now re-derived
+            from the proxy's geography before the profile is saved.
+
+            ### What was new in 1.4.3
 
             **A changed proxy covers every connection, not just new ones.** Each socket the
             local relay opens is now tagged with the proxy it was made through and is closed

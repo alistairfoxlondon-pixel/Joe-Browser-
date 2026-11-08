@@ -3090,6 +3090,11 @@ namespace JoeBrowser
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 var updated = dlg.Result;
+                /* A profile edited to match its proxy must not keep the clock of the previous
+                   exit: the locale is re-derived from the proxy's geography before the profile
+                   is saved, so the stored copy and the running one agree. */
+                if (updated.Proxy != null && updated.Proxy.Enabled)
+                    FingerprintFactory.ApplyProxyLocale(updated.Fp, updated.Proxy);
                 _store.Save(updated);
                 ReloadCards(true);
 
