@@ -428,9 +428,9 @@ namespace JoeBrowser
             int y = 0;
             foreach (var r in _rows)
             {
-                int rh = Ui.S(74) + Ui.S(18) * Math.Max(0, r.MemberCount - 1);
-                r.SetBounds(0, y, cw, Math.Min(rh, Ui.S(74) + Ui.S(18) * 3));
-                y += r.Height + Ui.S(8);
+                int rh = r.Measure(cw);
+                r.SetBounds(0, y, cw, rh);
+                y += rh + Ui.S(8);
             }
             _column.SetBounds(0, 0, Math.Max(cw, _host.Width - Ui.S(10)), Math.Max(y, _host.Height));
             _host.SyncExtent();
@@ -453,7 +453,7 @@ namespace JoeBrowser
             int pad = Ui.S(24);
             int w = ClientSize.Width;
 
-            Ui.Text(g, "Account audit", Theme.H2, Theme.Text, pad, Ui.S(14), w - pad * 2 - Ui.S(40));
+            Ui.Text(g, "Account audit", Theme.Display, Theme.Text, pad, Ui.S(14), w - pad * 2 - Ui.S(40));
 
             string sub;
             Color tone = Theme.TextDim;
@@ -476,6 +476,23 @@ namespace JoeBrowser
 
             using (var p = new Pen(Theme.Line))
                 g.DrawLine(p, pad, Ui.S(88), w - pad, Ui.S(88));
+
+            /* An empty scroll area is indistinguishable from a failed one, so say which it is
+               instead of leaving a blank rectangle under a heading. */
+            if (_rows.Count == 0 && _host != null)
+            {
+                var box = _host.Bounds;
+                float ic2 = Ui.S(26);
+                Icons.Draw(g, _profiles.Count < 2 ? "layers" : "check-circle",
+                    new RectangleF(box.X + (box.Width - ic2) / 2f, box.Y + box.Height / 2f - Ui.S(42), ic2, ic2),
+                    _profiles.Count < 2 ? Theme.TextFaint : Theme.Success);
+                Ui.Text(g, _profiles.Count < 2 ? "Nothing to compare yet" : "No shared environment",
+                    Theme.H2, Theme.Text, box.X, box.Y + box.Height / 2f - Ui.S(6), box.Width, "center");
+                Ui.Text(g, _profiles.Count < 2
+                        ? "Profiles are compared once there are two of them."
+                        : "No two profiles share a fingerprint, a proxy address or a browser build.",
+                    Theme.Caption, Theme.TextDim, box.X, box.Y + box.Height / 2f + Ui.S(16), box.Width, "center", 2);
+            }
         }
     }
 
@@ -509,15 +526,45 @@ namespace JoeBrowser
 
             float x = Ui.S(14) + ic + Ui.S(10);
             float tw = Math.Max(Ui.S(80), Width - x - Ui.S(14));
-            Ui.Text(g, _finding.Title, Theme.SmallBold, Theme.Text, x, Ui.S(12), tw);
-            Ui.Text(g, _finding.Detail ?? "", Theme.Caption, Theme.TextDim, x, Ui.S(32), tw);
+            Ui.Text(g, _finding.Title, Theme.BodyBold, Theme.Text, x, Ui.S(10), tw);
+            Ui.Text(g, _finding.Detail ?? "", Theme.Caption, Theme.TextDim, x, Ui.S(30), tw, "left", 2);
 
             /* The names are the point of the row: a finding the user cannot map back to a
                profile is a warning they will close without acting on. Three is the ceiling, the
                rest are counted, so the row never grows taller than a screenful of them. */
             string names = NamesLine();
             if (names.Length > 0)
-                Ui.Text(g, names, Theme.Caption, Theme.TextFaint, x, Ui.S(50), tw);
+                Ui.Text(g, names, Theme.Caption, Theme.TextFaint, x, Ui.S(66), tw);
+        }
+
+        /// <summary>
+        /// The height this row needs, measured rather than guessed: "shares webgl, canvas, audio
+        /// and 2 more" wraps to two lines in a narrow window and to one in a wide one, and a
+        /// fixed height either clips the narrow case or leaves a gap in the wide one.
+        /// </summary>
+        public int Measure(int width)
+        {
+            int textW = Math.Max(Ui.S(80), width - Ui.S(14) - Ui.S(16) - Ui.S(10) - Ui.S(14));
+            int detailH = MeasureLines(_finding.Detail, Theme.Caption, textW, 2);
+            int total = Ui.S(30) + detailH + Ui.S(6);
+            if (NamesLine().Length > 0) total += Ui.S(18);
+            return total + Ui.S(14);
+        }
+
+        private static int MeasureLines(string text, Font font, int width, int maxLines)
+        {
+            if (string.IsNullOrEmpty(text) || width <= 0) return Ui.S(16);
+            try
+            {
+                // 4000 is the same ceiling the rest of the app uses: MeasureText with an
+                // int.MaxValue height has no documented behaviour and wraps differently.
+                Size proposed = TextRenderer.MeasureText(text, font, new Size(width, 4000),
+                    TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+                int lineH = TextRenderer.MeasureText("Xg", font).Height + Ui.S(2);
+                int lines = Math.Max(1, Math.Min(maxLines, (int)Math.Ceiling(proposed.Height / (double)lineH)));
+                return lines * lineH;
+            }
+            catch { return Ui.S(16); }
         }
 
         private string NamesLine()
