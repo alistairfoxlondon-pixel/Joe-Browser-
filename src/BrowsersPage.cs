@@ -61,7 +61,9 @@ namespace JoeBrowser
                 row.ActionRequested += delegate(object s, EventArgs ev)
                 {
                     var r = (EngineRow)s;
-                    Raise(r.Info.Installed ? "reveal" : "install", r.Info.Key);
+                    // The button says what it does; the action has to match the label.
+                    if (!r.Info.Checked) Rescan();
+                    else Raise(r.Info.Installed ? "reveal" : "install", r.Info.Key);
                 };
                 _column.Controls.Add(row);
                 _rows.Add(row);
