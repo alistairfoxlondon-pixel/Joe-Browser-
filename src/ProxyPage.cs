@@ -200,6 +200,27 @@ namespace JoeBrowser
         private static readonly string[] ActionKeys = { "bolt", "plus", "pencil", "trash" };
         private static readonly string[] ActionTips = { "Check this proxy", "Create a profile with it", "Edit", "Delete" };
 
+        /* One shared tooltip for every row: the four icons carry no text, and the row body has a
+           second action (apply live) that nothing else advertises. */
+        private static readonly ToolTip Tips = new ToolTip
+        {
+            ShowAlways = true,
+            InitialDelay = 500,
+            ReshowDelay = 150,
+            AutoPopDelay = 6000
+        };
+
+        private string _tipKey;
+
+        /// <summary>Shows the tip for the action under the pointer, or for the row itself.</summary>
+        private void SyncTip(int hit)
+        {
+            string key = hit >= 0 && hit < ActionTips.Length ? ActionTips[hit] : "Click to apply this proxy live";
+            if (key == _tipKey) return;
+            _tipKey = key;
+            try { Tips.SetToolTip(this, key); } catch { }
+        }
+
         public ProxyRow()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
@@ -230,6 +251,8 @@ namespace JoeBrowser
             var a = Actions();
             int hit = -1;
             for (int i = 0; i < a.Length; i++) if (a[i].Contains(e.Location)) { hit = i; break; }
+            SyncTip(hit);
+            Cursor = hit >= 0 ? Cursors.Hand : Cursors.Default;
             if (hit != _hover) { _hover = hit; Invalidate(); }
             base.OnMouseMove(e);
         }

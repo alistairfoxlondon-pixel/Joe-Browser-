@@ -475,6 +475,9 @@ namespace JoeBrowser
             _toolsPage.ApplyText();
             _emptyPanel.Invalidate();
             _aboutColumn.Invalidate();
+            /* The empty state carries text too, and it is the first thing a new user sees: it
+               was the one place the new language did not reach until the window was resized. */
+            if (_clearFilter != null) _clearFilter.Text = "Clear search";
             FreezeRedraw(LayoutAll);
         }
 
@@ -1898,6 +1901,23 @@ namespace JoeBrowser
             string url = _setStartUrl.Value.Trim();
             if (!string.IsNullOrEmpty(url) && !url.StartsWith("http://") && !url.StartsWith("https://") && !url.StartsWith("about:"))
                 url = "https://" + url;
+            if (url.Length > 0 && !url.StartsWith("about:", StringComparison.Ordinal))
+            {
+                /* "https://" with nothing after it, or a space in the host, would be saved and
+                   then silently open a blank tab every launch. Reject it where it was typed. */
+                Uri parsed;
+                if (!Uri.TryCreate(url, UriKind.Absolute, out parsed) || string.IsNullOrEmpty(parsed.Host))
+                {
+                    Toast("That start page is not a usable address. Try https://example.com", ToastKind.Warn);
+                    _setStartUrl.Box.Focus();
+                    _setStartUrl.Box.SelectAll();
+                    return;
+                }
+                url = parsed.AbsoluteUri;
+            }
+            /* The field shows what was stored, not what was typed: without this a save that
+               normalised "google.com" left the box looking unsaved. */
+            if (_setStartUrl.Value != url) _setStartUrl.Value = url;
             _settings.DefaultStartUrl = string.IsNullOrEmpty(url) ? "https://www.google.com" : url;
             _settings.ThemeMode = Theme.Dark ? 1 : 2;
             _settings.DefaultGroup = (_setDefaultGroup.Value ?? "").Trim();
@@ -3195,6 +3215,18 @@ namespace JoeBrowser
             {
                 var focused = ActiveControl as ProfileCard;
                 if (focused != null && focused.Model != null) { EditProfile(focused.Model.Id); return true; }
+            }
+            /* Shift+F10 is the second standard context-menu key, after the Apps key the card
+               already handles. Without it the menu was unreachable on keyboards that have no
+               Apps key - which is most laptops. */
+            if (keyData == (Keys.Shift | Keys.F10) && _page == 0)
+            {
+                var focused = ActiveControl as ProfileCard;
+                if (focused != null)
+                {
+                    focused.ShowMenuKey();
+                    return true;
+                }
             }
             return base.ProcessCmdKey(ref msg, keyData);
         }
