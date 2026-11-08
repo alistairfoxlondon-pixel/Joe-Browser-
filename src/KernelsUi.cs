@@ -146,61 +146,72 @@ namespace JoeBrowser
             _rows.Clear();
         }
 
-        private async void LoadAsync()
+        private async System.Threading.Tasks.Task LoadAsyncCore()
         {
-            if (_loading) return;
-            _loading = true;
-            _refresh.Enabled = false;
-            ClearRows();
-            var wait = new KernelRow(new KernelRelease(_engine, "Loading builds\u2026", "", "", ""), false, null);
-            wait.ShowBusy("Contacting the publisher\u2026");
-            AddRow(wait);
-            LayoutCore();
-
-            List<KernelRelease> releases = null;
-            string error = null;
-            try { releases = await KernelStore.CatalogAsync(_engine).ConfigureAwait(true); }
-            catch (Exception ex) { error = ex.Message; }
-
-            if (IsDisposed) return;
-            ClearRows();
-
-            var installed = new Dictionary<string, KernelInstall>(StringComparer.OrdinalIgnoreCase);
-            foreach (var k in KernelStore.Installed())
-                if (string.Equals(k.Engine, _engine, StringComparison.OrdinalIgnoreCase))
-                    installed[k.Version] = k;
-
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (releases != null)
+            /* The busy flag and the Refresh button are restored on every exit path: a failure
+               half-way through the list used to leave the page stuck on "Loading builds". */
+            try
             {
-                foreach (var rel in releases)
+                if (_loading) return;
+                _loading = true;
+                _refresh.Enabled = false;
+                ClearRows();
+                var wait = new KernelRow(new KernelRelease(_engine, "Loading builds\u2026", "", "", ""), false, null);
+                wait.ShowBusy("Contacting the publisher\u2026");
+                AddRow(wait);
+                LayoutCore();
+
+                List<KernelRelease> releases = null;
+                string error = null;
+                try { releases = await KernelStore.CatalogAsync(_engine).ConfigureAwait(true); }
+                catch (Exception ex) { error = ex.Message; }
+
+                if (IsDisposed) return;
+                ClearRows();
+
+                var installed = new Dictionary<string, KernelInstall>(StringComparer.OrdinalIgnoreCase);
+                foreach (var k in KernelStore.Installed())
+                    if (string.Equals(k.Engine, _engine, StringComparison.OrdinalIgnoreCase))
+                        installed[k.Version] = k;
+
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (releases != null)
                 {
-                    if (!seen.Add(rel.Version)) continue;
-                    KernelInstall have;
-                    installed.TryGetValue(rel.Version, out have);
-                    AddRow(new KernelRow(rel, have != null, have));
+                    foreach (var rel in releases)
+                    {
+                        if (!seen.Add(rel.Version)) continue;
+                        KernelInstall have;
+                        installed.TryGetValue(rel.Version, out have);
+                        AddRow(new KernelRow(rel, have != null, have));
+                    }
                 }
-            }
-            // Builds on disk that the publisher no longer lists still belong in the list.
-            foreach (var kv in installed)
-            {
-                if (seen.Contains(kv.Key)) continue;
-                AddRow(new KernelRow(new KernelRelease(_engine, kv.Key, "", "", ""), true, kv.Value));
-            }
+                // Builds on disk that the publisher no longer lists still belong in the list.
+                foreach (var kv in installed)
+                {
+                    if (seen.Contains(kv.Key)) continue;
+                    AddRow(new KernelRow(new KernelRelease(_engine, kv.Key, "", "", ""), true, kv.Value));
+                }
 
-            if (_rows.Count == 0)
-            {
-                var none = new KernelRow(new KernelRelease(_engine,
-                    error != null ? "Could not reach the publisher" : "No builds published",
-                    error ?? "Check the connection and press Refresh.", "", ""), false, null);
-                AddRow(none);
-            }
+                if (_rows.Count == 0)
+                {
+                    var none = new KernelRow(new KernelRelease(_engine,
+                        error != null ? "Could not reach the publisher" : "No builds published",
+                        error ?? "Check the connection and press Refresh.", "", ""), false, null);
+                    AddRow(none);
+                }
 
-            _loading = false;
-            _refresh.Enabled = true;
-            FitHeight();
-            LayoutCore();
+                FitHeight();
+                LayoutCore();
+            }
+            finally
+            {
+                _loading = false;
+                if (_refresh != null) _refresh.Enabled = true;
+            }
         }
+
+        /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>
+        private void LoadAsync() { Guarded.Run("LoadAsync", this, delegate { return LoadAsyncCore(); }); }
 
         private void AddRow(KernelRow row)
         {
@@ -227,12 +238,12 @@ namespace JoeBrowser
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, "The build could not be removed.\r\n\r\n" + ex.Message,
-                    "Remove build", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ConfirmForm.Tell(this, "Remove build",
+                    "The build could not be removed.", ex.Message);
             }
         }
 
-        private async void Download(KernelRow row)
+        private async System.Threading.Tasks.Task DownloadCore(KernelRow row)
         {
             row.ShowBusy("Starting\u2026");
             LayoutCore();
@@ -249,11 +260,14 @@ namespace JoeBrowser
             catch (Exception ex)
             {
                 dlg.Close();
-                MessageBox.Show(this, "The build could not be installed.\r\n\r\n" + ex.Message,
-                    "Kernel download", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ConfirmForm.Tell(this, "Kernel download",
+                    "The build could not be installed.", ex.Message);
                 LoadAsync();
             }
         }
+
+        /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>
+        private void Download(KernelRow row) { Guarded.Run("Download", this, delegate { return DownloadCore(row); }); }
 
         private static string KernelStoreLabel(KernelRelease rel)
         {

@@ -13,7 +13,7 @@ namespace JoeBrowser
     internal static class Installation
     {
         public const string AppName = "Joe Browser";
-        public const string AppVersion = "1.2.0";
+        public const string AppVersion = "1.2.1";
         public const string Publisher = "Joe Goldberg";
         public const string AppId = "JoeBrowser.Browser.1.2";
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\JoeBrowser";
@@ -98,14 +98,15 @@ namespace JoeBrowser
                 if (!string.Equals(Path.GetFullPath(source), Path.GetFullPath(target),
                         StringComparison.OrdinalIgnoreCase))
                 {
-                    if (File.Exists(target))
-                    {
-                        try { File.SetAttributes(target, FileAttributes.Normal); } catch { }
-                        try { File.Delete(target); } catch { }
-                    }
-                    File.Copy(source, target, true);
+                    /* An in-place update runs while the previous copy may still be shutting
+                       down, and Windows keeps the image locked until it has. Failing the whole
+                       install on a transient lock is what made "install" look broken; retry
+                       for a few seconds instead. */
+                    ReplaceLocked(source, target);
                 }
                 try { File.SetAttributes(target, FileAttributes.Normal); } catch { }
+
+                CopyFonts(source, dir);
 
                 CreateShortcut(StartMenuLink(), target, dir);
                 if (desktopShortcut) CreateShortcut(DesktopLink(), target, dir);
@@ -117,6 +118,82 @@ namespace JoeBrowser
                 error = ex.Message;
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Copies the payload over the installed one, retrying while Windows holds the target
+        /// image open. <paramref name="source"/> may be a running executable, which is fine:
+        /// a running image can be read even though it cannot be replaced in place.
+        /// </summary>
+        internal static void ReplaceLocked(string source, string target)
+        {
+            Exception last = null;
+            for (int attempt = 0; attempt < 10; attempt++)
+            {
+                try
+                {
+                    if (File.Exists(target))
+                    {
+                        try { File.SetAttributes(target, FileAttributes.Normal); } catch { }
+                        try { File.Delete(target); } catch { }
+                    }
+                    File.Copy(source, target, true);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                    System.Threading.Thread.Sleep(300);
+                }
+            }
+            // A rename over the old image works even when Delete is refused, e.g. on a
+            // machine where the file is mapped by another user's session.
+            try
+            {
+                string staged = target + ".new";
+                File.Copy(source, staged, true);
+                try
+                {
+                    File.Replace(staged, target, null, true);
+                    return;
+                }
+                catch
+                {
+                    File.Delete(target + ".old");
+                    File.Move(target, target + ".old");
+                    File.Move(staged, target);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new IOException(
+                    "Could not replace " + target + ". Close Joe Browser and try again. " + (last ?? ex).Message);
+            }
+        }
+
+        /// <summary>
+        /// The fonts and other loose files that used to be shipped beside the executable.
+        ///
+        /// For a while the installer copied only JoeBrowser.exe, so an installed copy had no
+        /// <c>fonts</c> folder and drew no icons at all - while the same build run straight
+        /// from <c>dist</c>, which had the folder, looked perfect. That is the exact "icons not
+        /// visible, but only after installing" report. The build now embeds the faces as well
+        /// (see build.ps1 and Theme.InstallEmbeddedFonts), and this copies the folder when a
+        /// package does have one.
+        /// </summary>
+        internal static void CopyFonts(string sourceExe, string targetDir)
+        {
+            try
+            {
+                string from = Path.Combine(Path.GetDirectoryName(sourceExe) ?? "", "fonts");
+                if (!Directory.Exists(from)) return;
+                string to = Path.Combine(targetDir, "fonts");
+                Directory.CreateDirectory(to);
+                foreach (string file in Directory.GetFiles(from))
+                    File.Copy(file, Path.Combine(to, Path.GetFileName(file)), true);
+            }
+            catch { /* the embedded copies are the fallback, so this is never fatal */ }
         }
 
         internal static void CreateShortcut(string linkPath, string target, string workDir)

@@ -217,8 +217,46 @@ namespace JoeBrowser
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            if (keyData == Keys.Escape) { DialogResult = DialogResult.Cancel; Close(); return true; }
+            if (keyData == Keys.Escape)
+            {
+                /* Esc used to close the dialog outright. Inside a text field that is the wrong
+                   behaviour twice over: people press Esc to abandon a half-typed value, not the
+                   whole form, and everything they had already filled in was thrown away with
+                   no warning. In a field, Esc now clears focus back to the dialog; a second
+                   Esc (or Esc anywhere else) still closes it. */
+                Control focused = ActiveControl;
+                while (focused is ContainerControl && ((ContainerControl)focused).ActiveControl != null)
+                    focused = ((ContainerControl)focused).ActiveControl;
+
+                if (HasTypedText(focused))
+                {
+                    if (!_escHinted)
+                    {
+                        _escHinted = true;
+                        Secondary.Text = "Discard and close";
+                        Secondary.Invalidate();
+                    }
+                    SelectNextControl(focused, false, false, true, false);
+                    ActiveControl = null;
+                    return true;
+                }
+
+                DialogResult = DialogResult.Cancel;
+                Close();
+                return true;
+            }
             return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        private bool _escHinted;
+
+        private static bool HasTypedText(Control control)
+        {
+            var tb = control as TextBox;
+            if (tb != null) return !tb.ReadOnly && !string.IsNullOrEmpty(tb.Text);
+            var field = control as JBTextBox;
+            if (field != null) return !string.IsNullOrEmpty(field.Value);
+            return false;
         }
     }
 }

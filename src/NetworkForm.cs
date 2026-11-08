@@ -122,7 +122,7 @@ namespace JoeBrowser
             return null;
         }
 
-        private async void RunCheck()
+        private async System.Threading.Tasks.Task RunCheckCore()
         {
             if (_busy) return;
             _busy = true;
@@ -147,6 +147,9 @@ namespace JoeBrowser
             LayoutCore();
             Invalidate();
         }
+
+        /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>
+        private void RunCheck() { Guarded.Run("RunCheck", this, delegate { return RunCheckCore(); }); }
 
         private void Apply()
         {

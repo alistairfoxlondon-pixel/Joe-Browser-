@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace JoeBrowser
@@ -117,7 +118,7 @@ namespace JoeBrowser
         /// Without a proxy the connection this machine already uses sets the clock and the language,
         /// so a fresh profile matches the public IP the sites will see.
         /// </summary>
-        private async void DetectLocaleAsync()
+        private async System.Threading.Tasks.Task DetectLocaleAsyncCore()
         {
             if (_proxy != null && _proxy.Enabled) return;
             if (!_fp.AutoMatchProxy) return;
@@ -135,6 +136,9 @@ namespace JoeBrowser
             }
             catch (Exception ex) { Log.Error("Location lookup failed", ex); }
         }
+
+        /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>
+        private void DetectLocaleAsync() { Guarded.Run("DetectLocaleAsync", this, delegate { return DetectLocaleAsyncCore(); }); }
 
         private void ApplyDetectedLocale()
         {
@@ -385,7 +389,7 @@ namespace JoeBrowser
             _browserNote.Text = BrowserFetcher.Label(key) + " is not installed on this PC";
         }
 
-        private async void FetchBrowser()
+        private async System.Threading.Tasks.Task FetchBrowserCore()
         {
             string key = CurrentKindKey();
             if (!BrowserFetcher.Supports(key) || BrowserFetcher.IsInstalled(key)) return;
@@ -411,6 +415,9 @@ namespace JoeBrowser
             UpdateBrowserFetchUi();
             LayoutAll();
         }
+
+        /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>
+        private void FetchBrowser() { Guarded.Run("FetchBrowser", this, delegate { return FetchBrowserCore(); }); }
 
         private static string ShortLine(Exception ex)
         {
@@ -1288,7 +1295,7 @@ namespace JoeBrowser
 
         // ---------------------------------------------------------------- proxy test
 
-        private async void TestProxy()
+        private async System.Threading.Tasks.Task TestProxyCore()
         {
             var cfg = new ProxyConfig
             {
@@ -1332,6 +1339,9 @@ namespace JoeBrowser
                 _testBtn.Enabled = true;
             }
         }
+
+        /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>
+        private void TestProxy() { Guarded.Run("TestProxy", this, delegate { return TestProxyCore(); }); }
 
         private void SetProxyResult(int state, string text)
         {
@@ -1572,6 +1582,24 @@ namespace JoeBrowser
         {
             using (var f = new ConfirmForm(title, message, detail, okText, okKind))
                 return f.ShowDialog(owner) == DialogResult.OK;
+        }
+
+        /// <summary>
+        /// One-button notice with the same chrome as every other dialog. MessageBox shows the
+        /// Windows system font in a rectangle that ignores the theme, which is the most obvious
+        /// "this part is not finished" tell in an otherwise custom-drawn app.
+        /// </summary>
+        public static void Tell(IWin32Window owner, string title, string message, string detail = null)
+        {
+            try
+            {
+                using (var f = new ConfirmForm(title, message, detail, "OK", BtnKind.Primary))
+                {
+                    f._cancel.Visible = false;
+                    f.ShowDialog(owner);
+                }
+            }
+            catch { }
         }
 
         protected override void OnLoad(EventArgs e)

@@ -62,6 +62,12 @@ namespace JoeBrowser
         public void Save(Profile p)
         {
             Directory.CreateDirectory(AppPaths.Profiles);
+            /* A profile written before Proxy was initialised - an older file, a hand-edited
+               one, a duplicate that lost a field - made every save throw a NullReferenceException
+               from here, so the profile could never be edited again. */
+            if (p.Fp == null) p.Fp = new FingerprintConfig();
+            if (p.Proxy == null) p.Proxy = new ProxyConfig();
+            if (p.Tools == null) p.Tools = new ToolConfig();
             if (string.IsNullOrEmpty(p.Proxy.Password))
             {
                 /* DPAPI can refuse a value it wrote on another day or another machine. An empty
@@ -303,21 +309,63 @@ namespace JoeBrowser
                 if (File.Exists(AppPaths.SettingsFile))
                 {
                     var s = _json.Deserialize<AppSettings>(File.ReadAllText(AppPaths.SettingsFile, Encoding.UTF8));
-                    if (s != null) return s;
+                    if (s != null)
+                    {
+                        if (s.GoogleClientId != null) s.GoogleClientId = s.GoogleClientId.Trim();
+                        if (s.GoogleClientSecret != null) s.GoogleClientSecret = s.GoogleClientSecret.Trim();
+                        return s;
+                    }
                 }
             }
-            catch (Exception ex) { Log.Error("Cannot read settings", ex); }
+            catch (Exception ex)
+            {
+                Log.Error("Cannot read settings", ex);
+                /* A corrupt file must not be silently overwritten by the next save: keep a copy
+                   so the user can still be helped and their proxy list is not lost forever. */
+                try
+                {
+                    string backup = AppPaths.SettingsFile + ".broken";
+                    if (File.Exists(backup)) File.Delete(backup);
+                    File.Copy(AppPaths.SettingsFile, backup, true);
+                    Log.Error("The unreadable settings were kept at " + backup);
+                }
+                catch { }
+            }
             return new AppSettings();
         }
 
+        /// <summary>
+        /// Writes settings.json. Throws when the file cannot be written, so a caller that has to
+        /// know - the Google setup, which must not report success and then sign in with nothing -
+        /// can say so. Most callers save while the user is typing and ignore the failure; the
+        /// previous version swallowed everything, which is why a read-only %APPDATA% produced a
+        /// "saved" toast and settings that were gone on the next launch.
+        ///
+        /// The write goes to a temporary file first: a crash or a full disk during the write
+        /// used to leave a truncated settings.json, and every launch afterwards silently ran on
+        /// defaults.
+        /// </summary>
         public void SaveSettings(AppSettings s)
         {
+            Directory.CreateDirectory(AppPaths.Root);
+            string json = _json.Serialize(s);
+            string tmp = AppPaths.SettingsFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.WriteAllText(tmp, json, new UTF8Encoding(true));
             try
             {
-                Directory.CreateDirectory(AppPaths.Root);
-                File.WriteAllText(AppPaths.SettingsFile, _json.Serialize(s), new UTF8Encoding(true));
+                if (File.Exists(AppPaths.SettingsFile))
+                {
+                    try { File.Replace(tmp, AppPaths.SettingsFile, null); }
+                    catch { File.Copy(tmp, AppPaths.SettingsFile, true); File.Delete(tmp); }
+                }
+                else File.Move(tmp, AppPaths.SettingsFile);
             }
-            catch (Exception ex) { Log.Error("Cannot save settings", ex); }
+            catch (Exception ex)
+            {
+                try { File.Delete(tmp); } catch { }
+                Log.Error("Cannot save settings", ex);
+                throw;
+            }
         }
 
         internal static string Encrypt(string plain)

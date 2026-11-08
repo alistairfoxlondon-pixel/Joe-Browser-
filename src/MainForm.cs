@@ -1020,7 +1020,7 @@ namespace JoeBrowser
             }
         }
 
-        private async void CheckAllProxies()
+        private async System.Threading.Tasks.Task CheckAllProxiesCore()
         {
             if (_proxies.Count == 0) { Toast("Add a proxy first", ToastKind.Info); return; }
             _proxyPage.SetBusy(true, "Checking…");
@@ -1042,7 +1042,10 @@ namespace JoeBrowser
             finally { _proxyPage.SetBusy(false, ""); }
         }
 
-        private async void CheckProxy(int index)
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void CheckAllProxies() { Guard("CheckAllProxies", delegate { return CheckAllProxiesCore(); }); }
+
+        private async System.Threading.Tasks.Task CheckProxyCore(int index)
         {
             var e = ProxyAt(index);
             if (e == null) return;
@@ -1058,6 +1061,9 @@ namespace JoeBrowser
             }
             catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
         }
+
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void CheckProxy(int index) { Guard("CheckProxy", delegate { return CheckProxyCore(index); }); }
 
         private static void ApplyProxyResult(ProxyEntry e, ProxyCheckResult r)
         {
@@ -1166,7 +1172,7 @@ namespace JoeBrowser
             try { return new Uri(url).Host; } catch { return url; }
         }
 
-        private async void BrowserAction(string key, string engine)
+        private async System.Threading.Tasks.Task BrowserActionCore(string key, string engine)
         {
             try
             {
@@ -1245,13 +1251,16 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void BrowserAction(string key, string engine) { Guard("BrowserAction", delegate { return BrowserActionCore(key, engine); }); }
+
         private void SaveExtensions()
         {
             ExtensionCatalog.Save(_extensions);
             _extensionPage.SetItems(_extensions);
         }
 
-        private async void AddExtensionByUrl()
+        private async System.Threading.Tasks.Task AddExtensionByUrlCore()
         {
             string url;
             using (var dlg = new ToolDialog("Add extension by store link", "Import", "Cancel", 560, 340))
@@ -1280,6 +1289,9 @@ namespace JoeBrowser
             catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
             finally { _extensionPage.SetBusy(false, ""); }
         }
+
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void AddExtensionByUrl() { Guard("AddExtensionByUrl", delegate { return AddExtensionByUrlCore(); }); }
 
         private void AddExtensionFolder()
         {
@@ -1362,7 +1374,8 @@ namespace JoeBrowser
                 if (string.IsNullOrEmpty(_setLang.Value)) return;
                 _settings.UiLanguage = _setLang.Value;
                 L10n.Set(_setLang.Value);
-                _store.SaveSettings(_settings);
+                try { _store.SaveSettings(_settings); }
+                catch (Exception ex) { Log.Error("Language preference not saved", ex); }
             };
 
             // Switches carry no caption of their own; the row title to the left is the label.
@@ -1424,10 +1437,11 @@ namespace JoeBrowser
             /* The Google client id is the only setting that cannot be pre-filled by the app,
                so it gets a guided setup and a button that actually runs the flow and reports
                what Google said. Without those two, a wrong id just looks like a dead button. */
-            _setGoogleGuide = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "Set up", Radius = 4, Height = Ui.S(33), Tip = "How to create the OAuth client id" };
+            _setGoogleGuide = new JBButton { Kind = BtnKind.Soft, Icon = "help", Text = "Set up", Radius = 4, Height = Ui.S(33), Tip = L10n.T("set.google.hint") };
             _setGoogleTest = new JBButton { Kind = BtnKind.Soft, Icon = "check", Text = "Test", Radius = 4, Height = Ui.S(33), Tip = "Run the real Google sign-in now" };
             _setGoogleGuide.Click += delegate { GoogleSetupHelp(); };
-            _setGoogleTest.Click += delegate { TestGoogleSignIn(); };            _setSignOut = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("set.row.signout"), Radius = 4, Height = Ui.S(33) };
+            _setGoogleTest.Click += delegate { TestGoogleSignIn(); };
+            _setSignOut = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("set.row.signout"), Radius = 4, Height = Ui.S(33) };
             _setSecurity.Click += delegate
             {
                 if (Session.Current == null) { Toast("Sign in first.", ToastKind.Error); return; }
@@ -1435,8 +1449,10 @@ namespace JoeBrowser
             };
             _setSignOut.Click += delegate
             {
-                if (MessageBox.Show(this, "Sign out of this device?\r\nYour profiles stay where they are.",
-                        "Sign out", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                if (!ConfirmForm.Ask(this, "Sign out",
+                        "Sign out of this device?",
+                        "Your profiles, proxies and sessions stay where they are and are available the next time you sign in.",
+                        "Sign out", BtnKind.Primary)) return;
                 Session.SignOut();
                 Application.Restart();
                 Environment.Exit(0);
@@ -1444,7 +1460,10 @@ namespace JoeBrowser
 
             var account = Card("set.account");
             Row(account, "set.row.signed", null, _setAccountWho);
-            Row(account, "set.row.google", new[] { Ui.S(360), Ui.S(96), Ui.S(84) }, _setGoogleId, _setGoogleGuide, _setGoogleTest);
+            /* The id is long (72+ characters) and the row also carries two buttons, so the
+               field asks for more room than the other rows and shrinks first when the window is
+               narrow - RowWidths already handles that for every JBTextBox. */
+            Row(account, "set.row.google", new[] { Ui.S(420), Ui.S(92), Ui.S(80) }, _setGoogleId, _setGoogleGuide, _setGoogleTest);
             Row(account, "set.row.gsecret", new[] { Ui.S(360) }, _setGoogleSecret);
             Row(account, "set.row.security", new[] { Ui.S(104), Ui.S(88) }, _setSecurity, _setSignOut);
 
@@ -1525,26 +1544,27 @@ namespace JoeBrowser
 
         private void GoogleSetupHelp()
         {
-            using (var dlg = new ToolDialog("Set up Google sign-in", "Open Google Cloud", "Close", 620, 470))
+            /* Same dialog as the first-run button, so the instructions can never drift apart
+               from what the code actually does. */
+            if (GoogleSetupDialog.Ensure(this, _setGoogleId.Value))
             {
-                dlg.AddNote("1.  Create a project \u2014 any name.");
-                dlg.AddNote("2.  OAuth consent screen \u2192 External \u2192 add your address as a test user.");
-                dlg.AddNote("3.  Credentials \u2192 Create credentials \u2192 OAuth client ID \u2192 Desktop app.");
-                dlg.AddNote("4.  Paste the client ID and secret here.");
-                if (dlg.ShowDialog(this) == DialogResult.OK)
-                    OpenUrl(GoogleSignIn.ConsoleCredentialsUrl);
+                _setGoogleId.Value = GoogleSignIn.ClientId();
+                _setGoogleSecret.Value = GoogleSignIn.SavedClientSecret();
             }
         }
 
-        private async void TestGoogleSignIn()
+        private async System.Threading.Tasks.Task TestGoogleSignInCore()
         {
-            string id = (_setGoogleId.Value ?? "").Trim();
+            /* Normalised, not trimmed: a paste from the console commonly carries a trailing
+               space or the "id:secret" pair, and the un-cleaned value used to reach Google as
+               an invalid client. */
+            string id = GoogleSignIn.NormalizeClientId(_setGoogleId.Value);
             if (!GoogleSignIn.LooksValid(id))
             {
-                MessageBox.Show(this,
-                    "Paste a Google OAuth client id first. It looks like\r\n\r\n" +
-                    "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com",
-                    "Test Google sign-in", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ConfirmForm.Tell(this, "Test Google sign-in",
+                    "Paste a Google OAuth client id first. It looks like",
+                    "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com"
+                    + "\n\nOr use \"Set up\" and Joe Browser will walk through creating one.");
                 _setGoogleId.Box.Focus();
                 return;
             }
@@ -1553,7 +1573,8 @@ namespace JoeBrowser
                saved before the flow starts rather than after it succeeds. */
             _settings.GoogleClientId = id;
             _settings.GoogleClientSecret = (_setGoogleSecret.Value ?? "").Trim();
-            try { _store.SaveSettings(_settings); } catch { }
+            try { _store.SaveSettings(_settings); }
+            catch (Exception ex) { Log.Error("Google client id not saved", ex); }
 
             _setGoogleTest.Enabled = false;
             _setGoogleTest.Text = "Testing\u2026";
@@ -1573,17 +1594,19 @@ namespace JoeBrowser
             if (result.Ok)
             {
                 Toast("Google sign-in works \u2014 " + result.Identity.Email, ToastKind.Success);
-                MessageBox.Show(this,
-                    "Google sign-in works.\r\n\r\nSigned in as: " + result.Identity.Email +
-                    (string.IsNullOrEmpty(result.Identity.Name) ? "" : "\r\nName: " + result.Identity.Name),
-                    "Test Google sign-in", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ConfirmForm.Tell(this, "Test Google sign-in",
+                    "Google sign-in works. Signed in as " + result.Identity.Email + ".",
+                    string.IsNullOrEmpty(result.Identity.Name) ? null : "Name: " + result.Identity.Name);
             }
             else
             {
-                MessageBox.Show(this, result.Message + "\r\n\r\nError code: " + result.Code,
-                    "Test Google sign-in", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ConfirmForm.Tell(this, "Test Google sign-in", result.Message,
+                    "Error code: " + result.Code);
             }
         }
+
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void TestGoogleSignIn() { Guard("TestGoogleSignIn", delegate { return TestGoogleSignInCore(); }); }
 
         /* ------------------------------------------------------------------ *
          * Plan, limits and crypto payment.
@@ -1724,8 +1747,8 @@ namespace JoeBrowser
                 bool credited;
                 string message = Referral.Claim(box.Value, out credited);
                 RefreshPlanState();
-                MessageBox.Show(this, message, credited ? "Referral claimed" : "Referral",
-                    MessageBoxButtons.OK, credited ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                ConfirmForm.Tell(this, credited ? "Referral claimed" : "Referral",
+                    credited ? "Referral credit added." : "That receipt could not be used.", message);
             }
         }
 
@@ -1836,15 +1859,13 @@ namespace JoeBrowser
             var history = Plan.History();
             if (Plan.IsPro)
             {
-                MessageBox.Show(this, "Pro is active.\r\n\r\n" + Plan.Summary() +
-                    (history.Count > 0 ? "\r\n\r\nLast payment: " + history[history.Count - 1] : ""),
-                    "Plan", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ConfirmForm.Tell(this, "Plan", "Pro is active on this Windows user.",
+                    Plan.Summary() + (history.Count > 0 ? "\n\nLast payment: " + history[history.Count - 1] : ""));
                 return;
             }
-            MessageBox.Show(this,
-                "Pro is tied to this Windows user.\r\n\r\nReinstall and sign in to the same account to get it back. " +
-                "A transaction can never unlock twice.",
-                "Restore a purchase", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            ConfirmForm.Tell(this, "Restore a purchase",
+                "Pro is tied to this Windows user.",
+                "Reinstall and sign in to the same account to get it back. A transaction can never unlock twice.");
         }
 
         private void UpdateBrowserInfo()
@@ -1866,12 +1887,16 @@ namespace JoeBrowser
             _settings.DefaultStartUrl = string.IsNullOrEmpty(url) ? "https://www.google.com" : url;
             _settings.ThemeMode = Theme.Dark ? 1 : 2;
             _settings.DefaultGroup = (_setDefaultGroup.Value ?? "").Trim();
-            string clientId = (_setGoogleId.Value ?? "").Trim();
+            /* Normalised rather than trimmed: a paste from the console usually carries quotes,
+               a trailing space or the "id:secret" pair, and the raw value reached Google as an
+               invalid client. */
+            string clientId = GoogleSignIn.NormalizeClientId(_setGoogleId.Value);
             /* A client id that is not a client id produces an opaque "invalid_client" from
                Google later. Catch it at the point where it was typed instead. */
-            if (clientId.Length > 0 && !clientId.EndsWith(".apps.googleusercontent.com", StringComparison.OrdinalIgnoreCase))
+            if (clientId.Length > 0 && !GoogleSignIn.LooksValid(clientId))
             {
-                Toast("That does not look like a Google OAuth client id (it ends with .apps.googleusercontent.com)", ToastKind.Warn);
+                Toast("That does not look like a Google OAuth client id: the part before .apps.googleusercontent.com "
+                    + "starts with the project number, e.g. 123456789012-abc123.", ToastKind.Warn);
                 _setGoogleId.Box.Focus();
                 _setGoogleId.Box.SelectAll();
                 return;
@@ -1882,8 +1907,18 @@ namespace JoeBrowser
             _settings.EnableCustomExtensions = _setCustomExt.Checked;
             _settings.UseTrash = _setTrash.Checked;
             if (!string.IsNullOrEmpty(_setLang.Value)) _settings.UiLanguage = _setLang.Value;
-            _store.SaveSettings(_settings);
-            Toast("Settings saved", ToastKind.Success);
+            try
+            {
+                _store.SaveSettings(_settings);
+                Toast("Settings saved", ToastKind.Success);
+            }
+            catch (Exception ex)
+            {
+                /* A green "Settings saved" toast over a disk that refused the write is how a
+                   user loses their configuration and never finds out. */
+                Log.Error("Settings not saved", ex);
+                Toast("Settings could not be saved: " + ex.Message, ToastKind.Error);
+            }
         }
 
         private void ToggleTheme()
@@ -2256,7 +2291,10 @@ namespace JoeBrowser
 
         private void ReloadCards(bool fromDisk)
         {
-            if (fromDisk || _profiles == null || _profiles.Count == 0)
+            /* A zero-count reload used to re-read the store on every call, so deleting the
+               last profile hit the disk twice in a row for no reason. From-disk is the explicit
+               signal for "the store may have changed". */
+            if (fromDisk || _profiles == null)
                 _profiles = _store.LoadAll();
             ApplySort();
 
@@ -2289,8 +2327,27 @@ namespace JoeBrowser
                 _grid.Controls.Add(card);
                 _cards[id] = card;
             }
+
+            /* Cards are rebuilt from scratch, so any selection that pointed at a profile which
+               no longer exists has to go before the filter walks it. This was the crash: a
+               picked profile was deleted, ReloadCards dropped its card, and ApplyFilter then
+               indexed _cards with the stale id - KeyNotFoundException, reported to the user as
+               "Joe Browser hit an unexpected error" every time a picked profile was deleted. */
+            PrunePicks();
             ApplyFilter();
             Invalidate();
+        }
+
+        /// <summary>
+        /// Drops selection entries whose card no longer exists, and an anchor that points at
+        /// nothing. Every read of _picks goes through this first, because a delete, a filter
+        /// change and a bulk action can each remove a card under it.
+        /// </summary>
+        private void PrunePicks()
+        {
+            for (int i = _picks.Count - 1; i >= 0; i--)
+                if (!_cards.ContainsKey(_picks[i])) _picks.RemoveAt(i);
+            if (_pickAnchor != null && !_cards.ContainsKey(_pickAnchor)) _pickAnchor = null;
         }
 
         private void ApplyFilter()
@@ -2310,8 +2367,13 @@ namespace JoeBrowser
                 kv.Value.Visible = hit;
                 if (hit) shown++;
             }
+            /* Only selections that are still on screen survive a filter change. A pick whose
+               card has been unloaded is dropped too, rather than trusted - see PrunePicks. */
             for (int i = _picks.Count - 1; i >= 0; i--)
-                if (!_cards[_picks[i]].Visible) _picks.RemoveAt(i);
+            {
+                ProfileCard c;
+                if (!_cards.TryGetValue(_picks[i], out c) || !c.Visible) _picks.RemoveAt(i);
+            }
             if (_picks.Count == 0) _pickAnchor = null;
             _grid.LayoutGrid();
             _host.SyncExtent();
@@ -2360,7 +2422,7 @@ namespace JoeBrowser
             }
         }
 
-        private async void EditProfile(string id, int tab = 0)
+        private async System.Threading.Tasks.Task EditProfileCore(string id, int tab = 0)
         {
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
@@ -2383,6 +2445,9 @@ namespace JoeBrowser
                 else Toast("Profile updated", ToastKind.Success);
             }
         }
+
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void EditProfile(string id, int tab = 0) { Guard("EditProfile", delegate { return EditProfileCore(id, tab); }); }
 
         /// <summary>Quick rename, so changing the label never means opening the whole editor.</summary>
         private void RenameProfile(string id)
@@ -2414,7 +2479,7 @@ namespace JoeBrowser
         /// Clears this profile's cache - or its cache and cookies when it is closed. An open
         /// profile is cleaned through the browser itself, so the tab survives.
         /// </summary>
-        private async void ClearProfileData(string id)
+        private async System.Threading.Tasks.Task ClearProfileDataCore(string id)
         {
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
@@ -2442,8 +2507,11 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void ClearProfileData(string id) { Guard("ClearProfileData", delegate { return ClearProfileDataCore(id); }); }
+
         /// <summary>Reads the live tab back and reports what a fingerprint page would see.</summary>
-        private async void RunLeakTest(string id)
+        private async System.Threading.Tasks.Task RunLeakTestCore(string id)
         {
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
@@ -2467,6 +2535,9 @@ namespace JoeBrowser
             else if (result.Clean) Toast("No leak found in " + result.Total + " checks", ToastKind.Success);
             else Toast(result.Verdict, ToastKind.Warn);
         }
+
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void RunLeakTest(string id) { Guard("RunLeakTest", delegate { return RunLeakTestCore(id); }); }
 
         private void DuplicateProfile(string id) { DuplicateProfile(id, true); }
         private void DuplicateProfile(string id, bool announce)
@@ -2558,6 +2629,7 @@ namespace JoeBrowser
 
         private void TogglePick(string id, bool extend)
         {
+            PrunePicks();
             var order = VisibleCards();
             int idx = order.FindIndex(c => c.Model.Id == id);
             if (idx < 0) return;
@@ -2595,6 +2667,7 @@ namespace JoeBrowser
 
         private void SyncPicks()
         {
+            PrunePicks();
             foreach (var kv in _cards) kv.Value.Picked = _picks.Contains(kv.Key);
             LayoutBulk();
             _grid.Invalidate();
@@ -2603,6 +2676,7 @@ namespace JoeBrowser
         private void LayoutBulk()
         {
             if (_bulk == null || _host == null) return;
+            PrunePicks();
             if (_picks.Count < 2 || _page != 0) { _bulk.Visible = false; return; }
 
             _bulkCount.Text = _picks.Count + " selected";
@@ -2673,6 +2747,9 @@ namespace JoeBrowser
                 trash ? "You can restore them from Tools & data → Recycle bin."
                       : "Proxy settings stored in them are removed too."))
                 return;
+            /* Each DeleteProfile(..., false) takes its card out of the grid, so the grid is
+               never rebuilt once per item. Profiles loaded from disk still need one reload to
+               pick up anything the store rewrote. */
             foreach (var p in list) DeleteProfile(p.Id, false);
             ReloadCards(true);
             ClearPicks();
@@ -2691,7 +2768,7 @@ namespace JoeBrowser
                     ? "Move \"" + p.Name + "\" to the recycle bin?"
                     : "Delete \"" + p.Name + "\" and all of its browsing data? This cannot be undone.",
                 useTrash ? "Browsing data and cookies are kept so a restore is complete."
-                         : p.Proxy.Enabled ? "The linked proxy settings are removed too." : null))
+                         : (p.Proxy != null && p.Proxy.Enabled) ? "The linked proxy settings are removed too." : null))
                 return;
 
             BrowserSession s;
@@ -2700,11 +2777,25 @@ namespace JoeBrowser
                 _sessions.Remove(id);
                 try { s.Close(); } catch { }
             }
+            /* The selection must not keep pointing at the profile that is going away; the card
+               it refers to disappears on the next reload. */
+            _picks.Remove(id);
+            if (_pickAnchor == id) _pickAnchor = null;
+            _launching.Remove(id);
+
             try
             {
                 _store.Delete(p, useTrash);
                 _profiles = _store.LoadAll();
-                if (!ask) return;
+                PrunePicks();
+                if (!ask)
+                {
+                    /* Called from the bulk bar: the caller reloads and clears the selection
+                       once, so a per-item reload here would rebuild every card N times. */
+                    RemoveCard(id);
+                    SyncPicks();
+                    return;
+                }
                 ReloadCards(false);
                 Toast(useTrash ? "Moved to the recycle bin" : "Profile deleted", ToastKind.Success);
             }
@@ -2713,6 +2804,21 @@ namespace JoeBrowser
                 Log.Error("Delete failed", ex);
                 Toast("Could not delete the profile", ToastKind.Error);
             }
+        }
+
+        /// <summary>Takes one card out of the grid without rebuilding the rest.</summary>
+        private void RemoveCard(string id)
+        {
+            ProfileCard card;
+            if (!_cards.TryGetValue(id, out card)) return;
+            _cards.Remove(id);
+            _grid.Controls.Remove(card);
+            try { card.Dispose(); } catch { }
+            _grid.LayoutGrid();
+            _host.SyncExtent();
+            _emptyPanel.Visible = _page == 0 && _cards.Count == 0;
+            if (_emptyPanel.Visible) _emptyPanel.BringToFront();
+            _grid.Invalidate();
         }
 
         private void FocusSession(string id)
@@ -2731,7 +2837,7 @@ namespace JoeBrowser
             Toast("Browser closed", ToastKind.Info);
         }
 
-        private async void OpenProfile(string id)
+        private async System.Threading.Tasks.Task OpenProfileCore(string id)
         {
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
@@ -2824,6 +2930,9 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
+        private void OpenProfile(string id) { Guard("OpenProfile", delegate { return OpenProfileCore(id); }); }
+
         private async Task<bool> DownloadBrowserAsync(string engine)
         {
             string label = BrowserFetcher.Label(engine);
@@ -2909,6 +3018,43 @@ namespace JoeBrowser
             try { _toast.Show(message, kind); } catch { }
         }
 
+        /// <summary>
+        /// Runs an async handler so a failed await cannot reach the global "unexpected error"
+        /// dialog. Before this every one of these was <c>async void</c>: a network hiccup in a
+        /// proxy check or a missing kernel folder during launch threw away the user's whole
+        /// session and showed a crash box with no context.
+        /// </summary>
+        private void Guard(string action, Func<System.Threading.Tasks.Task> work)
+        {
+            System.Threading.Tasks.Task task;
+            try { task = work(); }
+            catch (Exception ex) { Fail(action, ex); return; }
+            if (task == null) return;
+
+            task.ContinueWith(delegate(System.Threading.Tasks.Task t)
+            {
+                Exception ex = t.Exception == null ? null : t.Exception.GetBaseException();
+                if (ex == null) return;
+                if (IsDisposed || Disposing) { Log.Error(action, ex); return; }
+                try
+                {
+                    BeginInvoke(new Action(delegate { if (!IsDisposed) Fail(action, ex); }));
+                }
+                catch { Log.Error(action, ex); }
+            }, System.Threading.Tasks.TaskScheduler.Default);
+        }
+
+        private void Fail(string action, Exception ex)
+        {
+            Log.Error(action, ex);
+            string hint = ex is UnauthorizedAccessException
+                ? " A file or folder is locked - close any Joe Browser browsers and try again."
+                : ex is System.IO.IOException
+                    ? " A file could not be read or written."
+                    : "";
+            Toast("That did not work: " + ex.Message + hint, ToastKind.Error);
+        }
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             try
@@ -2924,7 +3070,11 @@ namespace JoeBrowser
                     _settings.WinWidth = Math.Max(1000, (int)Math.Round(restore.Width / (double)Ui.Scale));
                     _settings.WinHeight = Math.Max(660, (int)Math.Round(restore.Height / (double)Ui.Scale));
                 }
-                _store.SaveSettings(_settings);
+                /* Closing the window is not the moment to lose the geometry and the
+                   preferences with it: a locked or read-only settings.json used to throw out of
+                   OnFormClosing, which can stop the window from closing at all. */
+                try { _store.SaveSettings(_settings); }
+                catch (Exception ex) { Log.Error("Settings not saved on exit", ex); }
 
                 foreach (var s in _sessions.Values.ToList())
                 {

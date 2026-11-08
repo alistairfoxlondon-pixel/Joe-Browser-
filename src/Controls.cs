@@ -87,6 +87,9 @@ namespace JoeBrowser
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
+        public const int WM_SETICON = 0x0080;
+        public const int ICON_SMALL = 0;
+        public const int ICON_BIG = 1;
         public const int EM_SETCUEBANNER = 0x1501;
         public const int EM_LINESCROLL = 0x00B6;
         public const int EM_GETFIRSTVISIBLELINE = 0x00CE;
@@ -185,6 +188,24 @@ namespace JoeBrowser
             Native.RoundedCorners(Handle, Theme.Radius);
             Native.WindowBorderColor(Handle, Theme.Line);
             Native.ImmersiveDarkMode(Handle, Theme.Dark);
+            ApplyWindowIcons();
+        }
+
+        /// <summary>
+        /// WinForms sets one icon and lets Windows shrink it for every surface, so the 16 px
+        /// taskbar button was a resampled 32 px frame - soft, and on some machines washed out
+        /// to almost nothing. Handing the window the exact 16 px and 32 px frames keeps both
+        /// crisp. The icons are the app's own cached instances, so nothing is disposed here.
+        /// </summary>
+        private void ApplyWindowIcons()
+        {
+            try
+            {
+                if (Icon != null) Native.SendMessage(Handle, Native.WM_SETICON, (IntPtr)Native.ICON_BIG, Icon.Handle);
+                Icon small = AppIcon.Small;
+                if (small != null) Native.SendMessage(Handle, Native.WM_SETICON, (IntPtr)Native.ICON_SMALL, small.Handle);
+            }
+            catch { }
         }
 
         public void ToggleMaximize()

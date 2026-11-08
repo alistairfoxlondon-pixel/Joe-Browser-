@@ -1,4 +1,4 @@
-# Joe Browser 1.2.0
+# Joe Browser 1.2.1
 
 > **Joe Browser** — a free, local-first **anti-detect browser** for Windows.
 > Unlimited multi-profile browser management with per-profile proxies,
@@ -175,23 +175,34 @@ nothing is sent anywhere and no confirmation email is involved.
   (100,000 iterations, per-account salt), never in plain text.
 - **Continue with Google** — a real OAuth 2.0 loopback flow with PKCE, opened in
   your default browser. Google never sees a password from this app and the app
-  never sees one from Google. It needs one thing that cannot ship inside the
-  binary: an OAuth client id belonging to your own Google account.
+  never sees one from Google. The OAuth client id belongs to a Google Cloud
+  project, so it is the one value the binary cannot invent.
 
-  **Creating it (about a minute, once):**
+  **Signing in for the first time:** press **Continue with Google**. If no client
+  id is configured yet, Joe Browser opens the guided setup, which explains the
+  three console clicks, opens the console for you, accepts whatever form the id
+  was copied in (bare, quoted, or `id: secret`), and saves it. No separate trip to
+  Settings is needed.
+
+  Or create it yourself (about a minute, once):
 
   1. Open <https://console.cloud.google.com/apis/credentials> and create a project
      (any name).
   2. **OAuth consent screen** → *External* → add your own address as a **test user**.
   3. **Create credentials** → **OAuth client ID** → application type **Desktop app**.
   4. Copy the **client ID** (ends with `.apps.googleusercontent.com`) and the
-     **client secret**, then paste both into **Settings → Account & security**.
+     **client secret**, then paste both into **Settings → Account & security**
+     (or into the guided setup).
 
   No redirect URI has to be registered: a *Desktop app* client accepts
-  `http://localhost` on any port. Press **Test** next to the field — it runs the
-  real flow and reports exactly what Google answered (`redirect_uri_mismatch`,
-  `invalid_client`, `access_denied`, …) instead of failing silently. **Set up**
-  opens the console and repeats these steps.
+  `http://127.0.0.1` on any port. The app binds IPv4 loopback explicitly and sends
+  Google the matching literal address, because `localhost` resolves to `::1`
+  first on Windows and a `127.0.0.1`-only listener never saw the redirect — that
+  was the single most common cause of a sign-in that hung until it timed out.
+
+  Press **Test** next to the field — it runs the real flow and reports exactly
+  what Google answered (`redirect_uri_mismatch`, `invalid_client`,
+  `access_denied`, `org_internal`, …) instead of failing silently.
 - **Two-factor authentication** — turn it on in **Settings → Account & security**.
   Scan the QR code with any authenticator app (or type the key by hand) and
   confirm a 6-digit code. Standard RFC 6238 TOTP, SHA-1, 30-second steps.
@@ -290,6 +301,14 @@ beyond .NET Framework 4.8, which ships with Windows). A modern C# compiler is
 located automatically; install the .NET Framework 4.8 Developer Pack if none is
 found, or pass `-Csc <path to csc.exe>`. New `.cs` files are picked up
 automatically. `build\make-icon.ps1` regenerates the application icon.
+
+The UI type and the Material icon face are **embedded in the executable** and
+extracted to `%APPDATA%\JoeBrowser\fonts` on first run. That matters because the
+installer ships a single file: an installed copy used to have no `fonts` folder
+beside it and therefore drew no icons at all, while the same build run straight
+from `dist\` (which does have the folder) looked perfect. If the icon face cannot
+be loaded for any reason, `Theme` logs it and `Icons.Draw` paints a neutral
+placeholder instead of an invisible gap.
 
 `build\audit.ps1` builds the test harness, which compiles the same sources:
 

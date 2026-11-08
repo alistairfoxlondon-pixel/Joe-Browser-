@@ -184,6 +184,9 @@ namespace JoeBrowser
                down. tools\audit --glyphs renders both faces at every size the UI uses. */
             bool solid = px >= 26 || (px < 18 && Strokes.Contains(name));
             Font f = solid ? Theme.IconFontSolid(px) : Theme.IconFont(px);
+            /* The face is always the system UI family, so it is available even on a machine
+               that has none of the bundled files. */
+            if (f == null) f = Theme.Body;
             if (f == null) return;
 
             float x = (float)Math.Floor(box.X + (box.Width - px) / 2f);
@@ -209,6 +212,7 @@ namespace JoeBrowser
                 g.PixelOffsetMode = oldOffset;
             }
         }
+
     }
 
     /// <summary>
@@ -227,6 +231,7 @@ namespace JoeBrowser
                 if (name == "telegram") Telegram(g, box);
                 else if (name == "x") XMark(g, box);
                 else if (name == "youtube") YouTube(g, box);
+                else if (name == "google") Google(g, box);
             }
             finally { g.SmoothingMode = old; }
         }
@@ -271,6 +276,44 @@ namespace JoeBrowser
                 new PointF(x + d * 0.38f, y + d * 0.50f)
             };
             using (var b = new SolidBrush(Theme.Text)) g.FillPolygon(b, p);
+        }
+
+        /// <summary>
+        /// The four-colour Google "G": a ring split into the brand arcs plus the blue bar that
+        /// runs into the centre. Drawn rather than shipped as a bitmap, because the sign-in
+        /// button uses it at 16 px where a resampled PNG turns into a smudge.
+        /// </summary>
+        private static void Google(Graphics g, RectangleF box)
+        {
+            float d = Math.Min(box.Width, box.Height);
+            float x = box.X + (box.Width - d) / 2f, y = box.Y + (box.Height - d) / 2f;
+            float stroke = Math.Max(1.2f, d * 0.26f);
+            var ring = new RectangleF(x + stroke / 2f, y + stroke / 2f, d - stroke, d - stroke);
+
+            Color blue = Color.FromArgb(0x42, 0x85, 0xF4);
+            Color red = Color.FromArgb(0xEA, 0x43, 0x35);
+            Color yellow = Color.FromArgb(0xFB, 0xBC, 0x05);
+            Color green = Color.FromArgb(0x34, 0xA8, 0x53);
+
+            using (var pen = new Pen(blue, stroke))
+            {
+                pen.StartCap = LineCap.Flat;
+                pen.EndCap = LineCap.Flat;
+                g.DrawArc(pen, ring, 312f, 60f);   // right, above the bar
+                pen.Color = red;
+                g.DrawArc(pen, ring, 190f, 120f);  // over the top
+                pen.Color = yellow;
+                g.DrawArc(pen, ring, 135f, 55f);   // left
+                pen.Color = green;
+                g.DrawArc(pen, ring, 40f, 95f);    // bottom
+            }
+
+            // The blue bar into the centre; its right end meets the blue arc.
+            float barH = stroke * 0.86f;
+            float barLeft = x + d * 0.50f;
+            float barRight = x + d - stroke * 0.10f;
+            using (var b = new SolidBrush(blue))
+                g.FillRectangle(b, barLeft, y + d * 0.5f - barH / 2f, barRight - barLeft, barH);
         }
 
         private static void YouTube(Graphics g, RectangleF box)
