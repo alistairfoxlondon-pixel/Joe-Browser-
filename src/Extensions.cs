@@ -626,16 +626,15 @@ if (cfg.human) {
                      ';-ms-user-select:text!important;user-select:text!important}';
     (document.head || document.documentElement).appendChild(st);
   } catch (e) {}
+  /* No preventDefault patch here on purpose. This whole script is a C# verbatim string that
+     is compiled into the EXE, so an {" "} style empty catch, and every brace literal, has to
+     survive the C# parser before it can reach a page; the guard below does the same job with
+     a capture listener and nothing to escape. The copy unlock in the right click block still
+     patches preventDefault once, and keeps its own reference to the native one. */
   try {
-    var nativePreventSelect = Event.prototype.preventDefault;
-    Event.prototype.preventDefault = function () {
-      try {
-        /* selectstart and copy are the two events a page uses to stop selection. Trusted ones
-           are swallowed; the page's own synthetic events still work. */
-        if (this && (this.type === 'selectstart' || this.type === 'copy' || this.type === 'cut') && this.isTrusted) return;
-      } catch (e) {}
-      return nativePreventSelect.call(this);
-    };
+    document.addEventListener('copy', function (e) {
+      try { if (e.isTrusted) e.stopImmediatePropagation(); } catch (x) {}
+    }, true);
   } catch (e) {}
   try {
     document.addEventListener('selectstart', function (e) {
