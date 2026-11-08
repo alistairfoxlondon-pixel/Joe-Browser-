@@ -2711,7 +2711,7 @@ namespace JoeBrowser
             var p = HistoryTarget();
             if (p == null) { Toast(L10n.T("history.none"), ToastKind.Info); return; }
             if (!ConfirmForm.Ask(this, L10n.T("history.confirm.title"), L10n.T("history.confirm.body"),
-                L10n.T("history.confirm.detail"), "Clear", BtnKind.Danger)) return;
+                L10n.T("history.confirm.detail"), L10n.T("history.clear"), BtnKind.Danger)) return;
             int n = HistoryStore.Clear(p.Id);
             _historyPage.Rebuild();
             Toast(n + " " + L10n.T("history.cleared"), ToastKind.Success);
