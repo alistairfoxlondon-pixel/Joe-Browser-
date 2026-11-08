@@ -101,6 +101,36 @@ namespace JoeBrowser
 
             Controls.AddRange(new Control[] { _title, _subtitle, _email, _name, _password, _error, _signIn, _signUp, _google, _toggle });
             Theme.Restyle(this);
+
+            /* Tab order follows the layout, not the order the controls were created in: the
+               display-name field was added last but sits between the email and password boxes,
+               so Tab used to jump from the address straight into the buttons. In sign-in mode
+               the name field is hidden and the order collapses to email -> password by itself. */
+            _email.TabIndex = 0;
+            _name.TabIndex = 1;
+            _password.TabIndex = 2;
+            _signIn.TabIndex = 3;
+            _signUp.TabIndex = 3;
+            _google.TabIndex = 4;
+            _toggle.TabIndex = 5;
+            Shown += delegate { try { _email.Box.Focus(); } catch { } };
+        }
+
+        /// <summary>
+        /// The gate is the only way into the app, so it must not be dismissible by a stray Esc:
+        /// closing it quits Joe Browser. Esc clears the focused field instead, and the window
+        /// keeps its close button.
+        /// </summary>
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Escape)
+            {
+                _error.Visible = false;
+                if (_password.Box.Focused) _password.Value = "";
+                else if (_email.Box.Focused || ActiveControl == _email) _email.Value = "";
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private void ToggleMode()

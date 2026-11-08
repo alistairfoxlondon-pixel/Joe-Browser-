@@ -801,6 +801,37 @@ namespace JoeBrowser
             Stroke(g, ring, radius + S(1.5f), Theme.Text, S(1f));
         }
 
+        /// <summary>
+        /// True while the user is driving the app with the keyboard, i.e. after a Tab or an
+        /// arrow key and until the next mouse click.
+        ///
+        /// Every custom control used <c>Focused &amp;&amp; ShowFocusCues</c>. Control.ShowFocusCues
+        /// is a process-wide flag that Windows reports as FALSE when a touch keyboard is
+        /// attached, in tablet posture and in some remote sessions - so on those machines the
+        /// app drew no focus ring anywhere and looked unkeyboardable. Keeping our own flag
+        /// makes the cue independent of that, and it behaves the way Windows itself does:
+        /// visible after a key press, gone as soon as the mouse is used again.
+        /// </summary>
+        public static bool KeyboardCuesForced;
+
+        /// <summary>Whether a focus indicator should be drawn for this control right now.</summary>
+        public static bool FocusCues(Control c)
+        {
+            if (c == null || !c.Focused) return false;
+            return c.ShowFocusCues || KeyboardCuesForced;
+        }
+
+        /// <summary>Called for the keys that move focus; ignored for ordinary typing.</summary>
+        public static void NoteKey(Keys keyData)
+        {
+            Keys code = keyData & Keys.KeyCode;
+            if (code == Keys.Tab || code == Keys.Left || code == Keys.Right ||
+                code == Keys.Up || code == Keys.Down || code == Keys.Home || code == Keys.End ||
+                code == Keys.PageUp || code == Keys.PageDown || code == Keys.Enter ||
+                code == Keys.Space)
+                KeyboardCuesForced = true;
+        }
+
         public static void Text(Graphics g, string text, Font font, Color color, float x, float y,
             float width = 0, string align = "left", int maxLines = 1)
         {

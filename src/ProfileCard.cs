@@ -228,7 +228,7 @@ namespace JoeBrowser
             if (!proxyWrapped) PaintTags(g);
             PaintActions(g);
 
-            if (Focused && ShowFocusCues) Ui.FocusRing(g, r, rad);
+            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, rad);
         }
 
         private void PaintHeader(Graphics g, RectangleF r)

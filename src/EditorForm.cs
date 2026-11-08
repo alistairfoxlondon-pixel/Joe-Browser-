@@ -1015,8 +1015,28 @@ namespace JoeBrowser
                previous tab's pixels for one frame. Force a full repaint of its children. */
             JBScrollHost[] hosts = { _hostGeneral, _hostFp, _hostPriv, _hostProxy, _hostTools };
             foreach (JBScrollHost h in hosts) h.Invalidate(true);
-            if (index == 0) _name.Box.Select();
+            /* Focus follows the tab. Without this the first control of the newly shown page is
+               never focused, so Tab after switching a tab started from the old page and the
+               keyboard user was dropped back where they came from. */
+            Control first = FirstField(index);
+            if (first != null && Visible) { try { first.Focus(); } catch { } }
             Invalidate();
+        }
+
+        /// <summary>The first real field of a tab, in the order it appears on screen.</summary>
+        private Control FirstField(int index)
+        {
+            switch (index)
+            {
+                case 0: return _name == null ? null : _name.Box;
+                /* Fingerprint, privacy, proxy and tools all open with a picker, which is a
+                   real tab stop in every one of those pages. */
+                case 1: return _os;
+                case 2: return _webrtcSel;
+                case 3: return _savedProxy;
+                case 4: return _toolSpeed;
+                default: return null;
+            }
         }
 
         private void SetError(string text)
@@ -1069,7 +1089,9 @@ namespace JoeBrowser
             int cancelW = _cancel.PreferredWidth(Ui.S(88));
             _save.SetBounds(w - pad - saveW, h - Ui.S(16) - saveH, saveW, saveH);
             _cancel.SetBounds(_save.Left - Ui.S(8) - cancelW, h - Ui.S(16) - saveH, cancelW, saveH);
-            int errW = Math.Max(Ui.S(80), _cancel.Left - pad * 2 - Ui.S(24));
+            /* The label starts at pad+22 (right of the alert glyph), so its width has to be
+               measured from that x or the last characters sit under the Cancel button. */
+            int errW = Math.Max(Ui.S(120), _cancel.Left - Ui.S(8) - (pad + Ui.S(22)) - Ui.S(4));
             _err.SetBounds(pad + Ui.S(22), h - Ui.S(16) - saveH, errW, saveH);
             _footerY = h - Ui.S(64);
         }
@@ -1389,7 +1411,19 @@ namespace JoeBrowser
             if (type != "none")
             {
                 if (host.Length == 0) { Fail(3, "Proxy host is required."); return; }
-                if (port == 0) { Fail(3, "Proxy port must be between 1 and 65535."); return; }
+                if (port == 0)
+                {
+                    /* Name the value that was typed. "Must be between 1 and 65535" told a user
+                       who entered "4758q" nothing about why it was rejected, and the field is
+                       numeric-looking enough that the typo is easy to miss. */
+                    string typed = (_port.Value ?? "").Trim();
+                    Fail(3, typed.Length == 0
+                        ? "Proxy port is required."
+                        : "\"" + typed + "\" is not a valid port. Use a number from 1 to 65535.");
+                    _port.Box.Focus();
+                    _port.Box.SelectAll();
+                    return;
+                }
             }
 
             string start = _startUrl.Value.Trim();
@@ -1489,6 +1523,8 @@ namespace JoeBrowser
             Close();
         }
 
+        private DateTime? _escGuard;
+
         private void Fail(int tab, string message)
         {
             SetError(message);
@@ -1519,8 +1555,19 @@ namespace JoeBrowser
         {
             if (keyData == Keys.Escape)
             {
-                DialogResult = DialogResult.Cancel;
-                Close();
+                /* Esc used to close the editor outright. Five tabs of edits — name, notes,
+                   fingerprint, proxy credentials, tools — were discarded silently, and Esc is
+                   also the natural "undo the value I am typing" key, so this was hit by
+                   accident more often than on purpose. One Esc now asks; a second Esc (or the
+                   Discard button) closes. */
+                if (_escGuard != null && (DateTime.UtcNow - _escGuard.Value).TotalSeconds < 4)
+                {
+                    DialogResult = DialogResult.Cancel;
+                    Close();
+                    return true;
+                }
+                _escGuard = DateTime.UtcNow;
+                SetError("Press Esc again to discard your changes.");
                 return true;
             }
             if (keyData == (Keys.Control | Keys.S))

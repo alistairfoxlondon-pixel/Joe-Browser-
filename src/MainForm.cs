@@ -60,7 +60,7 @@ namespace JoeBrowser
         private int _payTicks;
         private bool _payBusy;
         private const int PayPollSeconds = 8;
-        private JBButton _emptyBtn, _aboutTelegram;
+        private JBButton _emptyBtn, _clearFilter, _aboutTelegram;
         private JBToast _toast;
 
         // Settings controls
@@ -310,10 +310,13 @@ namespace JoeBrowser
             _emptyBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("empty.action"), Radius = 4, Height = Ui.S(33) };
             _emptyBtn.Click += delegate
             {
-                if (_filter.Length > 0) { _search.Value = ""; _filter = ""; ApplyFilter(); }
+                if (_filter.Length > 0) { ClearSearch(); }
                 else NewProfile();
             };
+            _clearFilter = new JBButton { Kind = BtnKind.Soft, Icon = "close", Text = "Clear search", Radius = 4, Height = Ui.S(33), Visible = false };
+            _clearFilter.Click += delegate { ClearSearch(); };
             _emptyPanel.Controls.Add(_emptyBtn);
+            _emptyPanel.Controls.Add(_clearFilter);
 
             _toast = new JBToast();
 
@@ -1679,11 +1682,22 @@ namespace JoeBrowser
 
         private void PlanAction(string key)
         {
-            if (key == "copy")
+            if (key == "copy" || key == "copyamount")
             {
                 var inv = _upgradePage.Current;
                 if (inv == null) return;
-                try { Clipboard.SetText(inv.Coin.Address); Toast("Address copied", ToastKind.Success); }
+                /* Send exactly this amount: the number the user would otherwise retype from the
+                   screen, rounded to the coin's own precision so the clipboard value is the one
+                   the invoice is actually matched against. */
+                string text = key == "copyamount"
+                    ? Invoice.Fmt(inv.Amount)
+                    : inv.Coin.Address;
+                try
+                {
+                    Clipboard.SetText(text);
+                    Toast(key == "copyamount" ? "Amount copied  ·  " + text + " " + inv.Coin.Symbol
+                                              : "Address copied", ToastKind.Success);
+                }
                 catch (Exception ex) { Log.Error("Clipboard", ex); Toast("Could not copy", ToastKind.Error); }
                 return;
             }
@@ -2047,8 +2061,30 @@ namespace JoeBrowser
             LayoutBulk();
 
             _emptyPanel.SetBounds(_host.Left, _host.Top, _host.Width, _host.Height);
-            int emptyW = _emptyBtn.PreferredWidth(Ui.S(160));
-            _emptyBtn.SetBounds((_emptyPanel.Width - emptyW) / 2, _emptyPanel.Height / 2 + Ui.S(52), emptyW, Ui.S(33));
+            int emptyW;
+            /* When a search caused the empty list the panel offers "Clear search" next to the
+               create action instead of hiding the way back. */
+            bool searching = _filter.Length > 0;
+            _emptyBtn.Text = searching ? "New profile" : L10n.T("empty.action");
+            _emptyBtn.Kind = searching ? BtnKind.Soft : BtnKind.Primary;
+            emptyW = _emptyBtn.PreferredWidth(Ui.S(160));
+            if (emptyW < Ui.S(40)) emptyW = Ui.S(160);
+            int extraW = searching ? _clearFilter.PreferredWidth(Ui.S(140)) + Ui.S(10) : 0;
+            int startX = (_emptyPanel.Width - (emptyW + extraW)) / 2;
+            int btnY = _emptyPanel.Height / 2 + Ui.S(52);
+            if (searching)
+            {
+                _clearFilter.Kind = BtnKind.Primary;
+                _clearFilter.SetBounds(startX, btnY, extraW - Ui.S(10), Ui.S(33));
+                _clearFilter.Visible = true;
+                _emptyBtn.SetBounds(startX + extraW, btnY, emptyW, Ui.S(33));
+            }
+            else
+            {
+                _clearFilter.Visible = false;
+                _emptyBtn.SetBounds(startX, btnY, emptyW, Ui.S(33));
+            }
+            _emptyBtn.Invalidate();
 
             int pageH = Math.Max(1, h - headerH);
             _settingsPage.SetBounds(contentX, headerH, contentW, pageH);
@@ -2069,6 +2105,24 @@ namespace JoeBrowser
 
             ResumeLayout(false);
             Invalidate();
+        }
+
+        /// <summary>
+        /// Puts the layers back in their fixed order, bottom to top: page content, then the
+        /// toast, then the caption buttons. Called after anything that changes what is on top -
+        /// a page switch, a toast, the bulk bar - so a transient message can never end up under
+        /// a control it is supposed to float above.
+        /// </summary>
+        private void Restack()
+        {
+            try
+            {
+                if (_toast != null) _toast.BringToFront();
+                if (_minBtn != null) _minBtn.BringToFront();
+                if (_maxBtn != null) _maxBtn.BringToFront();
+                if (_closeBtn != null) _closeBtn.BringToFront();
+            }
+            catch { }
         }
 
         private void LayoutSettings()
@@ -2243,9 +2297,15 @@ namespace JoeBrowser
             _saveSettings.Visible = page == 4;
             _themeSwitch.Visible = true;
 
+            /* The newly visible page has to come forward over the other page containers...
+               and then the fixed chrome has to be put back on top of everything. Every page
+               that is not showing stays Visible=false but keeps its z-order slot above the
+               toast, so without the second step the answer to a save, a proxy test or a Google
+               sign-in was hidden behind an invisible page on every screen but Profiles, and the
+               user saw nothing happen at all. */
             Control[] pages = { _host, _emptyPanel, _proxyPage, _extensionPage, _browsersPage, _settingsPage, _toolsPage, _aboutPage, _upgradePage };
             foreach (var p in pages) if (p.Visible) p.BringToFront();
-            _toast.BringToFront();
+            Restack();
 
             if (page == 1)
             {
@@ -2375,15 +2435,27 @@ namespace JoeBrowser
                 if (!_cards.TryGetValue(_picks[i], out c) || !c.Visible) _picks.RemoveAt(i);
             }
             if (_picks.Count == 0) _pickAnchor = null;
-            _grid.LayoutGrid();
-            _host.SyncExtent();
             _emptyPanel.Visible = _page == 0 && shown == 0;
             SyncPicks();
+            /* Z-order first, then layout: raising the host after the grid was measured but
+               before the page that owns it was raised left the stacked "no profiles" panel on
+               top of the first card whenever a filter emptied and then refilled the list. */
             if (_emptyPanel.Visible) _emptyPanel.BringToFront();
             else if (shown > 0 && _page == 0) _host.BringToFront();
-            _toast.BringToFront();
+            _grid.LayoutGrid();
+            _host.SyncExtent();
+            Restack();
             _emptyPanel.Invalidate();
             Invalidate();
+        }
+
+        /// <summary>One place that undoes a search, used by Esc, the empty panel and the filter chip.</summary>
+        private void ClearSearch()
+        {
+            if (_search != null) _search.Value = "";
+            _filter = "";
+            ApplyFilter();
+            if (_search != null && _search.Visible) { try { _search.Box.Focus(); } catch { } }
         }
 
         private void EmptyPaint(object sender, PaintEventArgs e)
@@ -2695,6 +2767,7 @@ namespace JoeBrowser
                 Math.Max(_host.Top + Ui.S(6), _host.Bottom - height - Ui.S(16)), width, height);
             _bulk.BringToFront();
             _bulk.Visible = true;
+            Restack();   // the toast and the caption buttons stay above the bulk action bar
         }
 
         private void BulkOpen()
@@ -3015,7 +3088,12 @@ namespace JoeBrowser
 
         private void Toast(string message, ToastKind kind)
         {
-            try { _toast.Show(message, kind); } catch { }
+            try
+            {
+                _toast.Show(message, kind);
+                Restack();
+            }
+            catch { }
         }
 
         /// <summary>
@@ -3088,6 +3166,8 @@ namespace JoeBrowser
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            /* Keyboard-cue tracking lives in JBForm.ProcessCmdKey and covers this window too;
+               it is deliberately not duplicated here. */
             if (keyData == (Keys.Control | Keys.N)) { NewProfile(); return true; }
             if (keyData == (Keys.Control | Keys.F) || keyData == (Keys.Control | Keys.K))
             {
@@ -3100,13 +3180,7 @@ namespace JoeBrowser
             if (keyData == (Keys.Control | Keys.O) && _page == 0) { CycleSort(); return true; }
             if (keyData == (Keys.Control | Keys.A) && _page == 0) { SelectAllVisible(); return true; }
             if (keyData == Keys.Escape && _page == 0 && _picks.Count > 0) { ClearPicks(); return true; }
-            if (keyData == Keys.Escape && _page == 0 && _filter.Length > 0)
-            {
-                _search.Value = "";
-                _filter = "";
-                ApplyFilter();
-                return true;
-            }
+            if (keyData == Keys.Escape && _page == 0 && _filter.Length > 0) { ClearSearch(); return true; }
             if (_page == 0 && (keyData == Keys.Left || keyData == Keys.Right || keyData == Keys.Up || keyData == Keys.Down))
             {
                 var order = VisibleCards();

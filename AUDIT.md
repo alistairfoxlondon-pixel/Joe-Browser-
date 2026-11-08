@@ -337,3 +337,82 @@ Windows run to be exercised end to end; the things to check on the first build a
 3. Select two profiles, delete one → no dialog, the bulk bar drops to one, delete the
    second → the card grid and the empty state are correct.
 4. `%APPDATA%\JoeBrowser\Logs` after any of the above: no `ERROR` lines.
+
+---
+
+# Second pass — whole-app UI/UX audit
+
+The first pass fixed what was outright broken. This pass walked every window, page and
+control looking for the things that make an app feel unfinished: layers in the wrong
+order, affordances that only exist for the mouse, focus that cannot be seen, text that
+is clipped, state that lies, and gestures that silently do nothing.
+
+## Findings and fixes
+
+### Layout and painting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Toasts appeared on Profiles and on no other page | `SetPage` raised the page panel **after** the toast, so the toast sat under an invisible-but-opaque page | `Restack()` re-raises toast → min/max/close after every page change, every toast and every bulk-bar show |
+| The "no profiles" panel could sit on top of a card after a filter emptied and refilled the list | z-order was set before the grid was measured, and `_host` was raised only when `shown > 0` | `ApplyFilter` sets visibility and z-order first, then lays out, then restacks |
+| Bulk-action bar covered by later-raised surfaces | it raised itself but nothing above it | `LayoutBulk` calls `Restack()` |
+| Tools scrollbar drifted a pixel per notch and could leave the page | the bar was drawn inside the scroll transform with the offset added back | drawn after `ResetTransform`, sized from the viewport |
+| Multiline field hints ran past the field and over the neighbouring control | the hint label was unclipped and had no ellipsis | `AutoEllipsis`, first line only, re-synced on resize |
+| Editor inline error hid its last characters under Cancel | the label width was measured from the panel edge, not from the text start | width derived from `_cancel.Left` and the glyph inset |
+| Toggle's off-track hairline over a filled accent track read as a dirty edge | a 1px `TextDim` stroke drawn in both states | the stroke is drawn only in the off state |
+| `JBScrollHost.OnPaint` had two statements on one line | copy/paste damage | reformatted |
+
+### Keyboard and focus
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| No focus ring anywhere on some machines | every control used `Focused && ShowFocusCues`; Windows reports `ShowFocusCues == false` in tablet posture, with a touch keyboard, and in some remote sessions | new `Ui.FocusCues()` + `Ui.KeyboardCuesForced`, set by `Ui.NoteKey` from `JBForm.ProcessCmdKey` / `MainForm.ProcessCmdKey`, cleared on mouse-down — the Windows "focus visible" rule, independent of that flag |
+| `JBSegment` had no focus indicator at all | never drew one | ring around the whole strip |
+| Focus ring on the Primary button was invisible | it was drawn in the text colour over a filled accent surface | outer 1.5px ring in a blend of accent and text |
+| Window caption buttons drew a focus ring inside a 32px hit area | wrong place for a cue | removed |
+| Links announced focus only through the OS | no painted state | text colour + underline change |
+| Page Up/Down/Home/End did nothing in any scroll page | they are command keys, so `OnKeyDown` never ran; and `JBScrollHost` was not `Selectable`, so it could not take focus | `ProcessCmdKey` on the host handles all six plus Ctrl+Home/End; the host is selectable, takes focus on click |
+| The wheel did nothing over cards, empty states and chips | WinForms does not bubble `MouseWheel`; the message goes to whatever is under the pointer and is dropped | `JBScrollHost.WndProc` claims `WM_MOUSEWHEEL` for any descendant that did not handle it |
+| Tools page was completely unreachable by keyboard | hand-painted tiles, `TabStop = false`, no key handling | the page is a tab stop with an arrow-key cursor, Home/End, Enter/Space, and auto-scroll to the focused tile |
+| Extension rows, recommended cards, coin/network chips were mouse-only | `Control` with no `Selectable`/`TabStop` and no key handling | selectable, Enter/Space activate, focus ring drawn |
+| `JBSelect` ignored Home/End and F4 | not input keys / not handled | Home/End move the selection, F4 and Space toggle the popup |
+| A 47-item country list had to be scrolled by hand | no type-ahead | letters jump to the next matching label |
+| Tab order in the sign-in form skipped the password box | the display-name field was created last but sits between them | explicit `TabIndex` in visual order; the hidden field self-collapses in sign-in mode |
+| Switching an editor tab left focus on the old page | nothing focused the new page | the first field of each tab takes focus |
+| Esc on the sign-in gate quit the app | `KeyPreview` dialog-key default | Esc clears the focused credential field instead |
+
+### State, data safety and honesty
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| One Esc discarded five tabs of profile edits | `ProcessCmdKey` closed the editor outright | first Esc asks, second Esc (within 4s) discards |
+| A typed port like `4758q` reported "must be between 1 and 65535" and left the caret nowhere useful | validation lost the input | the message quotes the value, and the field is focused and selected |
+| Re-opening a `JBSelect` popup disposed the strip that was still on screen | `ShowMenu` disposed unconditionally | the open popup owns the gesture and closes first; the `Closed` handler ignores replaced menus |
+| Toast vanished while the user was reading it | fixed 3.4s/6.5s timer, no hover state | the countdown pauses while hovered and resumes shortly after the pointer leaves |
+| A search with no results looked like the profiles had been deleted | the empty state offered only "Create profile" | it now offers a primary "Clear search", and the secondary button keeps creating |
+| Search could only be undone with Esc or by clearing the box | no visible control | `ClearSearch()` is shared by Esc, the empty state and the filter path |
+| Payment page needed the amount and address retyped | only "Copy address" existed | "Copy amount" added; the address text itself is clickable; "I have paid" drops to its own row when space is tight |
+| `NetworkForm` could throw if a slow probe finished after the window closed | continuation used the disposed form | `IsDisposed`/`IsHandleCreated` guard after the await |
+| Language popup looked broken when a search matched nothing | blank list | explicit "No language matches …" row |
+| Esc in the language popup left focus wherever Windows put it | no focus restore | focus returns to the picker, and dismissing no longer re-enters the popup |
+
+## Deliberately not changed
+
+* `JBScrollHost` is **not** a tab stop. A focusable scroll container costs every field inside
+  it an extra Tab, and the page-level keyboard paths above already cover scrolling.
+* Hand-painted decorative surfaces (`PromoCard`, `StepHeader`, `NoteBar`, `LeakRow`,
+  `KernelRow`, `EngineRow`) stay out of the tab order: they are labels or already contain a
+  real focusable button.
+* `ProfileCard` keeps its own `ShowFocusCues`-independent ring via `Ui.FocusCues`, but its
+  Tab behaviour (a card grid, not a form) is unchanged.
+
+## Verification of this pass
+
+* Every edited method re-read against its callers; `Ui` helpers (`S`, `Blend`, `Measure`,
+  `Clip`, `FocusRing`, `FocusCues`, `NoteKey`) confirmed to live in `Theme.cs`.
+* Per-file brace/paren/bracket balance check over all of `src/*.cs`: clean.
+* Icon-name audit: every literal passed to `Icons.Draw`/`Icon =` exists in the glyph table
+  (`google` and `telegram` are `BrandIcons`, by design).
+* Still requires a Windows run: the keyboard walk (Tab through every page, arrows in the
+  tools grid, F4/Space in a select), hovering a toast for 10s, and the wheel over a card
+  grid and over an empty state.
