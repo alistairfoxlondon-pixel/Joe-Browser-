@@ -150,6 +150,14 @@ namespace JoeBrowser.Setup
                 }
                 try { File.SetAttributes(exe, FileAttributes.Normal); } catch { }
 
+                /* The application's configuration travels inside the installer for the same
+                   reason the fonts do: the installed copy is a lone executable, and .NET reads
+                   JoeBrowser.exe.config from beside it. Without this file an installed Joe
+                   Browser ran without per-monitor DPI awareness and without WinForms' own DPI
+                   rescaling, which is what made the installed build look blurry on a scaled
+                   display while the portable one did not. */
+                WriteConfig(dir, exe);
+
                 /* The payload carries its fonts inside itself now; this covers a package that
                    was built with a side-by-side folder as well. */
                 CopyFonts(dir);
@@ -173,6 +181,35 @@ namespace JoeBrowser.Setup
                 result.Error = ex.Message;
             }
             return result;
+        }
+
+        /// <summary>
+        /// Writes the application's config file beside the installed executable, replaced
+        /// atomically so an interrupted install cannot leave a half-written one behind.
+        /// </summary>
+        private static void WriteConfig(string dir, string exe)
+        {
+            const string resource = "JoeBrowser.payload.exe.config";
+            string target = exe + ".config";
+            string staged = target + ".new";
+            try
+            {
+                using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream(resource))
+                {
+                    if (s == null) return;
+                    if (File.Exists(staged)) File.Delete(staged);
+                    using (var fs = new FileStream(staged, FileMode.Create, FileAccess.Write, FileShare.None))
+                        s.CopyTo(fs);
+                }
+                if (File.Exists(target)) File.Delete(target);
+                File.Move(staged, target);
+            }
+            catch
+            {
+                /* A missing config file degrades the look of the window; failing the whole
+                   install over it would be worse. */
+                try { if (File.Exists(staged)) File.Delete(staged); } catch { }
+            }
         }
 
         /// <summary>
