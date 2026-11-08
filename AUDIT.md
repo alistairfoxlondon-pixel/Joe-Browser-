@@ -466,3 +466,47 @@ does, because the worst UX defect is a screen that confidently states something 
   their own Close/Dispose ordering.
 * Needs a Windows run: cancel a Chromium download mid-way and close the window; install from
   setup and press Close; open a proxy dropdown and read the tooltips.
+
+---
+
+# Fourth pass — menus, cards and the language table
+
+## Menus
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A glyph sat on top of the first two letters of every menu item | the icon was painted twice: once from `OnRenderItemText` at the text rectangle, once from `OnRenderItemImage` at a fixed x — and `ShowImageMargin` was on, so the second lane landed over the label | one owner (the text renderer), positioned from the text rectangle; the image renderer only draws real bitmaps |
+| Every menu had an empty gutter on the left | the framework's image lane was reserved although items carry glyph names, not bitmaps | `ShowImageMargin` off by default, on for the country picker that does insert flag chips |
+| A long dropdown could be taller than the screen | rows were paged by a hard-coded 34 px row height that ignores DPI and the real item padding | rows measured from the menu font, so the page always fits |
+| Closed dropdowns leaked their flag bitmaps | `CloseMenu` closed the strip but never disposed it | closed, then disposed on a posted message; the control disposes whatever is still alive when it goes |
+
+## Cards and surfaces
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Four bright pixels in the rounded corners of every card | `JBPanel` cleared its buffer with `Theme.Bg` regardless of what was behind it | clears with `Ui.SurfaceColor(this)` |
+| A tool's compact button kept the wrong visual weight | the kind was set once, not when the row was reconfigured | routed through the same helper as the other buttons |
+
+## Language
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Choosing Hindi, Indonesian or Vietnamese changed nothing at all | those three were offered by the picker but had no translation table | only languages with a table are offered |
+| A partially translated language looked broken rather than unfinished | nothing said how complete it was | the picker shows "N% translated" and choosing one says so once |
+| A saved language with no table made every label show raw keys (`nav.profiles`) | `Set` accepted any known language, and `T` falls back per key — but the table lookup failed wholesale | `Set` falls back to English unless a table exists |
+
+## Command line
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `--help` started the app; an unknown switch was silently ignored | only three arguments were parsed | `--help` prints the options; an unrecognised switch is logged rather than swallowed |
+
+## Verification of this pass
+
+* Every translated table is a strict subset of the English keys — no orphans (checked by script).
+* Every `L10n.T` key used in the source resolves in the English table (208 keys, 0 missing).
+* Every icon name passed to `Icons.Draw`/`Icon =` exists in the glyph table; `google` and
+  `telegram` are vector brand marks by design.
+* Brace/paren/bracket balance clean; no duplicate member declarations.
+* Needs a Windows run: open a country dropdown and read the flags, open a profile card menu,
+  switch the interface language to German and back.
