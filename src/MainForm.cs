@@ -2669,8 +2669,11 @@ namespace JoeBrowser
             int w = _aboutPage.Width, h = _aboutPage.Height;
             _aboutHost.SetBounds(Ui.S(ContentPad), Ui.S(8),
                 Math.Max(Ui.S(160), w - Ui.S(ContentPad) * 2), Math.Max(Ui.S(120), h - Ui.S(16)));
-            int tw = _aboutTelegram.PreferredWidth(Ui.S(190));
-            _aboutTelegram.SetBounds(Math.Max(Ui.S(300), _aboutColumn.Width) - tw - Ui.S(20), Ui.S(47), tw, Ui.S(33));
+            /* The button sits at the right edge of the column, and a narrow window used to push
+               its left edge past that edge and leave it hanging outside the card. */
+            int colW = Math.Max(Ui.S(300), _aboutColumn.Width);
+            int tw = Math.Min(Math.Max(Ui.S(96), colW - Ui.S(60)), _aboutTelegram.PreferredWidth(Ui.S(190)));
+            _aboutTelegram.SetBounds(Math.Max(Ui.S(8), colW - tw - Ui.S(20)), Ui.S(47), tw, Ui.S(33));
             _aboutColumn.Invalidate();
         }
 
