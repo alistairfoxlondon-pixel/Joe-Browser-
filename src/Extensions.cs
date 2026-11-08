@@ -180,8 +180,11 @@ namespace JoeBrowser
                     bg.AddArc(46 - r * 2, 46 - r * 2, r * 2, r * 2, 0, 90);
                     bg.AddArc(1, 46 - r * 2, r * 2, r * 2, 90, 90);
                     bg.CloseFigure();
-                    using (var brush = new LinearGradientBrush(new RectangleF(0, 0, 48, 48),
-                        tint, ControlPaint.Dark(tint, 0.22f), 55f))
+                    /* Mixed by hand rather than with ControlPaint, which is in the Windows Forms
+                       assembly this file does not reference, and a gradient that darkens by a
+                       fixed factor needs no theme at all. */
+                    Color deep = Color.FromArgb(tint.R * 78 / 100, tint.G * 78 / 100, tint.B * 78 / 100);
+                    using (var brush = new LinearGradientBrush(new RectangleF(0, 0, 48, 48), tint, deep, 55f))
                         g.FillPath(brush, bg);
                 }
 
