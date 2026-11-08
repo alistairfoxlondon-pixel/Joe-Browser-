@@ -513,8 +513,17 @@ namespace JoeBrowser
 
         private void OpenUrl(string url)
         {
+            if (string.IsNullOrWhiteSpace(url)) return;
+            /* A link that does not start with a scheme is handed to the shell as a file name,
+               which is how a store link pasted without "https://" opened nothing at all. */
+            if (!url.Contains("://") && !url.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase))
+                url = "https://" + url;
             try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-            catch (Exception ex) { Log.Error("Open url failed", ex); Toast("Could not open the link", ToastKind.Error); }
+            catch (Exception ex)
+            {
+                Log.Error("Open url failed: " + url, ex);
+                Toast("Could not open the link. Your default browser may not be set.", ToastKind.Error);
+            }
         }
 
         /* ------------------------------------------------------------------ *
@@ -1497,6 +1506,34 @@ namespace JoeBrowser
         /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
         private void BrowserAction(string key, string engine) { Guard("BrowserAction", delegate { return BrowserActionCore(key, engine); }); }
 
+        /// <summary>
+        /// Puts a freshly imported extension in the library, replacing an entry that is the same
+        /// extension rather than adding a second copy of it. Two rows for one extension is a
+        /// list that lies about what is loaded, and only one of the two can win at launch.
+        /// </summary>
+        private string AddExtension(ExtensionItem item)
+        {
+            if (item == null) return "could not be added";
+            for (int i = 0; i < _extensions.Count; i++)
+            {
+                var have = _extensions[i];
+                if (have == null) continue;
+                bool samePackage = !string.IsNullOrEmpty(item.StoreId) &&
+                                   string.Equals(have.StoreId, item.StoreId, StringComparison.OrdinalIgnoreCase);
+                bool sameName = string.Equals((have.Name ?? "").Trim(), (item.Name ?? "").Trim(),
+                                              StringComparison.OrdinalIgnoreCase);
+                if (!samePackage && !sameName) continue;
+                if (!samePackage && !string.IsNullOrEmpty(have.StoreId) &&
+                    !string.IsNullOrEmpty(item.StoreId)) continue;
+                _extensions[i] = item;
+                SaveExtensions();
+                return "replaced";
+            }
+            _extensions.Add(item);
+            SaveExtensions();
+            return "added";
+        }
+
         private void SaveExtensions()
         {
             ExtensionCatalog.Save(_extensions);
@@ -1548,9 +1585,7 @@ namespace JoeBrowser
             try
             {
                 var item = await Task.Run(new Func<ExtensionItem>(delegate { return ExtensionCatalog.ImportFromUrl(url); }));
-                _extensions.Add(item);
-                SaveExtensions();
-                Toast(ExtensionNote("\"" + item.Name + "\" added"), ToastKind.Success);
+                Toast(ExtensionNote("\"" + item.Name + "\" " + AddExtension(item)), ToastKind.Success);
             }
             catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
             finally { _extensionPage.SetBusy(false, ""); }
@@ -1572,9 +1607,7 @@ namespace JoeBrowser
                 try
                 {
                     var item = ExtensionCatalog.ImportFromFile(ofd.FileName);
-                    _extensions.Add(item);
-                    SaveExtensions();
-                    Toast(ExtensionNote("\"" + item.Name + "\" added"), ToastKind.Success);
+                    Toast(ExtensionNote("\"" + item.Name + "\" " + AddExtension(item)), ToastKind.Success);
                 }
                 catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
             }
@@ -1588,9 +1621,7 @@ namespace JoeBrowser
                 try
                 {
                     var item = ExtensionCatalog.ImportFromFolder(fbd.SelectedPath);
-                    _extensions.Add(item);
-                    SaveExtensions();
-                    Toast(ExtensionNote("\"" + item.Name + "\" added"), ToastKind.Success);
+                    Toast(ExtensionNote("\"" + item.Name + "\" " + AddExtension(item)), ToastKind.Success);
                 }
                 catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
             }
@@ -1609,17 +1640,35 @@ namespace JoeBrowser
             if (index < 0 || index >= _extensions.Count) return;
             var item = _extensions[index];
             if (!ConfirmForm.Ask(this, "Remove extension", "Remove \"" + item.Name + "\" from Joe Browser?",
-                "The files stay on disk.", "Remove", BtnKind.Danger)) return;
+                "Its files are deleted from Joe Browser's extensions folder.", "Remove", BtnKind.Danger)) return;
+
+            /* The dialog used to promise the files stayed, and they did - in a folder that the
+               page offered no way to reach, one copy per import. Removing an entry therefore
+               left the extension behind for good, and re-importing made a second copy. Both are
+               fixed here: the managed folder is deleted, and an import of something that is
+               already listed replaces the entry instead of stacking another. */
+            string folder = item.Folder;
             _extensions.RemoveAt(index);
             SaveExtensions();
-            Toast(ExtensionNote("Extension removed"), ToastKind.Success);
+            bool removed = ExtensionCatalog.DeleteFiles(item);
+            Toast(ExtensionNote(removed ? "Extension removed" : "Extension removed. Close the browsers it was open in to free its files"),
+                removed ? ToastKind.Success : ToastKind.Info);
         }
 
         private void OpenExtensionStore(int index)
         {
             if (index < 0 || index >= _extensions.Count) return;
-            string url = _extensions[index].StoreUrl;
-            if (string.IsNullOrWhiteSpace(url)) { Toast("This extension was added from a local folder", ToastKind.Info); return; }
+            var item = _extensions[index];
+            string url = item.StoreUrl;
+            /* An extension imported from a file or a folder has no store link stored, but the
+               key inside its manifest names its store id, so the listing can still be opened. */
+            if (string.IsNullOrWhiteSpace(url) && !string.IsNullOrEmpty(item.StoreId))
+                url = ExtensionCatalog.StoreUrlForId(item.StoreId);
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                Toast("This extension has no store listing. Its manifest carries no key.", ToastKind.Info);
+                return;
+            }
             OpenUrl(url);
         }
 

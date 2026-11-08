@@ -47,7 +47,11 @@ namespace JoeBrowser
             _planNote.Wrap = true;
             _column.Controls.Add(_planNote);
 
-            _planCard = new JBPanel();
+            /* Reserved for the plan panel. It used to be added with no bounds at all, so it sat
+               at 0,0 sized 0x0 - invisible, but still a control in the column that the layout
+               below had to work around. Collapsed by default and only given space when it has
+               something to show. */
+            _planCard = new JBPanel { Visible = false, Hoverable = false };
             _column.Controls.Add(_planCard);
 
             _manage = MakeButton(L10n.T("acct.manageplan"), "crown", BtnKind.Primary);
@@ -97,6 +101,11 @@ namespace JoeBrowser
             _title.Text = me == null ? L10n.T("acct.signedout") : me.Email;
             if (me != null && !string.IsNullOrEmpty(me.DisplayName))
                 _title.Text = me.DisplayName + "   " + me.Email;
+            /* A long address in a narrow window is trimmed with an ellipsis, and the last thing a
+               user needs clipped on an account page is which account it is. The tooltip and a
+               selectable title both give the whole value back. */
+            ToolTips.Attach(_title, _title.Text);
+            _title.Selectable = me != null;
 
             _plan.Text = Plan.Summary();
             var until = Plan.Until;
@@ -125,6 +134,21 @@ namespace JoeBrowser
             LayoutCore();
         }
 
+        /// <summary>Height the wrapped text needs at the given width, in whole lines.</summary>
+        private static int MeasureLines(string text, Font font, int width)
+        {
+            int line = Math.Max(Ui.S(16), (int)Math.Ceiling(font.GetHeight()));
+            if (string.IsNullOrEmpty(text)) return line;
+            try
+            {
+                Size size = TextRenderer.MeasureText(text, font, new Size(Math.Max(Ui.S(80), width), int.MaxValue),
+                    TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
+                int lines = Math.Max(1, (int)Math.Round(size.Height / (double)line));
+                return line * Math.Min(3, lines) + Ui.S(2);
+            }
+            catch { return line; }
+        }
+
         protected override void OnResize(EventArgs e) { base.OnResize(e); LayoutCore(); }
 
         private void LayoutCore()
@@ -143,21 +167,18 @@ namespace JoeBrowser
                 y += Ui.S(34);
                 _plan.SetBounds(pad, y, inner, Ui.S(22));
                 y += Ui.S(26);
-                _planNote.SetBounds(pad, y, inner, Ui.S(20));
-                y += Ui.S(30);
+                /* The plan note wraps, and on a narrow window two lines of it sat on top of the
+                   first button row. Its height is measured from the text that is in it. */
+                int noteH = MeasureLines(_planNote.Text, Theme.Caption, inner);
+                _planNote.SetBounds(pad, y, inner, noteH);
+                y += noteH + Ui.S(10);
 
                 int bh = Ui.S(33);
-                int bx = pad;
                 JBButton[] actions = { _manage, _signOut, _switch, _pin, _twoFactor };
-                foreach (var b in actions)
-                {
-                    if (!b.Visible) continue;
-                    int bw = b.PreferredWidth(Ui.S(130));
-                    if (bx + bw > pad + inner) { bx = pad; y += bh + Ui.S(8); }
-                    b.SetBounds(bx, y, bw, bh);
-                    bx += bw + Ui.S(8);
-                }
-                y += bh + Ui.S(24);
+                /* FlowButtons wraps and never overlaps; the old loop compared bx + bw against
+                   the wrap edge without adding the gap it was about to advance by, so the last
+                   button on a line could cross the edge and start the next line under it. */
+                y = Ui.FlowButtons(actions, pad, y, inner, Ui.S(8), bh) + Ui.S(24);
 
                 _accountsHeading.SetBounds(pad, y, inner - _refresh.PreferredWidth(Ui.S(100)) - Ui.S(8), Ui.S(22));
                 int rw = _refresh.PreferredWidth(Ui.S(100));
@@ -207,6 +228,7 @@ namespace JoeBrowser
                     if (h != null) h(_page, _account.Email);
                 };
                 Controls.Add(_remove);
+                ToolTips.Attach(this, (string.IsNullOrEmpty(account.Email) ? "" : account.Email));
             }
 
             public int RowHeight { get { return Ui.S(62); } }
@@ -214,8 +236,24 @@ namespace JoeBrowser
             protected override void OnResize(EventArgs e)
             {
                 base.OnResize(e);
+                LayoutRemove();
+            }
+
+            protected override void OnHandleCreated(EventArgs e)
+            {
+                base.OnHandleCreated(e);
+                LayoutRemove();
+            }
+
+            /// <summary>Keeps the button inside the row whatever the row's width and scale are,
+               and repaints the text that shares the row with it.</summary>
+            private void LayoutRemove()
+            {
                 int bw = _remove.PreferredWidth(Ui.S(96));
-                _remove.SetBounds(Width - bw - Ui.S(12), (RowHeight - Ui.S(28)) / 2, bw, Ui.S(28));
+                if (bw > Math.Max(Ui.S(40), Width - Ui.S(28))) bw = Math.Max(Ui.S(40), Width - Ui.S(28));
+                _remove.SetBounds(Math.Max(Ui.S(6), Width - bw - Ui.S(12)),
+                    (RowHeight - Ui.S(28)) / 2, bw, Ui.S(28));
+                Invalidate();
             }
 
             protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
@@ -231,7 +269,10 @@ namespace JoeBrowser
                 Ui.Stroke(g, box, Ui.S(8), _hover ? Theme.HoverStrong : Theme.Line, 1f);
 
                 float left = Ui.S(14);
-                float w = Width - left - Ui.S(120);
+                /* The remove button is measured, not assumed: a fixed 120 px reserve is narrower
+                   than the button on a large font, and the address then ran underneath it. */
+                int removeW = _remove.PreferredWidth(Ui.S(96)) + Ui.S(12);
+                float w = Math.Max(Ui.S(60), Width - left - removeW);
                 Ui.Text(g, string.IsNullOrEmpty(_account.DisplayName) ? _account.Email : _account.DisplayName,
                     Theme.Body, Theme.Text, left, Ui.S(9), w);
                 Ui.Text(g, _account.Email, Theme.Caption, Theme.TextFaint, left, Ui.S(30), w);

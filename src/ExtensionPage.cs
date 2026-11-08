@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 
 namespace JoeBrowser
@@ -23,6 +24,29 @@ namespace JoeBrowser
         private readonly JBScrollHost _host;
         private readonly List<ExtensionRow> _rows = new List<ExtensionRow>();
         private readonly List<RecommendCard> _cards = new List<RecommendCard>();
+        /// <summary>Logos are read from disk once per path: an extension folder can hold a
+        /// 128 px png and the row is repainted on every hover.</summary>
+        private static readonly Dictionary<string, Image> LogoCache =
+            new Dictionary<string, Image>(StringComparer.OrdinalIgnoreCase);
+
+        internal static Image LogoFor(ExtensionItem item)
+        {
+            string path = item == null ? "" : item.IconPath;
+            if (string.IsNullOrEmpty(path)) return null;
+            Image img;
+            if (LogoCache.TryGetValue(path, out img)) return img;
+            try
+            {
+                /* Read through a stream and copy, so the file is not left locked by the
+                   browser's own read of the same folder. */
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var src = Image.FromStream(fs))
+                    img = new Bitmap(src);
+            }
+            catch { img = null; }
+            LogoCache[path] = img;
+            return img;
+        }
         private JBButton _addUrl, _addFolder, _addFile, _openFolder;
         private JBLabel _section;
         private JBPanel _empty;
@@ -49,10 +73,20 @@ namespace JoeBrowser
                why an import path has to be built rather than assumed. */
             _addFile = MakeButton("Import .crx or .zip", "download", BtnKind.Soft, "file");
             _openFolder = MakeButton("Open folder", "external", BtnKind.Soft, "openfolder");
-            _column.Controls.Add(_addUrl);
-            _column.Controls.Add(_addFolder);
-            _column.Controls.Add(_addFile);
-            _column.Controls.Add(_openFolder);
+            /* The action bar is pinned to the page rather than scrolled with the list. It sat
+               inside the scrolling column, so it moved under the pointer as the list grew and
+               could be scrolled half out of view - a bar of buttons that is not where it was a
+               second ago. */
+            Controls.Add(_addUrl);
+            Controls.Add(_addFolder);
+            Controls.Add(_addFile);
+            Controls.Add(_openFolder);
+            /* A control added later sits behind the ones already there, so the bar has to be
+               lifted above the scroller it shares the page with. */
+            _openFolder.BringToFront();
+            _addFile.BringToFront();
+            _addFolder.BringToFront();
+            _addUrl.BringToFront();
 
             _empty = new JBPanel();
             _empty.Paint += PaintEmpty;
@@ -162,24 +196,22 @@ namespace JoeBrowser
             _layingOut = true;
             try
             {
-                _host.SetBounds(0, 0, Math.Max(1, Width), Math.Max(1, Height));
                 int pad = Ui.S(28);
-                int inner = Math.Max(Ui.S(280), _host.Width - Ui.S(10) - pad * 2);
 
                 /* Four buttons on one line when they fit and wrapped onto two when they do not,
-                   rather than a row that runs off the right edge of a narrow window. */
-                int by = Ui.S(6);
-                int bx = pad;
+                   rather than a row that runs off the right edge of a narrow window. The band
+                   they sit in is measured first, then the scrolling list starts under it. */
+                int bandW = Math.Max(Ui.S(280), Width - pad * 2);
                 JBButton[] actions = { _addUrl, _addFolder, _addFile, _openFolder };
-                foreach (var b in actions)
-                {
-                    int bw = b.PreferredWidth(Ui.S(150));
-                    if (bx > pad && bx + bw > pad + inner) { bx = pad; by += Ui.S(33) + Ui.S(8); }
-                    b.SetBounds(bx, by, bw, Ui.S(33));
-                    bx += bw + Ui.S(10);
-                }
+                /* The bar wraps instead of running off the edge, and the scroller starts under
+                   whatever height it ended up needing. */
+                int bandBottom = Ui.FlowButtons(actions, pad, Ui.S(6), bandW, Ui.S(10), Ui.S(33));
+                int gapBelow = Ui.S(10);
+                _host.SetBounds(0, bandBottom + gapBelow, Math.Max(1, Width),
+                    Math.Max(1, Height - bandBottom - gapBelow));
+                int inner = Math.Max(Ui.S(280), _host.Width - Ui.S(10) - pad * 2);
 
-                int y = by + Ui.S(33) + Ui.S(22);
+                int y = Ui.S(10);
                 _empty.Visible = Items.Count == 0;
                 _empty.SetBounds(pad, y, inner, Ui.S(92));
                 if (Items.Count == 0) y += Ui.S(92) + Ui.S(18);
@@ -253,8 +285,14 @@ namespace JoeBrowser
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
-            int hit = e.X >= SwitchRect.Left ? 0 : DeleteRect.Contains(e.Location) ? 1 : StoreRect.Contains(e.Location) ? 2 : -1;
+            /* Only the switch itself toggles. The whole right edge used to, which meant a click
+               meant for the trash icon could land one pixel short and switch the extension off
+               instead of asking to remove it. */
+            int hit = SwitchRect.Contains(e.Location) ? 0
+                : DeleteRect.Contains(e.Location) ? 1
+                : StoreRect.Contains(e.Location) ? 2 : -1;
             if (hit != _hover) { _hover = hit; Invalidate(); }
+            Cursor = hit >= 0 ? Cursors.Hand : Cursors.Default;
             base.OnMouseMove(e);
         }
 
@@ -264,7 +302,7 @@ namespace JoeBrowser
         {
             base.OnMouseDown(e);
             if (e.Button != MouseButtons.Left) return;
-            if (e.X >= SwitchRect.Left) { var h = ToggleRequested; if (h != null) h(this, EventArgs.Empty); return; }
+            if (SwitchRect.Contains(e.Location)) { var h = ToggleRequested; if (h != null) h(this, EventArgs.Empty); return; }
             if (DeleteRect.Contains(e.Location)) { var h = DeleteRequested; if (h != null) h(this, EventArgs.Empty); return; }
             if (StoreRect.Contains(e.Location)) { var h = StoreRequested; if (h != null) h(this, EventArgs.Empty); return; }
         }
@@ -281,9 +319,28 @@ namespace JoeBrowser
 
             float chip = Ui.S(34);
             var cr = new RectangleF(Ui.S(16), (Height - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(7), Theme.AccentOnBg);
-            float ic = Ui.S(18);
-            Icons.Draw(g, "extension", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
+            /* The brief asks for each extension to have its own logo, and the row drew the same
+               puzzle piece for all of them. The package usually ships one; when it does not,
+               the piece is still the fallback. */
+            var logo = ExtensionPage.LogoFor(Item);
+            if (logo != null)
+            {
+                var target = new RectangleF(cr.X, cr.Y, chip, chip);
+                using (var path = Ui.Round(target, Ui.S(7)))
+                {
+                    var save = g.Save();
+                    g.SetClip(path);
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(logo, target);
+                    g.Restore(save);
+                }
+            }
+            else
+            {
+                Ui.Fill(g, cr, Ui.S(7), Theme.AccentOnBg);
+                float ic = Ui.S(18);
+                Icons.Draw(g, "extension", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
+            }
 
             float x = cr.Right + Ui.S(14);
             float mid = Height / 2f;

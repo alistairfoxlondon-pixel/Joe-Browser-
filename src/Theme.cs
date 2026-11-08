@@ -755,6 +755,33 @@ namespace JoeBrowser
             return Theme.Bg;
         }
 
+        /// <summary>
+        /// Places a row of buttons left to right, wrapping onto another line when the next one
+        /// would cross <paramref name="width"/>. Returns the y of the line after the last one, so
+        /// the caller starts the next block below every button it placed.
+        ///
+        /// Three pages used to measure and place their buttons by hand, each with the same
+        /// defect: the position was computed from the right edge one button at a time, so a
+        /// button could be placed on top of the one before it, and a narrow window pushed the
+        /// group past the edge of the page. One implementation means one fix.
+        /// </summary>
+        public static int FlowButtons(JBButton[] buttons, int left, int top, int width, int gap, int rowHeight)
+        {
+            if (buttons == null || buttons.Length == 0) return top;
+            int x = left, y = top, used = 0;
+            foreach (var b in buttons)
+            {
+                if (b == null || !b.Visible) continue;
+                int bw = b.PreferredWidth(S(84));
+                if (bw > width) bw = width;
+                if (used > 0 && x + bw > left + width) { x = left; y += rowHeight + gap; used = 0; }
+                b.SetBounds(x, y, bw, rowHeight);
+                x += bw + gap;
+                used++;
+            }
+            return y + rowHeight;
+        }
+
         public static GraphicsPath Round(RectangleF r, float radius)
         {
             var path = new GraphicsPath();

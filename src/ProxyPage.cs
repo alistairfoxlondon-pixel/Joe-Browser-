@@ -159,15 +159,12 @@ namespace JoeBrowser
                 int pad = Ui.S(28);
                 int inner = Math.Max(Ui.S(200), w - pad * 2);
 
-                int bw1 = _addBtn.PreferredWidth(Ui.S(120));
-                int bw2 = _importBtn.PreferredWidth(Ui.S(110));
-                int bw3 = _checkBtn.PreferredWidth(Ui.S(110));
+                /* Laid out by the shared flow so the three buttons wrap on a narrow window
+                   instead of the third one running past the right edge, which is what the
+                   hand-placed positions above did. */
                 int by = Ui.S(6);
-                _addBtn.SetBounds(pad, by, bw1, Ui.S(33));
-                _importBtn.SetBounds(pad + bw1 + Ui.S(10), by, bw2, Ui.S(33));
-                _checkBtn.SetBounds(pad + bw1 + bw2 + Ui.S(20), by, bw3, Ui.S(33));
-
-                int y = by + Ui.S(33) + Ui.S(22);
+                JBButton[] actions = { _addBtn, _importBtn, _checkBtn };
+                int y = Ui.FlowButtons(actions, pad, by, inner, Ui.S(10), Ui.S(33)) + Ui.S(22);
                 _empty.Visible = Items.Count == 0;
                 _empty.SetBounds(pad, y, inner, Ui.S(96));
                 if (Items.Count == 0) y += Ui.S(96) + Ui.S(18);

@@ -181,7 +181,32 @@ jobs:
             Requirements: any installed Chromium-based browser or Firefox. The Browsers page can
             install Chrome, Brave or Chromium for you.
 
-            ### What is new in 1.4.4
+            ### What is new in 1.4.5
+
+            **The history and account pages no longer overlap.** Both placed their rows of
+            buttons one at a time from the right edge, without accounting for the gap they were
+            about to advance by, so on a narrow window the last button on a line crossed the edge
+            and the next line started underneath it. One shared layout now places every row of
+            buttons: it measures them first and wraps them onto a new line when they do not fit.
+            The same fix reached the proxy, browsers and upgrade pages, where a button could be
+            drawn on top of the QR code or outside its card.
+
+            **Each extension shows its own logo.** Every row drew the same puzzle piece. The
+            logo is now the largest icon the extension's own manifest names, read from its
+            folder, and the picture is used everywhere that extension appears.
+
+            **The store link works, and says why when it cannot.** A link without `https://` was
+            handed to the shell as a file name and opened nothing. The store search appended a
+            percent sign to a path that was already encoded. A store download saved whatever came
+            back, so an HTML page for a removed or region locked id was reported as "not a valid
+            package"; it now reads the answer and says which of those it was.
+
+            **Removing an extension removes its files.** The dialog said the files stayed on
+            disk, and there was no way to reach them, so every removal left a copy behind.
+            Re-importing the same extension now replaces its entry instead of adding a second
+            row for the same package.
+
+            ### What was new in 1.4.4
 
             **A proxy edited onto an open profile is saved with its own clock.** Matching the
             clock to the proxy was only done at launch, so a proxy added in the editor could be

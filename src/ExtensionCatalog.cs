@@ -19,6 +19,16 @@ namespace JoeBrowser
         public string StoreUrl { get; set; }
         public string Version { get; set; }
 
+        /// <summary>Absolute path of the extension's own logo, read from its manifest, or
+        /// empty when the package ships none. Each extension gets its own picture on the
+        /// library row instead of one shared puzzle piece.</summary>
+        public string Icon { get; set; }
+
+        /// <summary>The id the extension is known by on the store, recovered from the key in
+        /// its manifest. Empty for a build of the app's own, and for a folder whose manifest
+        /// carries no key.</summary>
+        public string StoreId { get; set; }
+
         public ExtensionItem()
         {
             Id = Guid.NewGuid().ToString("N");
@@ -28,6 +38,20 @@ namespace JoeBrowser
             Source = "folder";
             StoreUrl = "";
             Version = "";
+            Icon = "";
+            StoreId = "";
+        }
+
+        /// <summary>Where the logo is drawn from, or empty. Checked every time because the
+        /// folder can be deleted behind the app's back.</summary>
+        [ScriptIgnore]
+        public string IconPath
+        {
+            get
+            {
+                try { return !string.IsNullOrEmpty(Icon) && File.Exists(Icon) ? Icon : ""; }
+                catch { return ""; }
+            }
         }
     }
 
@@ -103,6 +127,112 @@ namespace JoeBrowser
                 if (changed) Save(items);
             }
             catch (Exception ex) { Log.Error("Listing the default extensions failed", ex); }
+        }
+
+        /* ------------------------------------------------------------------ *
+         * Identity and logo, read from the package itself
+         * ------------------------------------------------------------------ */
+
+        /// <summary>
+        /// The extension id a manifest's public key stands for. Chromium's rule: sha256 of the
+        /// DER key, first 32 hex digits, each hex digit mapped 0-f to a-p. Having it means an
+        /// imported extension is listed, stored and linked under the same id the store uses.
+        /// </summary>
+        public static string IdForKey(string base64Key)
+        {
+            if (string.IsNullOrWhiteSpace(base64Key)) return "";
+            try
+            {
+                byte[] der = Convert.FromBase64String(base64Key.Trim());
+                using (var sha = System.Security.Cryptography.SHA256.Create())
+                {
+                    byte[] hash = sha.ComputeHash(der);
+                    var sb = new StringBuilder(32);
+                    for (int i = 0; i < 16; i++)
+                    {
+                        sb.Append((char)('a' + (hash[i] >> 4)));
+                        sb.Append((char)('a' + (hash[i] & 0x0F)));
+                    }
+                    return sb.ToString();
+                }
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>Extension id from a folder, or empty when its manifest has no key.</summary>
+        public static string IdFromFolder(string folder)
+        {
+            if (string.IsNullOrWhiteSpace(folder)) return "";
+            try
+            {
+                string manifest = Path.Combine(folder, "manifest.json");
+                if (!File.Exists(manifest)) return "";
+                var d = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(manifest, Encoding.UTF8));
+                object key;
+                if (d == null || !d.TryGetValue("key", out key)) return "";
+                return IdForKey(Convert.ToString(key));
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>
+        /// The extension's own logo: the largest icon its manifest names, resolved to a file in
+        /// the folder. Falls back to the largest icon_NN.png the package ships, so an extension
+        /// that declares its icons in code still gets its picture on the row.
+        /// </summary>
+        public static string IconFromFolder(string folder)
+        {
+            if (string.IsNullOrWhiteSpace(folder)) return "";
+            try
+            {
+                string manifest = Path.Combine(folder, "manifest.json");
+                if (File.Exists(manifest))
+                {
+                    var d = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(manifest, Encoding.UTF8));
+                    object node;
+                    if (d != null && d.TryGetValue("icons", out node))
+                    {
+                        var map = node as Dictionary<string, object>;
+                        if (map != null)
+                        {
+                            int bestSize = -1;
+                            string bestPath = "";
+                            foreach (var kv in map)
+                            {
+                                int size;
+                                if (!int.TryParse(kv.Key, out size)) continue;
+                                string rel = Convert.ToString(kv.Value);
+                                if (string.IsNullOrWhiteSpace(rel)) continue;
+                                string full = Path.Combine(folder, rel.Replace('/', '\\'));
+                                if (!File.Exists(full) || size <= bestSize) continue;
+                                bestSize = size;
+                                bestPath = full;
+                            }
+                            if (bestPath.Length > 0) return bestPath;
+                        }
+                    }
+                }
+                string best = "";
+                int bestPixels = -1;
+                foreach (string file in Directory.GetFiles(folder, "*.png", SearchOption.AllDirectories))
+                {
+                    string name = Path.GetFileNameWithoutExtension(file);
+                    int pixels = 0;
+                    int underscore = name.LastIndexOf('_');
+                    if (underscore >= 0) int.TryParse(name.Substring(underscore + 1), out pixels);
+                    if (pixels <= bestPixels) continue;
+                    bestPixels = pixels;
+                    best = file;
+                }
+                return best;
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>The store listing for an extension, when its id is known.</summary>
+        public static string StoreUrlForId(string id)
+        {
+            return string.IsNullOrEmpty(id) ? "" : "https://chromewebstore.google.com/detail/" + id;
         }
 
         /// <summary>Ensures the shipped store extensions are present in the library, once.
@@ -209,6 +339,22 @@ namespace JoeBrowser
                 foreach (var e in items)
                 {
                     if (e == null || string.IsNullOrEmpty(e.Id)) continue;
+                    /* Entries saved before the logo and the store id were recorded are filled
+                       in on load, once, from the package that is already on disk. */
+                    try
+                    {
+                        if (string.IsNullOrEmpty(e.Icon) || string.IsNullOrEmpty(e.StoreId))
+                        {
+                            if (string.IsNullOrEmpty(e.Icon)) e.Icon = IconFromFolder(e.Folder);
+                            if (string.IsNullOrEmpty(e.StoreId))
+                            {
+                                e.StoreId = IdFromFolder(e.Folder);
+                                if (e.StoreId.Length > 0 && string.IsNullOrEmpty(e.StoreUrl))
+                                    e.StoreUrl = StoreUrlForId(e.StoreId);
+                            }
+                        }
+                    }
+                    catch { }
                     // A deleted folder must not linger as a broken command-line argument.
                     if (!string.IsNullOrEmpty(e.Folder) &&
                         (!Directory.Exists(e.Folder) || !File.Exists(Path.Combine(e.Folder, "manifest.json"))))
@@ -313,14 +459,35 @@ namespace JoeBrowser
                 req.Timeout = 15000;
                 req.ReadWriteTimeout = 15000;
                 req.AllowAutoRedirect = true;
+                long delivered;
+                string contentType, finalUrl;
                 using (var resp = (HttpWebResponse)req.GetResponse())
-                using (var input = resp.GetResponseStream())
-                using (var output = File.Create(crx))
-                    input.CopyTo(output);
+                {
+                    /* The store answers a plain 200 with an HTML page for a few cases - an id
+                       that does not exist, a listing removed for policy, and the "please install
+                       from the store" interstitial. Saving that page as the package is how the
+                       old code ended up saying "not a valid package" for what was really "no
+                       such extension". Read the answer as what it says it is. */
+                    contentType = Convert.ToString(resp.ContentType) ?? "";
+                    finalUrl = Convert.ToString(resp.ResponseUri) ?? "";
+                    using (var input = resp.GetResponseStream())
+                    using (var output = File.Create(crx))
+                    {
+                        input.CopyTo(output);
+                    }
+                    delivered = new FileInfo(crx).Length;
+                }
 
                 byte[] raw = File.ReadAllBytes(crx);
                 int start = FindZipStart(raw);
-                if (start < 0) throw new InvalidOperationException("The store did not return a valid extension package. Try adding the unpacked folder instead.");
+                if (start < 0)
+                {
+                    Log.Info("Store answered " + delivered + " bytes of " + contentType + " from " + finalUrl);
+                    throw new InvalidOperationException(
+                        delivered == 0
+                            ? "The store sent nothing back for this id. Check the link, then try the .crx import instead."
+                            : "The store did not send an extension package for this id. It may be removed, region locked, or the link is not a store link. Download the .crx and use the file import instead.");
+                }
                 File.WriteAllBytes(zip, Slice(raw, start));
 
                 if (Directory.Exists(target)) Directory.Delete(target, true);
@@ -333,14 +500,21 @@ namespace JoeBrowser
 
                 string name = NameFromManifest(manifest) ?? id;
                 string version = VersionFromManifest(manifest) ?? "";
+                /* The id in the manifest's key is the identity Chromium will give the folder,
+                   and it is usually the id that was asked for. When it is not - a package
+                   saved from an older store, a fork with its own key - the honest link is the
+                   one the package proves, not the one that was pasted. */
+                string realId = IdFromFolder(target);
                 return new ExtensionItem
                 {
                     Name = name,
                     Folder = target,
                     Enabled = true,
                     Source = "url",
-                    StoreUrl = url,
-                    Version = version
+                    StoreUrl = string.IsNullOrEmpty(realId) ? url : StoreUrlForId(realId),
+                    Version = version,
+                    Icon = IconFromFolder(target),
+                    StoreId = realId.Length > 0 ? realId : id
                 };
             }
             finally
@@ -407,13 +581,17 @@ namespace JoeBrowser
             string target = Path.Combine(ImportedRoot, safe);
             Directory.CreateDirectory(ImportedRoot);
             CopyTree(folder, target);
+            string id = IdFromFolder(target);
             return new ExtensionItem
             {
                 Name = name,
                 Folder = target,
                 Enabled = true,
                 Source = "folder",
-                Version = VersionFromManifest(Path.Combine(target, "manifest.json"))
+                StoreUrl = StoreUrlForId(id),
+                Version = VersionFromManifest(Path.Combine(target, "manifest.json")),
+                Icon = IconFromFolder(target),
+                StoreId = id
             };
         }
 
@@ -471,16 +649,46 @@ namespace JoeBrowser
                     }
                     try { Directory.Delete(root, true); } catch { }
                 }
+                string fileId = IdFromFolder(target);
                 return new ExtensionItem
                 {
                     Name = name,
                     Folder = target,
                     Enabled = true,
                     Source = "file",
-                    Version = version
+                    StoreUrl = StoreUrlForId(fileId),
+                    Version = version,
+                    Icon = IconFromFolder(target),
+                    StoreId = fileId
                 };
             }
             finally { TryDelete(temp); }
+        }
+
+        /// <summary>
+        /// Deletes an extension's own folder, but only when it is inside the managed library.
+        /// A folder the user pointed at is theirs to keep, so an entry that refers to one is
+        /// removed from the list and nothing else happens to it.
+        /// </summary>
+        public static bool DeleteFiles(ExtensionItem item)
+        {
+            if (item == null || string.IsNullOrWhiteSpace(item.Folder)) return true;
+            try
+            {
+                string root = Path.GetFullPath(ImportedRoot).TrimEnd(Path.DirectorySeparatorChar) +
+                              Path.DirectorySeparatorChar;
+                string folder = Path.GetFullPath(item.Folder);
+                if (!folder.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return true;
+                if (Directory.Exists(folder)) Directory.Delete(folder, true);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                /* A running browser holds the folder open. The entry is gone from the list
+                   already, and the next attempt after the browser closes will succeed. */
+                Log.Error("Could not delete extension folder " + item.Folder, ex);
+                return false;
+            }
         }
 
         private static void CopyTree(string from, string to)
@@ -508,9 +716,15 @@ namespace JoeBrowser
             };
         }
 
+        /// <summary>
+        /// A store search. The query is already percent encoded in the table, so it is appended
+        /// as it stands; the old shape ignored this and produced "search/ublock%20origin",
+        /// which the store answers with its front page rather than results.
+        /// </summary>
         public static string StoreSearchUrl(string query)
         {
-            return "https://chromewebstore.google.com/search/" + query;
+            if (string.IsNullOrWhiteSpace(query)) return "https://chromewebstore.google.com/";
+            return "https://chromewebstore.google.com/search/" + query.Trim();
         }
     }
 }
