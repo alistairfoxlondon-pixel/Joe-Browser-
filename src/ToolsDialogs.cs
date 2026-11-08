@@ -269,15 +269,15 @@ namespace JoeBrowser
             int y = Ui.S(6);
             foreach (var r in _rows)
             {
-                int h = r.Height;
+                int rowH = r.Height;
                 Control c = r.Label ?? r.Field;
                 /* A note is written as one line but wraps when the dialog is narrow, and the row
                    used to keep the height of one line: the second line was drawn over whatever
                    followed it, which is how a paragraph of explanation ended up on top of the
                    field the user was meant to fill in. */
-                if (r.Wrap && c != null) h = Math.Max(h, WrappedHeight(c, innerW));
-                if (c != null) c.SetBounds(0, y, innerW, h);
-                y += h + Ui.S(9);
+                if (r.Wrap && c != null) rowH = Math.Max(rowH, WrappedHeight(c, innerW));
+                if (c != null) c.SetBounds(0, y, innerW, rowH);
+                y += rowH + Ui.S(9);
             }
             _content.SetBounds(0, 0, Math.Max(Ui.S(100), _body.Width), y + Ui.S(6));
             _body.SyncExtent();
