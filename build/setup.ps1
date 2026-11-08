@@ -38,7 +38,17 @@ $lines.Add('/win32icon:"' + (Join-Path $root "src\app.ico") + '"')
 $lines.Add('/win32manifest:"' + (Join-Path $root "src\app.manifest") + '"')
 # The application travels inside the installer as a resource.
 $lines.Add('/resource:"' + $app + '",JoeBrowser.payload.exe')
+# The installer carries its own identity, including the version: without these attributes it
+# exports as 0.0.0.0, so Add/Remove Programs had no version to show, Properties showed no
+# version tab, and the release check could not tell a stale installer from a fresh one. The
+# version is read from the application's AssemblyInfo so the two can never disagree.
+$info = Get-Content (Join-Path $root "src\AssemblyInfo.cs") -Raw
+$version = if ($info -match 'AssemblyFileVersion\("([0-9.]+)"\)') { $Matches[1] } else { "1.0.0.0" }
 $lines.Add('/out:"' + $Out + '"')
+$lines.Add('/win32version:' + $version)
+$lines.Add('/win32product:"Joe Browser"')
+$lines.Add('/win32company:"Joe Goldberg"')
+$lines.Add('/win32description:"Joe Browser setup"')
 foreach ($r in @("System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.Forms.dll")) {
     $lines.Add('/r:"' + (Join-Path $fw $r) + '"')
 }
