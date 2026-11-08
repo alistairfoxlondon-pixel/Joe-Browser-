@@ -620,6 +620,10 @@ A guarantee nobody can check is not a guarantee:
 * Pools parsed out of the source and the retry loop re-implemented in Python: 0 unresolved
   collisions at 5/10/30/50 profiles, 33 renderers and 15 screens.
 * Similarity rules simulated at 5/10/30/50/100 profiles: no false flags below 100.
+* Whole-workflow simulation against the real pools: create 8 (0 collisions) → duplicate all 8 (0
+  collisions across 16, max overlap 36%) → import two hand-edited copies (2 pairs flagged
+  `Identical`, 100% overlap) → run Fix (2 re-rolled, 0 remaining). That is the exact path a user
+  takes to break this, and it ends clean.
 * Every new API call checked against the declaring class (members, overloads, argument types).
 * Brace/paren/bracket balance clean across all 65 source files.
 * Needs a Windows run: create 20 profiles and confirm every card signature is distinct; duplicate a

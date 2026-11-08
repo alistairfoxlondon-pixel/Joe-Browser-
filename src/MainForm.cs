@@ -3144,6 +3144,10 @@ namespace JoeBrowser
             try
             {
                 _store.Delete(p, useTrash);
+                /* The deleted profile may have been the only one holding a build, so what counts
+                   as "used" changes here: without this the next new profile could be offered a
+                   build the workspace just freed, or keep avoiding one it no longer uses. */
+                KernelDiversity.Invalidate();
                 _profiles = _store.LoadAll();
                 PrunePicks();
                 if (!ask)
