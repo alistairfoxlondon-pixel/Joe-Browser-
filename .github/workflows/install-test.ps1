@@ -30,6 +30,12 @@ $size = (Get-Item $exe).Length
 Write-Host ("Installed: {0} ({1:N0} bytes)" -f $exe, $size)
 if ($size -lt 1MB) { throw "the installed copy is only $size bytes" }
 
+# .NET reads JoeBrowser.exe.config from beside the executable; an installed copy without it
+# runs with no DPI handling at all, which is invisible to any check that only starts the app.
+$installedConfig = $exe + '.config'
+if (-not (Test-Path $installedConfig)) { throw "the installer did not write $installedConfig" }
+Write-Host ("Configuration installed: {0} ({1:N0} bytes)" -f $installedConfig, (Get-Item $installedConfig).Length)
+
 $installedVersion = (Get-Item $exe).VersionInfo.FileVersion
 if ($installedVersion -ne "$Version.0") { throw "the installed copy reports $installedVersion, expected $Version.0" }
 

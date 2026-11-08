@@ -36,8 +36,13 @@ $lines.Add("/debug-")
 $lines.Add("/main:JoeBrowser.Setup.Program")
 $lines.Add('/win32icon:"' + (Join-Path $root "src\app.ico") + '"')
 $lines.Add('/win32manifest:"' + (Join-Path $root "src\app.manifest") + '"')
-# The application travels inside the installer as a resource.
+# The application travels inside the installer as a resource, and so does its configuration
+# file: the installed copy is a lone executable, and .NET reads JoeBrowser.exe.config from
+# beside it, so an installer that carries only the EXE installs an app with no DPI handling.
 $lines.Add('/resource:"' + $app + '",JoeBrowser.payload.exe')
+$appConfig = Join-Path $root "src\JoeBrowser.exe.config"
+if (-not (Test-Path $appConfig)) { throw "Missing $appConfig" }
+$lines.Add('/resource:"' + $appConfig + '",JoeBrowser.payload.exe.config')
 # The installer carries its own identity, including the version: without it the file exports as
 # 0.0.0.0, so Add/Remove Programs had no version to show, Properties had no version tab, and
 # nothing could tell a stale installer from a fresh one. csc has no switch for this - the
