@@ -185,13 +185,17 @@ namespace JoeBrowser
             Add(map, FpSurface.Platform, FpSurface.Platform,
                 fp.Os ?? "", fp.DeviceType ?? "", fp.FontSet ?? "auto");
 
+            /* Deliberately no fp.Platform or fp.Brand here. Those two are resolved at launch from
+               the installed browser and written into the profile, so including them made a
+               profile's signature change the first time it was opened - and the collision count
+               in the header would then disagree with the card the user was looking at a minute
+               earlier. What a profile *is* has to survive a launch. */
             Add(map, FpSurface.Navigator, FpSurface.Navigator,
                 "hw=" + fp.Cores,
                 "mem=" + fp.Memory,
                 "touch=" + fp.TouchPoints,
                 "dnt=" + (fp.DoNotTrack ? 1 : 0),
-                "plat=" + (fp.Platform ?? ""),
-                "brand=" + (fp.Brand ?? ""));
+                "ua=" + (fp.AutoUserAgent ? "auto" : "manual"));
 
             Add(map, FpSurface.Screen, FpSurface.Screen,
                 fp.ScreenW + "x" + fp.ScreenH,
