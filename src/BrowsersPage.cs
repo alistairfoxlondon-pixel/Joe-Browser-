@@ -358,7 +358,7 @@ namespace JoeBrowser
                 ? (string.IsNullOrEmpty(BusyText) ? "Working\u2026" : BusyText)
                 : Info.Installed
                     ? (string.IsNullOrEmpty(Info.Version) ? "Installed" : "Installed  \u00b7  " + ShortVersion(Info.Version))
-                    : !Info.Checked ? "Could not check \u2014 re-scan" : "Not installed";
+                    : !Info.Checked ? "Could not check, re-scan" : "Not installed";
             /* Theme has no warning colour of its own, so the amber the toasts use is mixed in
                place; a plain faint grey would read as another "not installed". */
             Color statusInk = Busy ? Theme.Accent

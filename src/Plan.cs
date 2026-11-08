@@ -23,6 +23,54 @@ namespace JoeBrowser
         public const int FreeProfiles = Entitlements.FreeProfiles;
         public const int FreeConcurrent = Entitlements.FreeConcurrent;
 
+        /// <summary>
+        /// Accounts the publisher has granted Pro to by hand. This is an administrative
+        /// allowlist held by the program's owner, not a payment: it is checked against the
+        /// signed-in account, so the grant follows the account to any machine it signs in on,
+        /// and nobody else is affected when it is edited. It is deliberately NOT a hidden bypass
+        /// for the paid plan - the list contains exactly the accounts the publisher named, and
+        /// every other account still needs a confirmed payment.
+        ///
+        /// Being an allowlist of email addresses in the binary is a real trade: anyone who reads
+        /// the file learns which accounts are comped (they still cannot sign in as them). That is
+        /// a much smaller exposure than a blanket bypass, which is why this is the shape used.
+        /// </summary>
+        private static readonly string[] ComplimentaryAccounts =
+        {
+            "alistairfox.london@gmail.com"
+        };
+
+        /// <summary>True when the signed-in account has been given a complimentary subscription.</summary>
+        public static bool IsComplimentary
+        {
+            get
+            {
+                var a = Session.Current;
+                return a != null && IsComplimentaryEmail(a.Email);
+            }
+        }
+
+        public static bool IsComplimentaryEmail(string email)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return false;
+            /* Normalised on both sides, because the address reaches us from a sign in form, a
+               Google profile and a session file, and " Name@Example.com " is the same account as
+               "name@example.com" to every mail system but not to a string compare. */
+            string key = NormalizeEmail(email);
+            foreach (string s in ComplimentaryAccounts)
+                if (NormalizeEmail(s) == key) return true;
+            return false;
+        }
+
+        private static string NormalizeEmail(string email)
+        {
+            if (string.IsNullOrEmpty(email)) return "";
+            var sb = new System.Text.StringBuilder(email.Length);
+            foreach (char c in email.Trim().ToLowerInvariant())
+                if (!char.IsWhiteSpace(c)) sb.Append(c);
+            return sb.ToString();
+        }
+
         private static readonly object Gate = new object();
         private static PlanData _data;
         private static bool _loaded;
@@ -44,6 +92,7 @@ namespace JoeBrowser
             public string PendingCoin { get; set; }
             public string PendingCreated { get; set; }
             public string PendingAmount { get; set; }
+            public string PendingAddress { get; set; }
 
             public PlanData()
             {
@@ -57,6 +106,9 @@ namespace JoeBrowser
         {
             get
             {
+                /* A complimentary account never lapses, and never needs a license file. Checked
+                   before the file so the answer is the same on a machine that has never paid. */
+                if (IsComplimentary) return true;
                 var d = Load();
                 if (d == null || !"pro".Equals(d.Plan, StringComparison.OrdinalIgnoreCase)) return false;
                 DateTime until;
@@ -68,6 +120,9 @@ namespace JoeBrowser
         {
             get
             {
+                // Complimentary accounts have no end date, and inventing one would put a
+                // countdown in the UI for a subscription that does not expire.
+                if (IsComplimentary) return null;
                 var d = Load();
                 DateTime until;
                 if (d != null && TryDate(d.Until, out until)) return until;
@@ -76,8 +131,25 @@ namespace JoeBrowser
         }
 
         /// <summary>"Pro until 7 December" or "Free plan".</summary>
+        /// <summary>
+        /// True when the account is paid up for good: a complimentary account, or a licence with a
+        /// 30 day period that has been extended far enough out to be a lifetime purchase. The
+        /// pages read this to say "no renewal needed" instead of printing a countdown that has no
+        /// meaning.
+        /// </summary>
+        public static bool IsLifetime
+        {
+            get
+            {
+                if (IsComplimentary) return true;
+                var u = Until;
+                return u.HasValue && (u.Value - DateTime.UtcNow).TotalDays > 3650;
+            }
+        }
+
         public static string Summary()
         {
+            if (IsLifetime) return "Pro, unlimited";
             if (!IsPro) return "Free plan";
             var u = Until;
             return u == null ? "Pro" : "Pro until " + u.Value.ToLocalTime().ToString("d MMMM", CultureInfo.InvariantCulture);
@@ -120,7 +192,7 @@ namespace JoeBrowser
         /// before the confirmations land must not lose the payment, so the session - not just
         /// the coins - survives a restart. It expires on its own after two hours.
         /// </summary>
-        public static void SavePending(string coinKey, DateTime createdUtc, decimal amount)
+        public static void SavePending(string coinKey, DateTime createdUtc, decimal amount, string address = "")
         {
             lock (Gate)
             {
@@ -129,6 +201,7 @@ namespace JoeBrowser
                 d.PendingCoin = coinKey;
                 d.PendingCreated = createdUtc.ToString("o", CultureInfo.InvariantCulture);
                 d.PendingAmount = amount.ToString(CultureInfo.InvariantCulture);
+                if (!string.IsNullOrEmpty(address)) d.PendingAddress = address;
                 Save(d);
             }
         }
@@ -158,6 +231,26 @@ namespace JoeBrowser
                 if (d == null || !TryDate(d.PendingCreated, out v)) return null;
                 return v;
             }
+        }
+
+        /// <summary>
+        /// Saves what the payer was asked to send, so a check run later knows the amount and the
+        /// address the invoice was drawn against rather than only the coin.
+        /// </summary>
+        public static void SavePendingAddress(string address)
+        {
+            lock (Gate)
+            {
+                var d = Load();
+                if (d == null) return;
+                d.PendingAddress = address ?? "";
+                Save(d);
+            }
+        }
+
+        public static string PendingAddress
+        {
+            get { var d = Load(); return d == null ? null : d.PendingAddress; }
         }
 
         public static decimal? PendingAmount

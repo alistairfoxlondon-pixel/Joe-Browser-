@@ -191,7 +191,7 @@ namespace JoeBrowser
                     "No Google client id is configured yet. Joe Browser can walk you through creating one in two minutes.");
             if (!LooksValid(clientId))
                 return GoogleResult.Fail("bad_client_id",
-                    "That is not a Google OAuth client id. It ends with .apps.googleusercontent.com - copy it again from the console.");
+                    "That is not a Google OAuth client id. It ends with .apps.googleusercontent.com, so copy it again from the console.");
 
             TcpListener listener = null;
             try
@@ -335,7 +335,7 @@ namespace JoeBrowser
                     return "That is not a Google OAuth client id. It ends with .apps.googleusercontent.com.";
                 default:
                     if (string.IsNullOrEmpty(code)) return "Google sign-in failed.";
-                    if (!string.IsNullOrEmpty(description)) return "Google returned: " + code + " - " + description;
+                    if (!string.IsNullOrEmpty(description)) return "Google returned " + code + ": " + description;
                     return "Google returned: " + code + ".";
             }
         }
@@ -394,7 +394,7 @@ namespace JoeBrowser
                 Log.Error("Google token exchange", ex);
                 return GoogleResult.Fail("token_exchange",
                     "Could not reach Google's token endpoint: " + ex.Message +
-                    " - check the connection (and any proxy) and try again.");
+                    ". Check the connection (and any proxy) and try again.");
             }
 
             var ser = new JavaScriptSerializer();

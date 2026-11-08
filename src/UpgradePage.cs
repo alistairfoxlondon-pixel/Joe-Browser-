@@ -481,7 +481,7 @@ namespace JoeBrowser
 
             /* Persisted so a payment made just before closing the app is still honoured. The
                intermediate session built while restoring must not overwrite the saved one. */
-            if (!createdUtc.HasValue && !_restoring) Plan.SavePending(coin.Key, created, amount);
+            if (!createdUtc.HasValue && !_restoring) Plan.SavePending(coin.Key, created, amount, coin.Address);
         }
 
         /// <summary>
@@ -625,12 +625,23 @@ namespace JoeBrowser
                 return;
             }
 
+            /* A complimentary account has no end date. Without this branch the countdown fell
+               back to zero and told the owner of the lifetime account "0 days left" in red on
+               their own plan page. */
+            if (Plan.IsLifetime)
+            {
+                Ui.Text(g, "Lifetime, no renewal needed", Theme.H3, Theme.Success,
+                    textLeft, Ui.S(63), textW);
+                return;
+            }
             int days = until.HasValue
                 ? Math.Max(0, (int)Math.Ceiling((until.Value - DateTime.UtcNow).TotalDays))
                 : 0;
-            Ui.Text(g, days + (days == 1 ? " day left" : " days left") +
-                    (until.HasValue ? "  \u00b7  until " + until.Value.ToLocalTime().ToString("d MMMM") : ""),
-                Theme.H3, days <= 5 ? Theme.Danger : Theme.Success, textLeft, Ui.S(63), textW);
+            Ui.Text(g, until.HasValue
+                        ? days + (days == 1 ? " day left" : " days left") + "  \u00b7  until " +
+                          until.Value.ToLocalTime().ToString("d MMMM")
+                        : "Active",
+                Theme.H3, until.HasValue && days <= 5 ? Theme.Danger : Theme.Success, textLeft, Ui.S(63), textW);
 
             /* A countdown bar for the 30-day period. The text says how long is left; the bar
                says it without being read, which is what a subscription timer is for. */

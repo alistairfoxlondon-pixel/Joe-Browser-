@@ -67,7 +67,7 @@ namespace JoeBrowser
         /// <summary>The message a user sends to a friend.</summary>
         public static string Invite()
         {
-            return "Try Joe Browser with me \u2014 anti-detect profiles for Windows. "
+            return "Try Joe Browser with me. Anti detect profiles for Windows. "
                  + "Use my code " + MyCode + " before you pay and I get 7 days of Pro.";
         }
 

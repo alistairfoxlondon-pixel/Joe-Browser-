@@ -34,6 +34,8 @@ namespace JoeBrowser
         private readonly HashSet<string> _workerStamped = new HashSet<string>();
         /// <summary>Installed browser build, e.g. "156.0.4314.58". The UA string cannot carry it.</summary>
         private string _browserFullVersion;
+        private bool _browserIsBrave;
+        private bool _browserIsEdge;
         private string _primarySession;
         private int _navCount;
         private readonly object _scriptState = new object();
@@ -51,6 +53,12 @@ namespace JoeBrowser
         public event Action<string> ProxyFallback;
 
         public bool ProxyFellBack { get; private set; }
+
+        /// <summary>True when this window's traffic goes through a relay that can be re-pointed
+        /// at a different upstream without closing the window. A profile that opened with no
+        /// proxy has none, and Chrome cannot be handed one after it starts: its proxy comes from
+        /// the command line it was launched with.</summary>
+        public bool HasRelay { get { return _relay != null; } }
 
         public bool IsRunning
         {
@@ -121,6 +129,8 @@ namespace JoeBrowser
                 throw new InvalidOperationException("No browser found.\r\n\r\nInstall Google Chrome, Microsoft Edge, Brave or Firefox, or set a browser path in Settings.");
             s.Browser = browser;
             s._browserFullVersion = browser.Version;
+            s._browserIsBrave = browser.IsBrave;
+            s._browserIsEdge = browser.IsEdge;
 
             var fp = profile.Fp ?? new FingerprintConfig();
             /* Last line of defence before the script is injected. A profile edited by hand, or
@@ -138,9 +148,13 @@ namespace JoeBrowser
 
             string startUrl = profile.StartUrl;
             if (string.IsNullOrWhiteSpace(startUrl)) startUrl = defaultStartUrl;
+            if (string.IsNullOrWhiteSpace(startUrl)) startUrl = Profile.FingerprintTestUrl;
+            /* A stored address that is no longer a URL must not become a Google tab: the profile
+               asks for one thing and gets another, which is worse than falling back to the
+               default everybody else gets. */
             Uri parsed;
-            if (string.IsNullOrWhiteSpace(startUrl) || !Uri.TryCreate(startUrl, UriKind.Absolute, out parsed))
-                startUrl = "https://www.google.com";
+            if (!Uri.TryCreate(startUrl, UriKind.Absolute, out parsed))
+                startUrl = Profile.FingerprintTestUrl;
             s._startUrl = startUrl;
 
             string dataDir = Path.Combine(AppPaths.Data, profile.Id);
@@ -210,12 +224,28 @@ namespace JoeBrowser
                 // A phone profile has to open like a phone. A desktop-sized window next to a
                 // 393x852 emulation leaves a dead gutter and contradicts screen.width.
                 var wa = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
-                winW = Math.Max(fp.ScreenW > 0 ? fp.ScreenW : 393, 360);
-                winH = viewH + 128;
-                /* A tall device (932 px + chrome) does not fit a 1080 px screen with a taskbar;
-                   the emulated viewport is scaled inside the window, so the frame is what gives. */
-                winW = Math.Min(winW, Math.Max(320, wa.Width - 80));
-                winH = Math.Min(winH, Math.Max(480, wa.Height - 40));
+                /* Emulation.setDeviceMetricsOverride scales the emulated viewport to fit the
+                   window and pins it to the TOP LEFT when the two do not have the same shape.
+                   A tall device (932 px plus chrome) does not fit a 1080 px screen, and the old
+                   code clamped width and height independently - which broke the ratio and drew
+                   the phone screen in the corner of a larger window with dead space beside it.
+                   Clamping both by the same factor keeps the window's content area the same
+                   shape as the device screen, so the viewport fills the window exactly. */
+                double vw = Math.Max(320, fp.ScreenW > 0 ? fp.ScreenW : 393);
+                double aspect = vw / Math.Max(1, viewH);
+                const int chromeH = 128;
+                double wantW = vw;
+                double wantH = wantW / aspect + chromeH;
+                double maxW = Math.Max(320, wa.Width - 80);
+                double maxH = Math.Max(480, wa.Height - 40);
+                if (wantW > maxW || wantH > maxH)
+                {
+                    double scale = Math.Min(maxW / wantW, maxH / wantH);
+                    wantW *= scale;
+                    wantH *= scale;
+                }
+                winW = (int)Math.Round(wantW);
+                winH = (int)Math.Round(wantH);
                 posX = wa.Left + Math.Max(0, (wa.Width - winW) / 2);
                 posY = wa.Top + Math.Max(0, (wa.Height - winH) / 2);
             }
@@ -242,7 +272,19 @@ namespace JoeBrowser
             args.Add("--password-store=basic");
             args.Add("--use-mock-keychain");
             args.Add("--lang=" + (fp.Language ?? "en-US"));
+            /* Sets the Accept-Language header in the network service, with no CDP domain
+               enabled. Previously the header was stamped through Network.setExtraHTTPHeaders,
+               which required Network.enable - the single clearest indication to a page that the
+               browser is under remote control. */
+            if (!string.IsNullOrEmpty(fp.AcceptLanguage)) args.Add("--accept-lang=\"" + fp.AcceptLanguage + "\"");
             args.Add("--window-size=" + winW + "," + winH);
+            /* Chrome features this app turns off everywhere. DnsOverHttps so every name is
+               resolved at the proxy rather than by a public resolver the browser chose itself,
+               which is exactly what a DNS-leak page reports; InsecureDownloadWarnings and
+               TriggeredPopupDefault because the infobars they draw are visible leaks that
+               --test-type used to hide at the cost of putting the word "test" on every child
+               process command line. */
+            var disableFeatures = new List<string> { "DnsOverHttps", "InsecureDownloadWarnings", "TriggeredPopupDefault" };
             args.Add("--window-position=" + posX + "," + posY);
             /* Only point the browser at the local relay when an upstream proxy is actually
                configured. Routing a direct connection through the relay adds a local hop to
@@ -270,11 +312,11 @@ namespace JoeBrowser
             if (proxyOn) args.Add("--disable-quic");
             /* Chromium shows a yellow "unsupported command-line flag" infobar for some of the
                switches above (host-resolver-rules among them). That bar is itself a detection
-               signal - and a screenshot-visible one - so it is suppressed here. --test-type only
-               removes infobars; it does not set any automation flag.
-               DoH is disabled so every name resolves at the proxy rather than at a public
-               resolver the browser picked on its own, which is what a DNS-leak page reports. */
-            args.Add("--test-type");
+               signal, and a screenshot-visible one, so the infobars are suppressed - but NOT
+               with --test-type. That switch is a lie with a cost: its name sits on the command
+               line of every child process, and "test" in an argument list is read by bot checks
+               the way a watermark is read. The feature flags in disableFeatures remove the same
+               bars without putting a word like that anywhere a page can find it. */
             /* A portable build cannot start its sandbox in an elevated (administrator) session:
                the sandboxed child processes need a restricted token that an elevated parent is
                not allowed to create. Chromium then logs "Sandbox cannot access executable",
@@ -287,7 +329,7 @@ namespace JoeBrowser
                 args.Add("--no-sandbox");
                 Log.Info("Elevated session detected: sandbox disabled for the portable build.");
             }
-            var disableFeatures = new List<string> { "DnsOverHttps" };
+
             // Chrome 137+ refuses a WebGL context entirely when there is no hardware GPU. Without
             // the software fallback a machine on a VM, RemoteApp or RDP session launches with
             // getContext('webgl') === null, which is a louder tell than any renderer string.
@@ -422,6 +464,58 @@ namespace JoeBrowser
                 var ignored = StampSessionAsync(sessionId, null, info != null ? Str(info, "url") : "");
                 return;
             }
+            /* ---- Browsing history ----
+               FrameNavigated is the page's own statement that it now shows a different document,
+               and it fires for every hop in a redirect chain, not only for the URL that ends up
+               in the address bar. FrameStartedNavigating fires before the request, which is the
+               only way to see a hop that is answered from cache or aborted mid-chain. Neither
+               is a request-level event, so no sub-resource is recorded: the unit is "the page
+               became this document". */
+            if (method == "Page.frameNavigated" || method == "Page.frameStartedNavigating")
+            {
+                /* The two methods describe the frame differently: frameNavigated nests it under
+                   "frame" with the url and the type, while frameStartedNavigating puts url,
+                   loaderId and navigationType at the top level next to frameId. Reading only the
+                   nested shape meant the earlier event recorded an empty url on every real
+                   navigation, which the store then discarded as uninteresting - so the hop that
+                   only that event can see would never have been kept. */
+                var frame = Get<Dictionary<string, object>>(args, "frame");
+                bool started = method == "Page.frameStartedNavigating";
+                bool top = started ? string.IsNullOrEmpty(Str(args, "parentId"))
+                    : (frame != null && string.IsNullOrEmpty(Str(frame, "parentId")));
+                if (!top) return;
+                string url = !started && frame != null ? Str(frame, "url") : Str(args, "url");
+                if (string.IsNullOrEmpty(url))
+                {
+                    var nested = frame != null ? Str(frame, "url") : "";
+                    url = nested;
+                }
+                string navType = started ? Str(args, "navigationType") : (frame != null ? Str(frame, "type") : "");
+                /* Back and forward are the user asking to see something they already saw; a
+                   reload is the same document again. Recording those would triple every entry
+                   the first time the user moves through their own history. */
+                if (navType.Equals("BackForwardCacheRestore", StringComparison.OrdinalIgnoreCase)) return;
+                if (method == "Page.frameNavigated" && navType.Equals("SameDocument", StringComparison.OrdinalIgnoreCase)) return;
+                HistoryStore.Add(Profile != null ? Profile.Id : null,
+                    Profile != null ? Profile.Name : null,
+                    url, "", started);
+                return;
+            }
+            if (method == "Page.titleUpdated" || method == "Page.frameNavigated")
+            {
+                /* Best effort: the title usually arrives after the document starts, so the
+                   history entry is rewritten with it rather than waiting to record the visit. */
+                string t = Str(args, "title");
+                if (!string.IsNullOrEmpty(t) && Profile != null) HistoryStore.SetLastTitle(Profile.Id, t);
+            }
+            if (method == "Page.navigatedWithinDocument")
+            {
+                /* A single-page app changes the document it "is" without a navigation event. */
+                string frag = Str(args, "url");
+                if (Profile != null) HistoryStore.Add(Profile.Id, Profile.Name, frag, "", true);
+                return;
+            }
+
             if (method == "Target.detachedFromTarget" || method == "Target.targetDestroyed")
             {
                 string sessionId = Str(args, "sessionId");
@@ -737,7 +831,14 @@ namespace JoeBrowser
             string acceptLanguage = fp.AcceptLanguage;
 
             await TrySend("Page.enable", null, session);
-            await TrySend("Network.enable", null, session);
+            /* Deliberately no Network.enable. Enabling that domain is the clearest CDP tell a
+               page can read without any cooperation: the browser stops reusing its network
+               stack, request priority classes appear as "kRenderBlocking"/"kPrefetch", and the
+               presence of the domain is itself observable. It was only ever here to inject an
+               Accept-Language header, which the --accept-lang launch switch now sets natively,
+               and every switch that reads its value still works without the domain enabled -
+               Chromium honours them in the network service, not through this session. */
+            if (DebugEvents != null) await TrySend("Network.enable", null, session);
             /* Runtime.enable only when somebody is listening: it makes the renderer report every
                console call and exception to us, which is what the diagnostic harness needs to
                explain a page that never finishes loading. Left off in normal use to keep the
@@ -766,8 +867,12 @@ namespace JoeBrowser
                     await SetLocaleAsync(lang, session);
                     lock (_scriptState) _locales[session ?? ""] = lang;
                 }
-                var headers = new Dictionary<string, object> { { "Accept-Language", acceptLanguage } };
-                await TrySend("Network.setExtraHTTPHeaders", new Dictionary<string, object> { { "headers", headers } }, session);
+                /* The header is set by the --accept-lang launch switch, which the network
+                   service applies without the Network domain being enabled. Restamping it here
+                   needed Network.setExtraHTTPHeaders, and having that domain on at all was the
+                   "Chrome Runtime" tell. A language edited in the editor therefore lands on
+                   the next launch rather than mid-page, which is the honest trade: a profile's
+                   language is chosen when the profile is made. */
             }
 
             if (fp.GeoMode != null && !fp.GeoMode.Equals("proxy", StringComparison.OrdinalIgnoreCase))
@@ -940,7 +1045,7 @@ namespace JoeBrowser
             return BuildUaMetadata(fp, await ReadRealClientHintsAsync(session).ConfigureAwait(false), _browserFullVersion);
         }
 
-        private static Dictionary<string, object> BuildUaMetadata(FingerprintConfig fp, Dictionary<string, object> real, string installedFull)
+        private Dictionary<string, object> BuildUaMetadata(FingerprintConfig fp, Dictionary<string, object> real, string installedFull)
         {
             int major = 131;
             string full = null;
@@ -959,7 +1064,14 @@ namespace JoeBrowser
 
             bool edge = (fp.Brand ?? "").Equals("Edge", StringComparison.OrdinalIgnoreCase);
             bool android = FingerprintFactory.IsAndroid(fp.Os);
-            string brandName = edge ? "Microsoft Edge" : "Google Chrome";
+            /* The hint list has to name the browser the page is actually talking to, not the one
+               the user agent string imitates. Brave keeps Chrome's user agent word for word and
+               puts its own name only here, and the reverse holds for Edge: a real Edge that
+               reports Google Chrome is a mismatch, because everything else Edge exposes (its
+               own extension store, its escape hatch pages) still says Edge. */
+            string brandName = edge || _browserIsEdge ? "Microsoft Edge"
+                : _browserIsBrave ? "Brave"
+                : "Google Chrome";
 
             // The GREASE brand ("Not_A Brand", "Not;A=Brand", …) and its version rotate with the
             // Chromium release, so copying the live value beats hard-coding a stale one.

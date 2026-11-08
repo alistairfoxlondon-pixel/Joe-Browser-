@@ -73,6 +73,13 @@ namespace JoeBrowser
 
         private const string ChromeCatalog =
             "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
+        /* Recent releases with their per version download links. The catalog above only carries
+           the newest build per channel - four builds in total - and "every profile gets its own
+           browser version" cannot hold across a workspace of ten with four of them. This
+           endpoint lists the last hundred known good versions, each with its own url, so a
+           profile can be pinned to a build nobody else is using. */
+        private const string ChromeHistory =
+            "https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json";
         private const string BraveCatalog =
             "https://api.github.com/repos/brave/brave-browser/releases?per_page=10";
         private const string ChromiumBase =
@@ -235,7 +242,22 @@ namespace JoeBrowser
         {
             switch (engine)
             {
-                case "chrome": return ChromeReleases();
+                /* The channel builds first - they are the ones a user is offered at the top and
+                   the ones the newest version lives in - then a run of older exact versions so a
+                   workspace of profiles can each have their own. Duplicates are dropped, since
+                   the newest channel build is also the newest entry in the history. */
+                case "chrome":
+                {
+                    var current = ChromeReleases();
+                    var older = ChromeHistoryReleases(24);
+                    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var merged = new List<KernelRelease>();
+                    foreach (var r in current)
+                        if (r != null && seen.Add(r.Engine + "|" + r.Version)) merged.Add(r);
+                    foreach (var r in older)
+                        if (r != null && seen.Add(r.Engine + "|" + r.Version)) merged.Add(r);
+                    return merged;
+                }
                 case "brave": return BraveReleases();
                 case "chromium": return ChromiumReleases();
                 default: return new List<KernelRelease>();
@@ -275,6 +297,51 @@ namespace JoeBrowser
                 }
             }
             catch (Exception ex) { Log.Error("Chrome kernel catalog failed", ex); }
+            return list;
+        }
+
+        /// <summary>
+        /// The newest <paramref name="want"/> stable Chrome builds before the current one, so a
+        /// workspace can be given distinct versions. Best effort: an offline machine gets an
+        /// empty list and keeps working on what it has.
+        /// </summary>
+        private static List<KernelRelease> ChromeHistoryReleases(int want)
+        {
+            var list = new List<KernelRelease>();
+            try
+            {
+                var root = Json(Get(ChromeHistory)) as Dictionary<string, object>;
+                var versions = root != null && root.ContainsKey("versions") ? root["versions"] as object[] : null;
+                if (versions == null) return list;
+
+                /* Walk backwards from the newest: the array is in release order, and the last
+                   entries are the most recent builds. */
+                for (int i = versions.Length - 1; i >= 0 && list.Count < want; i--)
+                {
+                    var v = versions[i] as Dictionary<string, object>;
+                    if (v == null) continue;
+                    string version = Str(v, "version");
+                    if (string.IsNullOrEmpty(version)) continue;
+                    var downloads = v.ContainsKey("downloads") ? v["downloads"] as Dictionary<string, object> : null;
+                    if (downloads == null) continue;
+                    var chrome = downloads.ContainsKey("chrome") ? downloads["chrome"] as object[] : null;
+                    if (chrome == null) continue;
+                    foreach (object o in chrome)
+                    {
+                        var d = o as Dictionary<string, object>;
+                        if (d == null) continue;
+                        if (!string.Equals(Str(d, "platform"), "win64", StringComparison.OrdinalIgnoreCase)) continue;
+                        string url = Str(d, "url");
+                        if (string.IsNullOrEmpty(url)) continue;
+                        /* An exact version is a whole release: the fourth part identifies the
+                           build, so two profiles pinned to 131.0.6778.86 and .204 are two builds
+                           that a page can tell apart. */
+                        list.Add(new KernelRelease("chrome", version, "Stable", url, "zip") { SizeMb = 170 });
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex) { Log.Error("Chrome version history failed", ex); }
             return list;
         }
 

@@ -38,7 +38,7 @@ namespace JoeBrowser
         public static string VersionText()
         {
             try { return Application.ProductVersion; }
-            catch { return "1.3.0"; }
+            catch { return "1.4.4"; }
         }
 
         /// <summary>Everything a developer needs: build, plan, browsers found, kernels, log tail.</summary>
@@ -208,7 +208,7 @@ namespace JoeBrowser
             if (Report.OpenTelegram(_what.Value))
                 Close();
             else
-                _status.Text = "Telegram could not be opened - the details were copied instead";
+                _status.Text = "Telegram could not be opened, so the details were copied instead";
         }
 
         protected override void OnLoad(EventArgs e)

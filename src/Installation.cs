@@ -13,7 +13,7 @@ namespace JoeBrowser
     internal static class Installation
     {
         public const string AppName = "Joe Browser";
-        public const string AppVersion = "1.3.0";
+        public const string AppVersion = "1.4.4";
         public const string Publisher = "Joe Goldberg";
         public const string AppId = "JoeBrowser.Browser.1.2";
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\JoeBrowser";
@@ -209,7 +209,7 @@ namespace JoeBrowser
                 lt.InvokeMember("WorkingDirectory", System.Reflection.BindingFlags.SetProperty, null, link, new object[] { workDir });
                 lt.InvokeMember("IconLocation", System.Reflection.BindingFlags.SetProperty, null, link, new object[] { target + ",0" });
                 lt.InvokeMember("Description", System.Reflection.BindingFlags.SetProperty, null, link,
-                    new object[] { "Joe Browser - anti-detect browser workspace" });
+                    new object[] { "Joe Browser anti detect browser workspace" });
                 lt.InvokeMember("Save", System.Reflection.BindingFlags.InvokeMethod, null, link, null);
             }
             catch { }

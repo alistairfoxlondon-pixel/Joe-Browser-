@@ -317,9 +317,9 @@ namespace JoeBrowser
                     switch (Relation)
                     {
                         case Relation.Identical: return "Identical fingerprint";
-                        case Relation.Linked: return "Linked \u2014 shares " + Join(SharedSurfaces);
-                        case Relation.Related: return "Related \u2014 shares " + Join(SharedSurfaces);
-                        case Relation.Remote: return "Barely related \u2014 shares " + Join(SharedSurfaces);
+                        case Relation.Linked: return "Linked, shares " + Join(SharedSurfaces);
+                        case Relation.Related: return "Related, shares " + Join(SharedSurfaces);
+                        case Relation.Remote: return "Barely related, shares " + Join(SharedSurfaces);
                         default: return "Independent";
                     }
                 }

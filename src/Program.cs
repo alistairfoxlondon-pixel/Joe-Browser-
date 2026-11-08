@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Runtime.InteropServices;
@@ -68,6 +69,128 @@ namespace JoeBrowser
                     Console.Error.WriteLine(sb.ToString());
                     return 2;
                 }
+                /* The configuration check proves the binary can start. It says nothing about the
+                   parts whose failure is silent, so the ones that can be exercised headlessly are
+                   exercised here and the build fails on any of them. The folder is thrown away
+                   afterwards, so a build machine keeps nothing from this. */
+                string sandbox = null;
+                try
+                {
+                    var sb = new System.Text.StringBuilder();
+                    string history = HistoryStore.SelfTest();
+                    if (!string.IsNullOrEmpty(history)) sb.Append(" [history" + history + "]");
+
+                    sandbox = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                        "joebrowser-selftest-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                    System.IO.Directory.CreateDirectory(sandbox);
+                    var store = new ProfileStore(sandbox);
+
+                    /* The brief's hardest rule: two new profiles must not describe the same
+                       machine. Profiles are made through the same path the grid uses, so this
+                       tests the real generator rather than a copy of it. */
+                    var profiles = new List<Profile>();
+                    for (int i = 0; i < 8; i++)
+                    {
+                        var p = new Profile();
+                        p.Name = "self test " + (i + 1);
+                        FingerprintIdentity.Comparison clash;
+                        FingerprintIdentity.MakeUnique(p.Fp, "System default", p.Proxy, profiles, out clash);
+                        if (clash != null && clash.Relation == FingerprintIdentity.Relation.Linked)
+                            sb.Append(" [profile " + (i + 1) + " is linked to profile " +
+                                      (profiles.IndexOf(clash.B) + 1) + "]");
+                        string note;
+                        KernelDiversity.Assign(p, profiles, out note);
+                        profiles.Add(p);
+                    }
+
+                    var bySignature = new Dictionary<string, int>(StringComparer.Ordinal);
+                    foreach (var p in profiles)
+                    {
+                        if (p.Fp == null) { sb.Append(" [a profile has no fingerprint]"); continue; }
+                        /* The UA is resolved against an installed browser at launch, so it is
+                           empty until then; what has to be there from the start is the machine
+                           the profile claims to be, which is what the site reads. */
+                        FingerprintFactory.ResolveUserAgent(p.Fp, new BrowserInfo
+                        {
+                            Name = "self test",
+                            Version = "131.0.0.0",
+                            MajorVersion = 131,
+                            Path = System.IO.Path.Combine(sandbox, "chrome.exe")
+                        });
+                        if (string.IsNullOrEmpty(p.Fp.UserAgent)) sb.Append(" [a profile has no user agent]");
+                        string sig = FingerprintIdentity.OverallHash(p);
+                        int n;
+                        bySignature.TryGetValue(sig, out n);
+                        bySignature[sig] = n + 1;
+                    }
+                    foreach (var kv in bySignature)
+                        if (kv.Value > 1) sb.Append(" [" + kv.Value + " of 8 profiles share one signature]");
+                    /* A unique signature is not enough on its own: the brief asks for a different
+                       kernel each time as well, so a grid of eight identical Chrome builds would
+                       pass the check above and fail the requirement. Pinning only happens when
+                       more than one build is installed - a lone build is shared by design - so
+                       the rule is checked only where it can apply. */
+                    var kernels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var p in profiles)
+                    {
+                        string key = (p.KernelEngine ?? "browser") + "|" + (p.KernelVersion ?? "system");
+                        int k;
+                        kernels.TryGetValue(key, out k);
+                        kernels[key] = k + 1;
+                    }
+                    int pinned = 0;
+                    foreach (var p in profiles) if (KernelDiversity.IsPinned(p)) pinned++;
+                    if (pinned > 0 && pinned < profiles.Count)
+                        sb.Append(" [" + pinned + " of 8 profiles have a build of their own]");
+                    if (pinned == 0 && kernels.Count != 1)
+                        sb.Append(" [" + kernels.Count + " kinds of kernel among 8 profiles]");
+
+                    /* The start page every new profile gets: the fingerprint test page, not a
+                       search engine. Checked here because it is a one line default that three
+                       separate fallbacks read, and a wrong one is invisible until a user opens
+                       a blank tab. */
+                    var fresh = new Profile();
+                    if (fresh.StartUrl != Profile.FingerprintTestUrl)
+                        sb.Append(" [a new profile starts on " + (fresh.StartUrl ?? "nothing") + "]");
+                    var settings = new AppSettings();
+                    if (settings.DefaultStartUrl != Profile.FingerprintTestUrl)
+                        sb.Append(" [the app default start page is " + (settings.DefaultStartUrl ?? "nothing") + "]");
+
+                    /* The complimentary grant: it must recognise the account whatever shape the
+                       address arrives in, and it must not recognise anybody else. */
+                    if (!Plan.IsComplimentaryEmail("alistairfox.london@gmail.com"))
+                        sb.Append(" [the complimentary account is not recognised]");
+                    if (!Plan.IsComplimentaryEmail("  AlistairFox.London@Gmail.com "))
+                        sb.Append(" [a spaced or capitalised address is not recognised]");
+                    if (Plan.IsComplimentaryEmail("someone@example.com"))
+                        sb.Append(" [an unrelated address was granted Pro]");
+                    if (Plan.IsComplimentaryEmail(""))
+                        sb.Append(" [an empty address was granted Pro]");
+
+                    var saved = new Profile { Name = "self test save" };
+                    store.Save(saved);
+                    var back = store.LoadAll();
+                    if (back.Count != 1) sb.Append(" [saved profile did not reload]");
+                    else if (back[0].Fp == null) sb.Append(" [reloaded profile lost its fingerprint]");
+                    store.Delete(saved, false);
+
+                    if (sb.Length > 0)
+                    {
+                        Console.Error.WriteLine("selftest failed:" + sb);
+                        return 4;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("selftest threw " + ex.GetType().Name + ": " + ex.Message);
+                    return 5;
+                }
+                finally
+                {
+                    try { if (sandbox != null && System.IO.Directory.Exists(sandbox)) System.IO.Directory.Delete(sandbox, true); }
+                    catch { }
+                }
+
                 Console.WriteLine("selftest ok " + Application.ProductVersion);
                 return 0;
             }
@@ -217,6 +340,13 @@ namespace JoeBrowser
                    update never leaves stale manifests or scripts behind. Writes only files
                    whose content actually changed. */
                 ExtensionManager.EnsureAll();
+                /* Three of the brief's named defaults already exist as first party extensions -
+                   paste as human, enable right click, proxy watch - and are written above. What
+                   was missing is that the extensions page never learned about them on a machine
+                   that had never opened it: EnsureDefaults only ran when the page was built, so
+                   a profile launched straight from a fresh install had the folders on disk and
+                   the catalog listing them as absent. Listing is cheap and idempotent. */
+                try { ExtensionCatalog.ListPresentDefaults(); } catch (Exception ex) { Log.Error("Default extensions", ex); }
                 /* The account gate only appears until the first account exists. After that the
                    app remembers the sign-in for this Windows user (DPAPI-protected session
                    marker), so daily use stays a double-click. */

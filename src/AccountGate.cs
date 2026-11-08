@@ -23,7 +23,7 @@ namespace JoeBrowser
 
         public AccountGate()
         {
-            Text = "Joe Browser - Sign in";
+            Text = "Joe Browser";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterScreen;
             MaximizeBox = false;
@@ -150,7 +150,7 @@ namespace JoeBrowser
             _google.Location = new Point(Ui.S(40), top + Ui.S(46));
             _toggle.Location = new Point(Ui.S(40), top + Ui.S(96));
             _toggle.Text = _registering ? "Already have an account? Sign in" : "New here? Create an account";
-            Text = _registering ? "Joe Browser - Create account" : "Joe Browser - Sign in";
+            Text = "Joe Browser";
             _title.Text = _registering ? "Create your Joe Browser account" : "Welcome to Joe Browser";
             _subtitle.Text = _registering
                 ? "An email address and a password are all that is required."

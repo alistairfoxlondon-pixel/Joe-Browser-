@@ -38,6 +38,13 @@ namespace JoeBrowser
             cfg["battery"] = fp.SpoofBattery;
             cfg["seed"] = fp.Seed;
             cfg["touch"] = fp.TouchPoints;
+            /* Layout width is one of the few surfaces a page can measure without asking for
+               anything: innerWidth minus documentElement.clientWidth is exactly the width of the
+               scrollbar the HOST operating system draws. A Windows host therefore reports 17 px
+               to a page being told the profile is a Mac or a phone, contradicting the platform
+               string in the same breath - the cheapest anti-detect tell there is. This is the
+               scrollbar of the device the profile claims to be. */
+            cfg["sbw"] = FingerprintFactory.ScrollbarWidthFor(fp);
             cfg["mobile"] = fp.DeviceType != null && fp.DeviceType != "desktop";
             cfg["safari"] = FingerprintFactory.IsIos(fp.Os);
             cfg["webrtc"] = (fp.WebRtcMode ?? (fp.WebRtcProtect ? "proxy" : "off")).ToLowerInvariant();
@@ -272,6 +279,61 @@ namespace JoeBrowser
   getter(NP, 'webdriver', false);
   getter(NP, 'doNotTrack', F.dnt);
 
+  /* ---- automation leftovers a bot checker reads first ---- */
+  /* Every one of these exists only when a browser is driven by a framework. They are cheap to
+     look for, so a page looks: window.webdriver, the document's own webdriver flag, Playwright's
+     bindings, the __driver_evaluate family, and the Chromium devtools marker. A profile must not
+     carry any of them, and deleting is done through the prototype where the value lives so the
+     deletion itself does not leave a fresh own-property behind. */
+  try { delete Document.prototype.$cdc_asdjflasutopfhvcZLmcfl_; } catch (e) {}
+  try { delete Document.prototype.$wdc_; } catch (e) {}
+  try { delete window.__webdriver_evaluate; } catch (e) {}
+  try { delete window.__selenium_evaluate; } catch (e) {}
+  try { delete window.__webdriver_script_fn; } catch (e) {}
+  try { delete window.__driver_evaluate; } catch (e) {}
+  try { delete window.__lastWatirAlert; } catch (e) {}
+  try { delete window.__playwright; } catch (e) {}
+  try { delete window.__pw_manual; } catch (e) {}
+  try { delete window.__puppeteer_evaluation_script__; } catch (e) {}
+  try { delete window.callPhantom; } catch (e) {}
+  try { delete window._phantom; } catch (e) {}
+  /* Only a Node-style Buffer is a leftover. A page that bundles one onto window owns it, and
+     removing that would break the page rather than hide anything. */
+  try {
+    if (window.Buffer && typeof window.Buffer.from === 'function' && typeof window.Buffer.alloc === 'function')
+      delete window.Buffer;
+  } catch (e) {}
+
+  /* A devtools session that is attached makes Chromium print a warning line at the top of the
+     console, and it also makes this symbol live. Running browsers here are never under devtools,
+     so the symbol is removed when it is there at all. */
+  try {
+    if (window.devtools) { try { delete window.devtools; } catch (e) { window.devtools = undefined; } }
+  } catch (e) {}
+
+  /* Headless builds leave their own fingerprints in the WebGL context list and in the amount of
+     GPU information they report. The renderer and vendor are already overridden by the profile;
+     what is added here is the SwiftShader marker that appears when a headless build falls back to
+     software rendering, and the empty extension list that only a headless context returns. */
+  try {
+    var __jbBad = /swiftshader|llvmpipe|software|mesa offscreen|angle \(google, vulkan/i;
+    var __jbRE = WebGLRenderingContext.prototype.getExtension;
+    WebGLRenderingContext.prototype.getExtension = mark(function getExtension(name) {
+      var out = __jbRE.apply(this, arguments);
+      /* A headless context answers getExtension for the debug renderer info with a software
+         adapter even when getParameter has already been overridden. Reporting nothing is what a
+         machine without the extension does, and it matches the hardware renderer the profile
+         claims. */
+      if (out && name && /WEBGL_debug_renderer_info/i.test(String(name))) {
+        try {
+          var vendor = this.getParameter(out.UNMASKED_VENDOR_WEBGL);
+          if (vendor && __jbBad.test(String(vendor))) return null;
+        } catch (e) {}
+      }
+      return out;
+    }, 'getExtension', 1);
+  } catch (e) {}
+
   function emptyList(tag) {
     /* Built on the real interface prototype, not on Array: a phone still answers
        navigator.plugins instanceof PluginArray === true, and an Array fails that check
@@ -288,6 +350,39 @@ namespace JoeBrowser
     } catch (e) {}
     return a;
   }
+
+  /* ---- window.chrome ----
+     A Chromium browser always exposes this object, and its absence is one of the oldest bot
+     checks in existence: a page that finds navigator.userAgent saying Chrome and no
+     window.chrome has found automation, not a browser. Some of the ways this app drives a
+     profile - the CDP session, an isolated world, an extension loaded late - can leave it
+     missing, so it is put back rather than hoped for, with the shape a real Chrome has even
+     when no extension is installed. Chrome's own object has no runtime.id in that case, and
+     inventing one would be the new tell. */
+  try {
+    if (!window.chrome) {
+      var chromeStub = {};
+      chromeStub.app = {
+        isInstalled: false,
+        InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+        RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' }
+      };
+      chromeStub.runtime = {
+        OnInstalledReason: {
+          CHROME_UPDATE: 'chrome_update', INSTALL: 'install',
+          SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update'
+        },
+        OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
+        PlatformArch: { ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
+        PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' },
+        connect: function () { throw new Error('Could not establish connection. Receiving end does not exist.'); },
+        sendMessage: function () { throw new Error('Could not establish connection. Receiving end does not exist.'); }
+      };
+      chromeStub.loadTimes = function () { return null; };
+      chromeStub.csi = function () { return null; };
+      Object.defineProperty(window, 'chrome', { value: chromeStub, writable: true, configurable: true, enumerable: true });
+    }
+  } catch (e) {}
 
   /* ---- iOS and Android tell-tales ---- */
   try {
@@ -529,6 +624,89 @@ namespace JoeBrowser
       var v = (ih > 0 ? ih : 800) + chromeGapH;
       return Math.min(v, F.ah > 0 ? F.ah : v);
     });
+  } catch (e) {}
+
+  /* ---- Layout width, or the scrollbar leak ---- */
+  /* These three facts have to agree with each other and with the claimed platform:
+       innerWidth - documentElement.clientWidth  == width of the OS scrollbar
+       window.scrollbars.visible                 == whether that scrollbar is showing
+       (scrollbar-gutter / scrollbar-width)      == whether the OS uses overlay bars
+     On a Windows host a macOS profile reported 17 px of gutter and a visible classic
+     scrollbar; a phone profile reported both, which no phone can do. The gutter is now
+     emulated per device: 0 where the platform overlays (iOS, Android), 15 on macOS, 17 on
+     Windows. Only the gutter is written - the content box keeps its real size, so pages are
+     never asked to lay out inside an imaginary strip. */
+  try {
+    var SBW = (typeof F.sbw === 'number') ? F.sbw : 17;
+    var overlayBars = (F.mobile || F.touch > 0) || SBW === 0;
+
+    function layoutOverride(proto, prop, extra) {
+      if (!proto) return;
+      var desc = Object.getOwnPropertyDescriptor(proto, prop);
+      if (!desc || !desc.get) return;
+      var real = desc.get;
+      Object.defineProperty(proto, prop, {
+        configurable: true,
+        enumerable: desc.enumerable,
+        get: mark(function () {
+          var v = 0;
+          try { v = real.call(this); } catch (e) { return 0; }
+          if (typeof v !== 'number' || v <= 0) return v;
+          // Elements only report a gutter when they actually scroll; subtracting it from every
+          // element would make every non-scrolling box too narrow by one scrollbar.
+          var scrolls = false;
+          try { scrolls = this.scrollHeight > (this.clientHeight || 0); } catch (e) { scrolls = false; }
+          return Math.max(0, v - (scrolls ? SBW : 0));
+        }, 'get ' + prop, 0)
+      });
+    }
+    if (typeof Element !== 'undefined' && Element.prototype) {
+      layoutOverride(Element.prototype, 'clientWidth');
+    }
+
+    /* window.innerWidth is authoritative for the page's layout width, so it keeps its value.
+       What must change is the difference between it and the document's client width, which is
+       how a script measures the scrollbar without asking for anything. */
+    if (typeof Document !== 'undefined' && Document.prototype) {
+      var cwDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
+      if (cwDesc && cwDesc.get) {
+        var realCw = cwDesc.get;
+        Object.defineProperty(Document.prototype, 'clientWidth', {
+          configurable: true,
+          get: mark(function () {
+            var v = 0;
+            try { v = realCw.call(this.documentElement); } catch (e) { return 0; }
+            if (typeof v !== 'number' || v <= 0) return v;
+            var scrolls = false;
+            try { scrolls = this.documentElement.scrollHeight > (this.documentElement.clientHeight || 0); } catch (e) { scrolls = false; }
+            return Math.max(0, v - (scrolls ? SBW : 0));
+          }, 'get clientWidth', 0)
+        });
+      }
+    }
+
+    /* CSS media queries answer the same question independently:
+         (scrollbar-width: none)  - true when the platform overlays its scrollbars
+         (scrollbar-width: thin)  - Windows 11 and anything themed thin */
+    if (window.matchMedia) {
+      var origScrollbarMM = window.matchMedia;
+      method(window, 'matchMedia', function matchMediaScroll(query) {
+        var q = String(query).toLowerCase();
+        var wanted = null;
+        if (q.indexOf('scrollbar-width') >= 0) {
+          if (q.indexOf('none') >= 0) wanted = overlayBars;
+          else if (q.indexOf('thin') >= 0) wanted = !overlayBars && SBW !== 17;
+          else if (q.indexOf('auto') >= 0) wanted = !overlayBars && SBW === 17;
+        }
+        if (wanted === null) return origScrollbarMM.call(window, query);
+        var real = origScrollbarMM.call(window, query);
+        try {
+          Object.defineProperty(real, 'matches', { configurable: true, get: function () { return wanted; } });
+          Object.defineProperty(real, 'media', { configurable: true, get: function () { return String(query); } });
+        } catch (e) { }
+        return real;
+      }, 1);
+    }
   } catch (e) {}
 
   /* ---- WebGL ---- */

@@ -27,7 +27,7 @@ namespace JoeBrowser
 
         public InstallGate()
         {
-            Text = "Joe Browser - Install";
+            Text = "Joe Browser";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterScreen;
             MaximizeBox = false;

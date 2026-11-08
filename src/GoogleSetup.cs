@@ -88,8 +88,8 @@ namespace JoeBrowser
             }
             if (!GoogleSignIn.LooksValid(id))
             {
-                Warn("That does not look like a client id. Copy the value labelled \"Client ID\" - not the project "
-                   + "id, and not the secret.");
+                Warn("That does not look like a client id. Copy the value labelled \"Client ID\", "
+                   + "not the project id and not the secret.");
                 _id.Box.Focus();
                 _id.Box.SelectAll();
                 return false;

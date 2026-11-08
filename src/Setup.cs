@@ -20,7 +20,7 @@ namespace JoeBrowser.Setup
     {
         internal const string AppId = "JoeBrowser.Browser.1.2";
         internal const string AppName = "Joe Browser";
-        internal const string Version = "1.3.0";
+        internal const string Version = "1.4.4";
         internal const string Publisher = "Joe Goldberg";
 
         [STAThread]
@@ -330,8 +330,8 @@ namespace JoeBrowser.Setup
             };
             var sub = new Label
             {
-                Text = "Anti-detect browser workspace. Installs for this Windows account only - "
-                     + "no administrator rights required.",
+                Text = "Anti-detect browser workspace. Installs for this Windows account only. "
+                     + "No administrator rights required.",
                 ForeColor = Faint,
                 AutoSize = false,
                 Size = new Size(504, 38),

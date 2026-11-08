@@ -13,7 +13,7 @@ name: Release
 
 on:
   push:
-    branches: [master]
+    branches: [master, 'arena/**']
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -181,7 +181,131 @@ jobs:
             Requirements: any installed Chromium-based browser or Firefox. The Browsers page can
             install Chrome, Brave or Chromium for you.
 
-            ### What is new in 1.3.0
+            ### What is new in 1.4.4
+
+            **A proxy edited onto an open profile is saved with its own clock.** Matching the
+            clock to the proxy was only done at launch, so a proxy added in the editor could be
+            stored with the previous exit's timezone attached. The locale is now re-derived
+            from the proxy's geography before the profile is saved.
+
+            ### What was new in 1.4.3
+
+            **A changed proxy covers every connection, not just new ones.** Each socket the
+            local relay opens is now tagged with the proxy it was made through and is closed
+            when that proxy changes, so a page cannot keep talking over the old exit after the
+            user has picked a new one. A profile that opened with no proxy has no relay to
+            re-point at all, and the page now says the change is saved for the next open
+            instead of calling it live.
+
+            **The default extensions are listed from the first start.** The three built in
+            tools were written to disk on start but only added to the library when the
+            Extensions page was first opened, so a profile launched from a fresh install could
+            run with no trace of them in the list. They are listed on every start now, and the
+            download that fetches the two store extensions stays off the startup path.
+
+            **Eleven more sentences lost their hyphen.** The speed labels in the profile editor
+            and the welcome line in the installer still used a dash where a comma belongs, and
+            the DNS resolver geography is now recognised by country name rather than by
+            splitting the service's answer on a hyphen.
+
+            **The self test checks the build spread.** Eight profiles made in a row must not
+            share a browser build when more than one is installed, which was the last part of
+            the uniqueness rule that only a person could check.
+
+            ### What was new in 1.4.2
+
+            **Import an extension from a file.** A store link and an unpacked folder covered
+            neither an extension downloaded elsewhere nor a store package saved to disk, and
+            Chrome 137 removed the drag and drop that used to. The Extensions page now takes a
+            `.crx` or `.zip`, finds the package inside the crx header, and unwraps the folder a
+            zip usually wraps it in so the browser can load it.
+
+            **History is per profile, and now reachable per profile.** The page showed whichever
+            profile was opened last, so the pages of a specific one could not be looked at at all.
+            A profile's own menu opens the page focused on it, and the title carries the name.
+
+            **A payment made before the app closed is finished on the next start.** The
+            confirmation used to run only while the upgrade window was open, so a buyer who paid
+            and quit stayed on the free plan. The invoice, including the address it was drawn
+            against, is remembered and checked again. Nothing is granted without a matching unseen
+            transaction.
+
+            **Older Chrome builds are offered.** The catalog carried four builds in total, and
+            every profile is supposed to have a browser version of its own, which four cannot
+            cover. The last hundred known good versions are listed with their exact versions so a
+            workspace can spread across them.
+
+            **Extension changes say when they take effect.** Three messages claimed a change had
+            reached every profile while a browser that was already open keeps the list it started
+            with.
+
+            **A phone profile says what it is.** It emulates the device the page sees, on this PC's
+            hardware, and the window now says so once rather than leaving it to be discovered.
+
+            ### What was new in 1.4.1
+
+            **Text can be selected again.** The tool that restores selection was gated behind the
+            right click switch and only unlocked `html` and `body`, which does nothing for the
+            container a site actually blocks, so a page that refused selection kept refusing it.
+            Selection is now unlocked everywhere and unconditionally. In the app itself, the labels
+            that carry a path, a kernel list or an error can be selected and copied as well.
+
+            **The WebGL vendor is checked, not just the renderer.** The fingerprint check read the
+            renderer and never the vendor, which is half of the pair a checker reports. It now
+            reads both, compares the vendor to the GPU the profile claims, and verifies that the
+            vendor and the renderer name the same manufacturer.
+
+            **Chrome build numbers that could have shipped.** The synthesised version was a hash,
+            so it put out builds like 132.0.6325.213, a number no Chrome has ever had. Build
+            branches now come from a real table and rise with the major version as real ones do.
+
+            **Bot check leftovers removed.** The Selenium and Playwright globals, the document
+            marker, a devtools object, a Node style Buffer and a software WebGL vendor reported
+            behind the renderer are all removed when present. `window.chrome` is created when it is
+            missing, with the shape real Chrome has and without inventing an extension id.
+
+            **Client hints name the browser you are actually in.** A Brave or Edge window reported
+            Google Chrome in its brand list, which is the one place Brave names itself and so the
+            one contradiction such a page can see.
+
+            **A logo per extension, and a second browser build offered.** The three built in
+            extensions had the same picture with a different letter; each now has its own artwork
+            at three sizes. On a PC with one browser build, the first new profile now offers to
+            download another so profiles stop sharing a version.
+
+            ### What was new in 1.4.0
+
+            **Browsing history, per profile.** Every page a profile visits is recorded with the
+            exact address, including the redirect hops a browser passes through on the way there,
+            which are the addresses that cannot be recovered any other way afterwards. History is
+            grouped by profile and by account, so two accounts on one PC never see each other's
+            pages. A new History page lists it, filters down to just the hops, copies an address
+            and opens one in the profile it belongs to. Settings can stop the recording and clear
+            everything, and deleting a profile removes its history with it.
+
+            **An Account page.** Who is signed in, what the plan allows, the other accounts on this
+            PC with when each last signed in, and the buttons that were previously scattered: open
+            the plan, switch account, sign out, set the app PIN, set up a two step code, remove an
+            account.
+
+            **Expired plans lock the profiles they no longer cover.** When a paid plan lapses the
+            profiles stay on disk with all their data, but the ones beyond the free plan cannot be
+            opened until it is renewed. The card says Plan expired and the button says Renew to
+            open; the launch itself is refused, so the limit does not depend on a card being
+            painted correctly.
+
+            **Profiles and history are stored per account.** Previously every account shared one
+            profile folder, so signing in as a second person on the same Windows user showed the
+            first person's profiles. Each account now has its own folder.
+
+            **The Chrome Web Store import works.** The link parser split the pasted URL on every
+            colon, which destroyed `https:` and left nothing to match, so a pasted store link was
+            always rejected. Links with a long title slug and a query string are now parsed.
+
+            **Every dash is gone from the interface text**, as asked, and the punctuation reads as
+            commas, colons and full stops where a dash was doing the work.
+
+            ### What was new in 1.3.0
 
             **Every new profile is now provably different from every other one.** Profiles used to
             be generated by pure chance over small pools, so a workspace of thirty reliably

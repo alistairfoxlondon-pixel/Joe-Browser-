@@ -60,7 +60,53 @@ namespace JoeBrowser
             return "https://chromewebstore.google.com/detail/" + id;
         }
 
-        /// <summary>Ensures the shipped store extensions are present in the library, once.</summary>
+        /// <summary>
+        /// Adds the shipped store extensions that are already unpacked on disk to the library,
+        /// with no network access. Called at start, because the library is what the Extensions
+        /// page and the launch path read; a download there would put a web request in front of
+        /// the first window.
+        /// </summary>
+        public static void ListPresentDefaults()
+        {
+            try
+            {
+                var items = Load();
+                bool changed = false;
+                foreach (var entry in DefaultStoreExtensions)
+                {
+                    string id = entry[0];
+                    string target = Path.Combine(ImportedRoot, id);
+                    if (!File.Exists(Path.Combine(target, "manifest.json"))) continue;
+                    bool listed = false;
+                    foreach (var e in items)
+                    {
+                        if (e == null || string.IsNullOrEmpty(e.Folder)) continue;
+                        try
+                        {
+                            if (e.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase))
+                            { listed = true; break; }
+                        }
+                        catch { }
+                    }
+                    if (listed) continue;
+                    items.Add(new ExtensionItem
+                    {
+                        Name = entry[1],
+                        Folder = target,
+                        Enabled = true,
+                        Source = "store",
+                        StoreUrl = StoreUrlFor(id),
+                        Version = VersionFromManifest(Path.Combine(target, "manifest.json"))
+                    });
+                    changed = true;
+                }
+                if (changed) Save(items);
+            }
+            catch (Exception ex) { Log.Error("Listing the default extensions failed", ex); }
+        }
+
+        /// <summary>Ensures the shipped store extensions are present in the library, once.
+        /// Downloads what is missing, so it belongs off the startup path.</summary>
         public static void EnsureDefaults()
         {
             try
@@ -216,6 +262,11 @@ namespace JoeBrowser
             string s = url.Trim();
             // A raw id is also accepted.
             if (s.Length == 32 && IsId(s)) return s.ToLowerInvariant();
+            /* Only the query is cut here, never the fragment or the whole URL: a Web Store link
+               pasted from the address bar ends in a long slug plus "/<id>", and an older build
+               split the string on every colon as well, which chopped "https:" into "https" and
+               left nothing to match. An id is 32 characters from a-p, so searching the path
+               segments from the end finds it whatever slug the store put in front. */
             int q = s.IndexOf('?');
             if (q > 0) s = s.Substring(0, q);
             string[] bits = s.Split(new[] { '/', '=', '&', '#', ':' }, StringSplitOptions.RemoveEmptyEntries);
@@ -364,6 +415,72 @@ namespace JoeBrowser
                 Source = "folder",
                 Version = VersionFromManifest(Path.Combine(target, "manifest.json"))
             };
+        }
+
+        /// <summary>
+        /// Imports a downloaded extension as a file: a .crx from the Chrome Web Store, a zip of an
+        /// unpacked extension, or a zip of the store package. The store is not reachable from some
+        /// networks and an extension can also arrive as a file from elsewhere, so this is the path
+        /// for "I already have it" - the same one Chrome itself removed in 137.
+        /// </summary>
+        public static ExtensionItem ImportFromFile(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                throw new InvalidOperationException("Choose an existing .crx or .zip file.");
+
+            byte[] raw = File.ReadAllBytes(path);
+            int start = FindZipStart(raw);
+            if (start < 0)
+                throw new InvalidOperationException("That file is not a packed extension. A .crx or .zip is expected.");
+
+            Directory.CreateDirectory(ImportedRoot);
+            string safe = Guid.NewGuid().ToString("N").Substring(0, 12);
+            string target = Path.Combine(ImportedRoot, safe);
+            string temp = Path.Combine(ImportedRoot, safe + ".zip");
+            try
+            {
+                File.WriteAllBytes(temp, Slice(raw, start));
+                Directory.CreateDirectory(target);
+                using (var archive = ZipFile.OpenRead(temp)) archive.ExtractToDirectory(target);
+
+                /* A zip usually wraps the extension in one folder, and the browser will not load
+                   it unless manifest.json is at the root of what it is given. */
+                string manifest = Path.Combine(target, "manifest.json");
+                if (!File.Exists(manifest))
+                {
+                    string[] dirs = Directory.GetDirectories(target);
+                    if (dirs.Length == 1 && File.Exists(Path.Combine(dirs[0], "manifest.json")))
+                        manifest = Path.Combine(dirs[0], "manifest.json");
+                }
+                if (!File.Exists(manifest))
+                    throw new InvalidOperationException(
+                        "The package has no manifest.json, so Chromium cannot load it. Use the store link instead.");
+
+                string root = Path.GetDirectoryName(manifest);
+                string name = NameFromManifest(manifest) ?? Path.GetFileNameWithoutExtension(path);
+                string version = VersionFromManifest(manifest) ?? "";
+                if (!string.Equals(root, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    /* Move the single inner folder up rather than rewriting every path. */
+                    foreach (string f in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
+                    {
+                        string rel = f.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar);
+                        string dest = Path.Combine(target, rel);
+                        Directory.CreateDirectory(Path.GetDirectoryName(dest));
+                        File.Copy(f, dest, true);
+                    }
+                    try { Directory.Delete(root, true); } catch { }
+                }
+                return new ExtensionItem
+                {
+                    Name = name,
+                    Folder = target,
+                    Enabled = true,
+                    Source = "file",
+                    Version = version
+                };
+            }
+            finally { TryDelete(temp); }
         }
 
         private static void CopyTree(string from, string to)

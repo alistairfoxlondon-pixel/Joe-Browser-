@@ -18,6 +18,11 @@ namespace JoeBrowser
         private readonly Func<ProxyConfig> _provider;
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private volatile ProxyConfig _current;
+        /* Every socket is pinned to the upstream that was live when it opened. Without the
+           epoch a page could keep talking over a connection made through the previous proxy,
+           which is exactly the leak a user changes proxy to avoid. */
+        private int _epoch;
+        private string _epochKey;
 
         public int Port { get; private set; }
 
@@ -49,6 +54,16 @@ namespace JoeBrowser
                 if (p != null) _current = p;
             }
             catch { }
+            var cfg = _current;
+            string key = cfg == null || !cfg.Enabled
+                ? "direct"
+                : (cfg.Type ?? "") + "|" + (cfg.Host ?? "") + "|" + cfg.Port.ToString() + "|" +
+                  (cfg.User ?? "") + "|" + (cfg.Password ?? "") + "|" + (cfg.FallbackDirect ? "1" : "0");
+            if (!string.Equals(key, _epochKey, StringComparison.Ordinal))
+            {
+                _epochKey = key;
+                Interlocked.Increment(ref _epoch);
+            }
             return _current;
         }
 
@@ -123,8 +138,9 @@ namespace JoeBrowser
                     }
                 }
 
-                var up = PumpAsync(cs, us, _cts.Token);
-                var down = PumpAsync(us, cs, _cts.Token);
+                int epoch = Volatile.Read(ref _epoch);
+                var up = PumpAsync(cs, us, _cts.Token, epoch);
+                var down = PumpAsync(us, cs, _cts.Token, epoch);
                 await Task.WhenAny(up, down).ConfigureAwait(false);
                 try { client.Close(); } catch { }
                 try { upstream.Close(); } catch { }
@@ -136,13 +152,16 @@ namespace JoeBrowser
             }
         }
 
-        private static async Task PumpAsync(NetworkStream from, NetworkStream to, CancellationToken ct)
+        private async Task PumpAsync(NetworkStream from, NetworkStream to, CancellationToken ct, int epoch)
         {
             var buf = new byte[16384];
             try
             {
                 while (true)
                 {
+                    /* The upstream moved: drop this socket so the next request is made through
+                       the proxy the user just picked, not the one they replaced. */
+                    if (Volatile.Read(ref _epoch) != epoch) break;
                     int n = await from.ReadAsync(buf, 0, buf.Length, ct).ConfigureAwait(false);
                     if (n <= 0) break;
                     await to.WriteAsync(buf, 0, n).ConfigureAwait(false);

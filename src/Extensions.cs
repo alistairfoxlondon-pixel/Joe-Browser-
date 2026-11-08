@@ -54,7 +54,7 @@ namespace JoeBrowser
                         NoHosts, "service-worker.js", "content.js", false));
                     Write(HumanPaste, "service-worker.js", HumanPasteWorker);
                     Write(HumanPaste, "content.js", HumanPasteContent);
-                    WriteIcon(HumanPaste, "H", Color.FromArgb(0, 120, 215));
+                    WriteIcon(HumanPaste);
 
                     Write(ProxyWatch, "manifest.json", Manifest("Joe Proxy Watch", "1.1.0",
                         "Warns when the connection IP rotates or the proxy goes offline.",
@@ -63,7 +63,7 @@ namespace JoeBrowser
                     Write(ProxyWatch, "service-worker.js", ProxyWatchWorker);
                     Write(ProxyWatch, "content.js", ProxyWatchContent);
                     Write(ProxyWatch, "banner.css", ProxyWatchCss);
-                    WriteIcon(ProxyWatch, "P", Color.FromArgb(0, 150, 136));
+                    WriteIcon(ProxyWatch);
 
                     Write(RightClickEnable, "manifest.json", Manifest("Joe Right Click Enable", "1.2.0",
                         "Restores the right-click menu and copy on sites that block them.",
@@ -71,7 +71,7 @@ namespace JoeBrowser
                         NoHosts, "service-worker.js", "content.js", false));
                     Write(RightClickEnable, "service-worker.js", RightClickWorker);
                     Write(RightClickEnable, "content.js", RightClickContent);
-                    WriteIcon(RightClickEnable, "R", Color.FromArgb(0, 120, 215));
+                    WriteIcon(RightClickEnable);
 
                     // Retire the old guard folder so a stale copy is never loaded alongside
                     // the new enable-right-click extension.
@@ -101,8 +101,11 @@ namespace JoeBrowser
             if (hosts != null && hosts.Length > 0)
                 lines.Add("  \"host_permissions\": [" + string.Join(", ", Quote(hosts)) + "]");
             lines.Add("  \"background\": { \"service_worker\": \"" + worker + "\" }");
-            lines.Add("  \"action\": { \"default_title\": \"" + name + "\", \"default_icon\": \"icon.png\" }");
-            lines.Add("  \"icons\": { \"48\": \"icon.png\" }");
+            /* A Chromium action icon is asked for at 16, 32 and 48; one 48 pixel file scaled down
+               at run time is visibly soft in the toolbar, and the extension list wants 128. */
+            lines.Add("  \"action\": { \"default_title\": \"" + name + "\", \"default_icon\": { " +
+                      "\"16\": \"icon16.png\", \"48\": \"icon48.png\", \"128\": \"icon128.png\" } }");
+            lines.Add("  \"icons\": { \"16\": \"icon16.png\", \"48\": \"icon48.png\", \"128\": \"icon128.png\" }");
             if (content != null)
             {
                 /* One list entry, so the join below adds a comma only after the whole member. */
@@ -123,33 +126,132 @@ namespace JoeBrowser
             return sb.ToString();
         }
 
-        private static void WriteIcon(string id, string letter, Color tint)
+        /// <summary>
+        /// Bumped when the artwork changes. The logos used to be a coloured circle with a letter
+        /// in it, which is not a logo and looked like three copies of the same one; installs that
+        /// already had them kept them forever because the writer skipped an existing file.
+        /// </summary>
+        private const int IconVersion = 2;
+
+        private static void WriteIcon(string id)
         {
-            string path = Path.Combine(Dir(id), "icon.png");
-            if (File.Exists(path)) return;
+            string dir = Dir(id);
+            string stamp = Path.Combine(dir, "icon.version");
+            string existing = File.Exists(stamp) ? (File.ReadAllText(stamp) ?? "").Trim() : "";
+            if (existing == IconVersion.ToString()) return;
+
             try
             {
-                using (var bmp = new Bitmap(48, 48, PixelFormat.Format32bppArgb))
-                using (var g = Graphics.FromImage(bmp))
-                using (var f = new Font("Segoe UI", 22f, FontStyle.Bold, GraphicsUnit.Pixel))
-                using (var brush = new SolidBrush(tint))
-                {
-                    g.SmoothingMode = SmoothingMode.AntiAlias;
-                    g.Clear(Color.Transparent);
-                    g.FillEllipse(brush, 1, 1, 46, 46);
-                    var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-                    g.DrawString(letter, f, Brushes.White, new RectangleF(0, 0, 48, 48), sf);
-                    bmp.Save(path, ImageFormat.Png);
-                }
+                foreach (int size in new[] { 16, 48, 128 })
+                    DrawLogo(id, size).Save(Path.Combine(dir, "icon" + size + ".png"), ImageFormat.Png);
+                /* The name older builds used, and the one the manifest still points at first. */
+                DrawLogo(id, 48).Save(Path.Combine(dir, "icon.png"), ImageFormat.Png);
+                File.WriteAllText(stamp, IconVersion.ToString());
             }
             catch (Exception ex) { Log.Error("Extension icon failed", ex); }
-            try
+        }
+
+        /// <summary>
+        /// One distinct piece of artwork per extension, drawn as vectors so every size is sharp.
+        /// Each says what the tool does: a page and a typing caret, a globe that is being watched,
+        /// and a mouse with its right button pressed. They share the app's palette so the set
+        /// reads as one family rather than three unrelated pictures.
+        /// </summary>
+        private static Bitmap DrawLogo(string id, int size)
+        {
+            var bmp = new Bitmap(size, size, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bmp))
             {
-                // Every manifest references banner.css; keep the file present in each folder.
-                string css = Path.Combine(Dir(id), "banner.css");
-                if (!File.Exists(css)) File.WriteAllText(css, ProxyWatchCss, new UTF8Encoding(false));
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.Clear(Color.Transparent);
+                g.ScaleTransform(size / 48f, size / 48f);
+
+                bool paste = id == HumanPaste;
+                bool watch = id == ProxyWatch;
+                Color tint = paste ? Color.FromArgb(0x1F, 0x7B, 0xE8)
+                    : watch ? Color.FromArgb(0x0E, 0xA5, 0x8C)
+                    : Color.FromArgb(0xE0, 0x8A, 0x1E);
+
+                using (var bg = new GraphicsPath())
+                {
+                    const float r = 11f;
+                    bg.AddArc(1, 1, r * 2, r * 2, 180, 90);
+                    bg.AddArc(46 - r * 2, 1, r * 2, r * 2, 270, 90);
+                    bg.AddArc(46 - r * 2, 46 - r * 2, r * 2, r * 2, 0, 90);
+                    bg.AddArc(1, 46 - r * 2, r * 2, r * 2, 90, 90);
+                    bg.CloseFigure();
+                    /* Mixed by hand rather than with ControlPaint, which is in the Windows Forms
+                       assembly this file does not reference, and a gradient that darkens by a
+                       fixed factor needs no theme at all. */
+                    Color deep = Color.FromArgb(tint.R * 78 / 100, tint.G * 78 / 100, tint.B * 78 / 100);
+                    using (var brush = new LinearGradientBrush(new RectangleF(0, 0, 48, 48), tint, deep, 55f))
+                        g.FillPath(brush, bg);
+                }
+
+                using (var ink = new Pen(Color.White, 2.2f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                using (var thin = new Pen(Color.FromArgb(210, 255, 255, 255), 1.6f)
+                    { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                using (var solid = new SolidBrush(Color.White))
+                {
+                    if (paste)
+                    {
+                        /* A page with a folded corner, three lines of text, and the caret that
+                           types them. */
+                        using (var page = new GraphicsPath())
+                        {
+                            page.AddLine(14, 9, 27, 9);
+                            page.AddLine(27, 9, 34, 16);
+                            page.AddLine(34, 16, 34, 39);
+                            page.AddLine(34, 39, 14, 39);
+                            page.CloseFigure();
+                            g.FillPath(new SolidBrush(Color.FromArgb(36, 255, 255, 255)), page);
+                            g.DrawPath(ink, page);
+                        }
+                        g.DrawLines(ink, new[] { new PointF(27, 9), new PointF(27, 16), new PointF(34, 16) });
+                        g.DrawLine(thin, 19, 23, 30, 23);
+                        g.DrawLine(thin, 19, 28, 30, 28);
+                        g.DrawLine(thin, 19, 33, 25, 33);
+                        /* The caret sits on the last line, where a human would be typing. */
+                        using (var caret = new SolidBrush(Color.White)) g.FillRectangle(caret, 26.4f, 30.9f, 1.8f, 6.2f);
+                    }
+                    else if (watch)
+                    {
+                        /* A globe with a watch ring around it: the IP is being monitored. */
+                        g.DrawEllipse(ink, 11, 11, 26, 26);
+                        using (var flat = new GraphicsPath())
+                        {
+                            flat.AddEllipse(17.5f, 11, 13, 26);
+                            g.DrawPath(thin, flat);
+                        }
+                        g.DrawLine(ink, 11, 24, 37, 24);
+                        g.DrawArc(thin, 16, 11, 16, 26, 90, 180);
+                        g.DrawArc(thin, 16, 11, 16, 26, 270, 180);
+                        using (var pulse = new SolidBrush(Color.White)) g.FillEllipse(pulse, 29.5f, 5.5f, 9, 9);
+                        using (var ring = new SolidBrush(tint)) g.FillEllipse(ring, 31.6f, 7.6f, 4.8f, 4.8f);
+                    }
+                    else
+                    {
+                        /* A mouse outline with the right button filled: the tool is about the
+                           button a site disables. */
+                        using (var body = new GraphicsPath())
+                        {
+                            body.AddArc(15, 7, 18, 20, 180, 180);
+                            body.AddArc(15, 21, 18, 20, 0, 180);
+                            body.CloseFigure();
+                            g.DrawPath(ink, body);
+                        }
+                        using (var right = new GraphicsPath())
+                        {
+                            right.AddArc(24, 8.6f, 8, 18, 270, 90);
+                            right.AddLine(32, 15, 24, 15);
+                            right.CloseFigure();
+                            g.FillPath(solid, right);
+                        }
+                        g.DrawLine(thin, 24, 9, 24, 27);
+                    }
+                }
             }
-            catch { }
+            return bmp;
         }
 
         private static string[] Quote(string[] values)
@@ -614,6 +716,36 @@ if (cfg.human) {
    clipboard back: page handlers never see those trusted events, inline blockers are
    stripped, and selection CSS is unlocked. This is the opposite of a right-click
    blocker - it does not remove any browser feature. */
+/* Selection is not a site's choice to take away here. Whatever else is switched off, the
+   page cannot refuse to let the user select and copy its own text - that was reported as
+   reported as text selection not working, and a site that blocks selectstart is almost
+   always one
+   that also blocks the copy it would need. */
+(function () {
+  try {
+    var st = document.createElement('style');
+    st.setAttribute('data-jb', 'selection');
+    st.textContent = 'html,body,body *{-webkit-user-select:text!important;-moz-user-select:text!important' +
+                     ';-ms-user-select:text!important;user-select:text!important}';
+    (document.head || document.documentElement).appendChild(st);
+  } catch (e) {}
+  /* No preventDefault patch here on purpose. This script is a C# verbatim string compiled
+     into the EXE, so a stray double quote inside it ends the string and every brace has to
+     survive the C# parser before it reaches a page. The guard below does the same job with a
+     capture listener and nothing to escape. The copy unlock in the right click block still
+     patches preventDefault once, and keeps its own reference to the native one. */
+  try {
+    document.addEventListener('copy', function (e) {
+      try { if (e.isTrusted) e.stopImmediatePropagation(); } catch (x) {}
+    }, true);
+  } catch (e) {}
+  try {
+    document.addEventListener('selectstart', function (e) {
+      try { if (e.isTrusted) e.stopImmediatePropagation(); } catch (x) {}
+    }, true);
+  } catch (e) {}
+})();
+
 if (cfg.rightClick) {
   var UNBLOCK = { contextmenu:1, copy:1, cut:1, selectstart:1, dragstart:1, mousedown:1, mouseup:1 };
   Event.prototype.preventDefault = function(){

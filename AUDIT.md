@@ -672,3 +672,40 @@ Still to confirm on a real desktop (CI runs windowless): the visual side of 1.3.
 distinct card signatures for twelve profiles, an unchanged signature after a relaunch, the
 audit's Fix reporting how many open profiles it retargeted, and the coherence repair on a
 hand-edited `Os=macOS` profile.
+
+## Round 15: the final sweep before 1.4.3
+
+The brief was re-read item by item and every item was matched against a line of code, a self
+test assertion or a build step. Five things were still wrong, and all five are fixed in 1.4.3.
+
+| Item | What was wrong | Fix |
+|---|---|---|
+| Proxy hot swap without closing tabs | New connections took the new upstream, but a socket already open carried on through the old one, so part of a page could still leave by the exit the user had replaced | Each socket is tagged with the upstream it was opened through and closed when that changes (`ProxyRelay.PumpAsync`) |
+| The same, when the profile opened with no proxy | The window said the change was live; there was no relay to re-point at all, and Chrome reads its proxy once from its command line | The window says the change is saved for the next open (`BrowserSession.HasRelay`, `MainForm.ApplyProxyLive`) |
+| Default extensions | The three built in tools reached disk on start but only reached the library when the Extensions page was opened, so a fresh install could launch with none listed | `ExtensionCatalog.ListPresentDefaults` runs at start; the store download stays on the extensions path |
+| No dashes in text | Eleven sentences still used a hyphen as a comma, including the profile editor's speed labels and the installer's welcome line | Reworded, and the DNS resolver geography is matched by country name instead of by splitting on a hyphen |
+| Every profile a different browser build | Nothing checked it except a person reading the grid | The self test now fails when eight profiles made in a row share a build while more than one is installed |
+
+Two smaller copy faults went with them: clearing a profile's history asked "Clear" while its
+button says "Clear history", and the account page described an unlimited plan without saying
+the plan belongs to the account rather than to the machine.
+
+### What the build proves
+
+`JoeBrowser.exe --selftest` on a Windows runner, on every push: the configuration parses, the
+eight profiles get eight distinct signatures and no shared build, a new profile opens on
+`https://ipfighter.com/browser-fingerprint` and so does a fresh settings file, the
+complimentary account is recognised with spaces and capitals and no other address is granted
+Pro, history de-duplicates a redirect's hop and its commit, and a profile saves and reloads.
+
+The `v1.4.3` tag additionally runs the installer silently, runs the installed copy and requires
+uninstalling to remove the executable, the shortcut and the registry entry.
+
+### What no sandbox can prove
+
+Fingerprint scores on iphey, pixelscan and AmIUnique; whether a site flags the browser; DNS leak
+results against a live proxy; and the visual side, meaning no scrollbars, a centred mobile
+viewport, one logo per built in extension and the icon face loading. These need a Windows
+desktop with a real proxy. The Brave, Edge and Firefox launch paths and the Android, iOS, macOS
+and Linux profile targets are implemented and selectable, and their runtimes cannot be
+exercised here either.
