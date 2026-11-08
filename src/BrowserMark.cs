@@ -80,6 +80,12 @@ namespace JoeBrowser
         public static void Draw(Graphics g, RectangleF box, string kind)
         {
             if (g == null || box.Width < 4 || box.Height < 4) return;
+
+            /* The real vendor logo wins whenever one is embedded. The vector art below is now
+               only the fallback for "auto"/"custom" and for a build with the resources
+               stripped, which keeps the app recognisable without pretending to be Chrome. */
+            if (BrowserLogo.TryDraw(g, box, kind)) return;
+
             string k = Norm(kind);
             float d = Math.Min(box.Width, box.Height);
             var r = new RectangleF(box.X + (box.Width - d) / 2f, box.Y + (box.Height - d) / 2f, d, d);

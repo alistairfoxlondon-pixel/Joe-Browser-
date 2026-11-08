@@ -33,9 +33,14 @@ namespace JoeBrowser
         private JBTextBox _name, _startUrl, _notes, _browserPath, _host, _port, _user, _pass, _ua, _lat, _lng;
         private JBTextBox _group, _tags, _status, _customExt;
         private JBSelect _screen, _tz, _gpu, _os, _cores, _ram, _browserKind, _webrtcSel, _geoSel, _savedProxy;
+        private JBSelect _kernel, _osVer, _fontSet;
+        private JBButton _kernelManage;
+        private JBToggle _hwNoise;
+        private List<string> _kernelKeys = new List<string>();
+        private List<string> _osVerKeys = new List<string>();
         private JBLangPicker _lang;
         private JBToggle _canvas, _audio, _fonts, _dnt, _battery, _autoMatch, _autoUa;
-        private JBButton _regen, _browse, _testBtn, _save, _cancel, _getBrowser, _openExtFolder;
+        private JBButton _regen, _browse, _testBtn, _save, _cancel, _getBrowser, _openExtFolder, _random;
         private JBToggle _toolHumanPaste, _toolProxyWatch, _toolRightClick, _toolAllowShift;
         private JBSelect _toolSpeed, _toolInterval;
         private JBLabel _browserNote;
@@ -47,9 +52,10 @@ namespace JoeBrowser
         private int _footerY;
         private List<string> _kindKeys = new List<string>();
 
-        private JBLabel _lblName, _lblStart, _lblKind, _lblPath, _lblNotes;
+        private JBLabel _lblName, _lblStart, _lblKind, _lblPath, _lblNotes, _lblKernel;
         private JBLabel _lblGroup, _lblTags, _lblStatus;
         private JBLabel _lblOs, _lblScreen, _lblTz, _lblLang, _lblGpu, _lblCores, _lblRam;
+        private JBLabel _lblOsVer, _lblFontSet;
         private JBLabel _lblUa, _lblWebrtc, _lblGeo, _lblLat, _lblLng;
         private JBLabel _lblType, _lblHost, _lblPort, _lblUser, _lblPass, _lblSaved;
         private JBLabel _lblExt, _lblSpeed, _lblInterval, _lblCustomExt, _lblExtHint;
@@ -252,8 +258,7 @@ namespace JoeBrowser
             _browse.Click += delegate { BrowseBrowser(); };
             _tabGeneral.Controls.Add(_browse);
 
-            _lblGroup = Lbl(_tabGeneral, "GROUP / FOLDER");
-            _group = Txt(_tabGeneral, _profile.Group, "e.g. Clients / EU store", "folder", false, 40);
+            _lblGroup = Lbl(_tabGeneral, "GROUP / FOLDER");            _group = Txt(_tabGeneral, _profile.Group, "e.g. Clients / EU store", "folder", false, 40);
             _lblTags = Lbl(_tabGeneral, "TAGS (COMMA SEPARATED)");
             _tags = Txt(_tabGeneral, _profile.Tags, "work, ads, verified", "flag", false, 40);
             _lblStatus = Lbl(_tabGeneral, "STATUS");
@@ -275,6 +280,23 @@ namespace JoeBrowser
                 LayoutAll();
             };
             UpdateBrowserFetchUi();
+
+            /* Pinned build. Empty means "whatever is installed"; a pinned build keeps the
+               profile on one exact version even after the everyday browser updates. */
+            _lblKernel = Lbl(_tabGeneral, "ENGINE BUILD");
+            _kernel = Pick(_tabGeneral, "layers");
+            BuildKernelOptions();
+            _kernel.SelectedIndexChanged += delegate { if (_suppress) return; };
+            _kernelManage = new JBButton { Kind = BtnKind.Soft, Icon = "download", Text = "Kernels" };
+            _kernelManage.Click += delegate
+            {
+                using (var dlg = new KernelForm()) dlg.ShowDialog(this);
+                _suppress = true;
+                BuildKernelOptions();
+                _suppress = false;
+                LayoutAll();
+            };
+            _tabGeneral.Controls.Add(_kernelManage);
 
             _name.EnterPressed += OnEnterKey;
             _startUrl.EnterPressed += OnEnterKey;
@@ -317,8 +339,27 @@ namespace JoeBrowser
             _browserKind.SetItems(labels, sel);
         }
 
-        private void BrowseBrowser()
+        /// <summary>Installed builds plus the "whatever is installed" default.</summary>
+        private void BuildKernelOptions()
         {
+            var labels = new List<string> { "Installed browser" };
+            _kernelKeys = new List<string> { "" };
+            foreach (var k in KernelStore.Installed())
+            {
+                string name = k.Engine == "chrome" ? "Chrome"
+                    : k.Engine == "brave" ? "Brave" : "Chromium";
+                labels.Add(name + " " + k.Version);
+                _kernelKeys.Add(k.Engine + "|" + k.Version);
+            }
+            string want = (_profile.KernelEngine ?? "") + "|" + (_profile.KernelVersion ?? "");
+            int sel = _kernelKeys.IndexOf(want);
+            if (sel < 0) sel = 0;
+            _suppress = true;
+            _kernel.SetItems(labels, sel);
+            _suppress = false;
+        }
+
+        private void BrowseBrowser()        {
             using (var dlg = new OpenFileDialog())
             {
                 dlg.Title = "Select a browser executable";
@@ -394,8 +435,21 @@ namespace JoeBrowser
                 LayoutAll();
             };
 
-            _lblScreen = Lbl(_tabFp, "SCREEN");
-            _screen = Pick(_tabFp, "screen");
+            /* Android and iOS version. "auto" takes the build the handset behind the viewport
+               really shipped; a manual pick is honoured on every surface that mentions it. */
+            _lblOsVer = Lbl(_tabFp, "OS VERSION");
+            _osVer = Pick(_tabFp, "android");
+            _osVer.SelectedIndexChanged += delegate
+            {
+                if (_suppress) return;
+                int i = _osVer.SelectedIndex;
+                string key = i >= 0 && i < _osVerKeys.Count ? _osVerKeys[i] : "auto";
+                if (FingerprintFactory.IsAndroid(_fp.Os)) _fp.AndroidVersion = key;
+                else _fp.IosVersion = key;
+                FingerprintFactory.ResolveUserAgent(_fp, null);
+            };
+
+            _lblScreen = Lbl(_tabFp, "SCREEN");            _screen = Pick(_tabFp, "screen");
             _screen.SelectedIndexChanged += delegate
             {
                 if (_suppress) return;
@@ -460,6 +514,23 @@ namespace JoeBrowser
             };
             _tabFp.Controls.Add(_regen);
 
+            /* A whole new identity, not just a re-roll inside the same device target. This is
+               what makes two profiles created a minute apart share nothing at all. */
+            _random = new JBButton { Kind = BtnKind.Soft, Icon = "sparkle", Text = "Random identity" };
+            _random.Click += delegate
+            {
+                string[] pool = { "Windows 11", "Windows 10", "macOS", "Linux", "Android", "iPhone", "iPad" };
+                string os = pool[new Random(Guid.NewGuid().GetHashCode()).Next(pool.Length)];
+                _systemTarget = false;
+                FingerprintFactory.Regenerate(_fp, os, _proxy);
+                FingerprintFactory.ApplyProxyLocale(_fp, _proxy);
+                RefreshFingerprintUi();
+                _ua.Value = "";
+                LayoutAll();
+                SetError("");
+            };
+            _tabFp.Controls.Add(_random);
+
             _fpWarn = new JBLabel(LabelRole.Faint, "");
             _fpWarn.TextAlign = ContentAlignment.MiddleLeft;
             _tabFp.Controls.Add(_fpWarn);
@@ -485,8 +556,15 @@ namespace JoeBrowser
 
         private void BuildPrivacy()
         {
-            _lblWebrtc = Lbl(_tabPriv, "WEBRTC LEAK");
-            _webrtcSel = Pick(_tabPriv, "shield");
+            _lblFontSet = Lbl(_tabPriv, "FONT LIST");
+            _fontSet = Pick(_tabPriv, "face");
+            var fontLabels = new List<string>();
+            foreach (var f in FingerprintFactory.FontSets) fontLabels.Add(f[1]);
+            _fontSet.SetItems(fontLabels, 0);
+            _hwNoise = new JBToggle { Text = "Hardware noise", Checked = _fp.HardwareNoise };
+            _tabPriv.Controls.Add(_hwNoise);
+
+            _lblWebrtc = Lbl(_tabPriv, "WEBRTC LEAK");            _webrtcSel = Pick(_tabPriv, "shield");
             _webrtcSel.SetItems(LabelsOf(FingerprintFactory.WebRtcOptions), 0);
 
             _lblGeo = Lbl(_tabPriv, "GEOLOCATION");
@@ -717,7 +795,7 @@ namespace JoeBrowser
             _customExt = Txt(_tabTools, _tools.CustomExtensions, "C:\\extensions\\my-extension", null, true, 76);
 
             _lblExtHint = new JBLabel(LabelRole.Faint,
-                "Built into the app: these tools are injected directly into the browser, so no extension install is needed. Extra folders are optional unpacked extensions.");
+                "Tools are injected directly \u2014 no extension install needed. Extra folders are optional unpacked extensions.");
             _lblExtHint.Wrap = true;
             _lblExtHint.TextAlign = ContentAlignment.TopLeft;
             _tabTools.Controls.Add(_lblExtHint);
@@ -775,6 +853,12 @@ namespace JoeBrowser
                 for (int i = 0; i < FingerprintFactory.OsList.Length; i++)
                     if (string.Equals(FingerprintFactory.OsList[i], _fp.Os, StringComparison.OrdinalIgnoreCase)) osIdx = i;
                 if (_systemTarget) osIdx = 0;
+                /* A new profile mirrors this PC. If the stored target is not this machine - a
+                   duplicated profile opened as new, or a fingerprint rolled before the editor
+                   existed - the whole identity is re-rolled instead of keeping a Windows screen
+                   and GPU under a target the picker now calls "System default". */
+                if (_systemTarget && !string.Equals(_fp.Os, FingerprintFactory.SystemOsName(), StringComparison.OrdinalIgnoreCase))
+                    FingerprintFactory.Regenerate(_fp, FingerprintFactory.SystemOsName(), _proxy);
                 _os.SelectedIndex = osIdx;
                 _os.Icon = FingerprintFactory.DeviceIcon(_fp.Os);
                 if (!string.Equals(FingerprintFactory.OsList[osIdx], _fp.Os, StringComparison.OrdinalIgnoreCase))
@@ -852,6 +936,42 @@ namespace JoeBrowser
                 _suppress = false;
                 _regen.Invalidate();
             }
+            RefreshOsVersionUi();
+        }
+
+        /// <summary>Android/iOS version list, shown only for a mobile target.</summary>
+        private void RefreshOsVersionUi()
+        {
+            bool android = FingerprintFactory.IsAndroid(_fp.Os);
+            bool ios = FingerprintFactory.IsIos(_fp.Os);
+            if (_osVer == null) return;
+            _suppress = true;
+            try
+            {
+                _lblOsVer.Visible = android || ios;
+                _osVer.Visible = android || ios;
+                _fontSet.SelectedIndex = Math.Max(0,
+                    FingerprintFactory.IndexOfKey(FingerprintFactory.FontSets, _fp.FontSet ?? "auto", 0));
+                _hwNoise.Checked = _fp.HardwareNoise;
+                if (!android && !ios) return;
+
+                string[] values = android ? FingerprintFactory.AndroidVersions : FingerprintFactory.IosVersions;
+                string cur = android ? (_fp.AndroidVersion ?? "auto") : (_fp.IosVersion ?? "auto");
+                var labels = new List<string>();
+                _osVerKeys = new List<string>();
+                foreach (string v in values)
+                {
+                    _osVerKeys.Add(v);
+                    labels.Add(v == "auto"
+                        ? "Auto  (" + (android ? FingerprintFactory.AndroidVersionFor(_fp) : FingerprintFactory.IosVersionFor(_fp)) + ")"
+                        : v);
+                }
+                int idx = _osVerKeys.IndexOf(cur);
+                _osVer.SetItems(labels, idx < 0 ? 0 : idx);
+                _lblOsVer.Text = android ? "ANDROID VERSION" : "IOS VERSION";
+                _osVer.Icon = android ? "android" : "iphone";
+            }
+            finally { _suppress = false; }
         }
 
         /// <summary>The option list plus the stored value, so a legacy profile is never lost.</summary>
@@ -876,6 +996,9 @@ namespace JoeBrowser
 
         private void SwitchTab(int index)
         {
+            /* Whoever calls this - a click or code - the strip and the page must agree. The
+               setter is a no-op when the index already matches, so this cannot loop. */
+            if (_tabs != null && _tabs.SelectedIndex != index) _tabs.SelectedIndex = index;
             _hostGeneral.Visible = index == 0;
             _hostFp.Visible = index == 1;
             _hostPriv.Visible = index == 2;
@@ -981,6 +1104,12 @@ namespace JoeBrowser
             }
             y += rg;
 
+            int manageW = _kernelManage.PreferredWidth(Ui.S(112));
+            _lblKernel.SetBounds(0, y, cw - manageW - Ui.S(8), lh); y += lh + lg;
+            _kernel.SetBounds(0, y, cw - manageW - Ui.S(8), fh);
+            _kernelManage.SetBounds(cw - manageW, y, manageW, fh);
+            y += fh + rg;
+
             if (_getBrowser != null && _getBrowser.Visible)
             {
                 int gw = Ui.S(118);
@@ -1032,6 +1161,15 @@ namespace JoeBrowser
 
             int y = Ui.S(4);
             y = Row(_lblOs, _os, _lblScreen, _screen, y, cw, two, lh, lg, rg, cg, fh, fh);
+            /* Decide from the profile, not from Control.Visible: a tab that is not the current
+               one reports every child as invisible, which would skip this row and leave the
+               label stacked at 0,0 on top of the first one. */
+            if (FingerprintFactory.IsMobileOs(_fp.Os))
+            {
+                _lblOsVer.SetBounds(0, y, cw, lh); y += lh + lg;
+                _osVer.SetBounds(0, y, two ? (cw - cg) / 2 : cw, fh);
+                y += fh + rg;
+            }
             y = Row(_lblCores, _cores, _lblRam, _ram, y, cw, two, lh, lg, rg, cg, fh, fh);
             y = Row(_lblTz, _tz, _lblLang, _lang, y, cw, two, lh, lg, rg, cg, fh, fh);
 
@@ -1039,6 +1177,7 @@ namespace JoeBrowser
             _gpu.SetBounds(0, y, cw, fh); y += fh + rg;
 
             _regen.SetBounds(0, y, _regen.PreferredWidth(Ui.S(160)), Ui.S(33));
+            _random.SetBounds(_regen.Right + Ui.S(8), y, _random.PreferredWidth(Ui.S(160)), Ui.S(33));
             y += Ui.S(33) + Ui.S(10);
             UpdateFirefoxWarn(0, y, cw);
             if (_fpWarn.Visible) y += Ui.S(26) + Ui.S(6);
@@ -1056,13 +1195,16 @@ namespace JoeBrowser
             if (GeoIsCustom)
                 y = Row(_lblLat, _lat, _lblLng, _lng, y, cw, two, lh, lg, rg, cg, fh, fh);
 
+            _lblFontSet.SetBounds(0, y, cw, lh); y += lh + lg;
+            _fontSet.SetBounds(0, y, two ? (cw - cg) / 2 : cw, fh); y += fh + rg;
+
             _lblUa.SetBounds(0, y, cw, lh); y += lh + lg;
             int uaW = two ? cw - Ui.S(214) - cg : cw;
             _ua.SetBounds(0, y, uaW, fh);
             _autoUa.SetBounds(uaW + cg, y, cw - uaW - cg, fh);
             y += fh + rg;
 
-            Control[] toggles = { _canvas, _audio, _fonts, _battery, _dnt, _autoMatch };
+            Control[] toggles = { _canvas, _audio, _fonts, _hwNoise, _battery, _dnt, _autoMatch };
             int cols = two ? 2 : 1;
             int tg = Ui.S(10), th = Ui.S(28);
             int colW = two ? (cw - tg) / 2 : cw;
@@ -1280,6 +1422,12 @@ namespace JoeBrowser
             _profile.BrowserKind = custom.Length > 0 ? "custom"
                 : (ki >= 0 && ki < _kindKeys.Count ? _kindKeys[ki] : "auto");
 
+            int kk = _kernel.SelectedIndex;
+            string kernelKey = kk > 0 && kk < _kernelKeys.Count ? _kernelKeys[kk] : "";
+            int bar = kernelKey.IndexOf('|');
+            _profile.KernelEngine = bar > 0 ? kernelKey.Substring(0, bar) : "";
+            _profile.KernelVersion = bar > 0 ? kernelKey.Substring(bar + 1) : "";
+
             ApplyScreenSelection();
             _fp.Os = ResolveOs(_os.Value);
             _fp.DeviceType = FingerprintFactory.DeviceTypeFor(_fp.Os);
@@ -1290,6 +1438,8 @@ namespace JoeBrowser
             _fp.CanvasNoise = _canvas.Checked;
             _fp.AudioNoise = _audio.Checked;
             _fp.FontsNoise = _fonts.Checked;
+            _fp.HardwareNoise = _hwNoise.Checked;
+            _fp.FontSet = KeyOf(FingerprintFactory.FontSets, _fontSet.SelectedIndex, "auto");
             _fp.SpoofBattery = _battery.Checked;
             _fp.DoNotTrack = _dnt.Checked;
             _fp.AutoMatchProxy = _autoMatch.Checked;

@@ -8,6 +8,12 @@ namespace JoeBrowser
     {
         public static string Build(FingerprintConfig fp, string ua, string platform, string language, string[] languages)
         {
+            return Build(fp, ua, platform, language, languages, null);
+        }
+
+        public static string Build(FingerprintConfig fp, string ua, string platform, string language, string[] languages,
+            Dictionary<string, object> uaMetadata)
+        {
             var cfg = new Dictionary<string, object>();
             cfg["ua"] = ua ?? "";
             cfg["platform"] = platform ?? "Win32";
@@ -40,9 +46,60 @@ namespace JoeBrowser
             cfg["accept"] = fp.AcceptLanguage ?? language ?? "en-US";
             cfg["tz"] = fp.Timezone ?? "";
             cfg["geo"] = fp.GeoMode ?? "proxy";
+            cfg["fontSet"] = string.IsNullOrEmpty(fp.FontSet) ? "auto" : fp.FontSet;
+            cfg["hwNoise"] = fp.HardwareNoise;
+            /* The version the device actually reports, resolved once so every surface that
+               mentions it (user agent, hint, screen) carries the same number. */
+            cfg["androidVer"] = FingerprintFactory.AndroidVersionFor(fp);
+            cfg["iosVer"] = FingerprintFactory.IosVersionFor(fp);
 
+            // Client hints have to come from the same identity as the user agent. The navigator
+            // object is patched with exactly the metadata CDP sends in the request headers, so a
+            // page that reads both cannot see the host browser's real brands or version.
+            if (uaMetadata != null)
+            {
+                object v;
+                cfg["brands"] = uaMetadata.TryGetValue("brands", out v) ? v : null;
+                cfg["fullVersionList"] = uaMetadata.TryGetValue("fullVersionList", out v) ? v : null;
+                cfg["uaFullVersion"] = uaMetadata.TryGetValue("fullVersion", out v) ? v : "";
+                cfg["uaPlatform"] = uaMetadata.TryGetValue("platform", out v) ? v : "";
+                cfg["platformVersion"] = uaMetadata.TryGetValue("platformVersion", out v) ? v : "";
+                cfg["architecture"] = uaMetadata.TryGetValue("architecture", out v) ? v : "";
+                cfg["bitness"] = uaMetadata.TryGetValue("bitness", out v) ? v : "";
+                cfg["model"] = uaMetadata.TryGetValue("model", out v) ? v : "";
+                cfg["wow64"] = uaMetadata.TryGetValue("wow64", out v) ? v : false;
+            }
+
+            /* Workers are a separate realm: Page.addScriptToEvaluateOnNewDocument never reaches
+               them, and CDP worker sessions are not reliably attachable on every build. The page
+               therefore prepends this bootstrap to every JavaScript Blob, which is how nearly all
+               fingerprint libraries build a worker. Without it a worker reports the host's real
+               navigator/WebGL while the page reports the profile - a one-message contradiction. */
+            cfg["wjs"] = WorkerBootstrap(fp, ua, platform, language, languages);
             string json = new JavaScriptSerializer().Serialize(cfg);
+
             return Template.Replace("__CFG__", json);
+        }
+
+        /// <summary>Compact worker-realm patch: navigator, timezone, OffscreenCanvas, WebGL.</summary>
+        private static string WorkerBootstrap(FingerprintConfig fp, string ua, string platform,
+            string language, string[] languages)
+        {
+            var c = new Dictionary<string, object>();
+            c["ua"] = ua ?? "";
+            c["platform"] = platform ?? "Win32";
+            c["language"] = language ?? "en-US";
+            c["languages"] = languages ?? new[] { language ?? "en-US" };
+            c["cores"] = fp.Cores;
+            c["memory"] = Math.Min(8, fp.Memory > 0 ? fp.Memory : 8);
+            c["touch"] = fp.TouchPoints;
+            c["tz"] = fp.Timezone ?? "";
+            c["glVendor"] = fp.WebGlVendor ?? "";
+            c["glRenderer"] = fp.WebGlRenderer ?? "";
+            c["canvas"] = fp.CanvasNoise;
+            c["seed"] = fp.Seed;
+            c["safari"] = FingerprintFactory.IsIos(fp.Os);
+            return WorkerTemplate.Replace("__CFG__", new JavaScriptSerializer().Serialize(c));
         }
 
         private const string Template = @"
@@ -77,6 +134,11 @@ namespace JoeBrowser
         } catch (e) {}
         fakes.set(fn, 'function ' + name + '(' + params + ') { [native code] }');
       }
+      /* A native accessor carries its own name ('get userAgent'); an anonymous replacement
+         reports name === '', which is the first thing a descriptor scan looks for. */
+      if (name) {
+        try { Object.defineProperty(fn, 'name', { value: name, configurable: true }); } catch (e) {}
+      }
       if (len != null) Object.defineProperty(fn, 'length', { value: len, configurable: true });
     } catch (e) {}
     return fn;
@@ -89,21 +151,84 @@ namespace JoeBrowser
     }, 'toString', 0);
   } catch (e) {}
 
+  /* ---- Worker realm ----
+     A worker gets a fresh global and never sees this script. Fingerprint libraries build their
+     worker from a JavaScript Blob, so the bootstrap is prepended there. Without it the page
+     reports the profile while the worker reports the host's real navigator, cores, timezone,
+     canvas hash and GPU - a contradiction one postMessage exposes. */
+  try {
+    if (F.wjs && typeof Blob === 'function') {
+      var OrigBlob = window.Blob;
+      var JbBlob = mark(function Blob(parts, options) {
+        try {
+          var t = options && options.type ? String(options.type) : '';
+          if (/javascript|ecmascript/i.test(t) && parts && parts.length) {
+            var list = Array.prototype.slice.call(parts);
+            list.unshift(F.wjs);
+            parts = list;
+          }
+        } catch (e) {}
+        return new OrigBlob(parts, options);
+      }, 'Blob', 2);
+      try { JbBlob.prototype = OrigBlob.prototype; } catch (e) {}
+      window.Blob = JbBlob;
+    }
+  } catch (e) {}
+
+  /* The interface a getter may be invoked on. Native accessors throw TypeError for any other
+     this, and checkers rely on it: they capture the getter and call it with null expecting the
+     call to blow up, and they look for own prototype/arguments/caller on the function. A plain
+     function fails every one of those, so both factories below build object-literal accessors
+     instead - those carry no own prototype, and the guard throws for a wrong this. */
+  function ownerIface(obj) {
+    try {
+      var I = obj && obj.constructor;
+      if (typeof I === 'function' && I.prototype) return I;
+    } catch (e) {}
+    return Object;
+  }
+
+  function attachGetter(obj, prop, holder) {
+    var d = Object.getOwnPropertyDescriptor(holder, prop);
+    if (!d || !d.get) return false;
+    mark(d.get, 'get ' + prop, 0);
+    Object.defineProperty(obj, prop, { get: d.get, set: undefined, enumerable: true, configurable: true });
+    return true;
+  }
+
   function getter(obj, prop, value) {
     if (!obj) return;
     try {
+      var I = ownerIface(obj);
+      var holder = {
+        get [prop]() {
+          if (!(this instanceof I)) throw new TypeError('Illegal invocation');
+          return value;
+        }
+      };
+      if (attachGetter(obj, prop, holder)) return;
+    } catch (e) {}
+    try {
       var g = mark(function () { return value; }, 'get ' + prop, 0);
       Object.defineProperty(obj, prop, { get: g, set: undefined, enumerable: true, configurable: true });
-    } catch (e) {}
+    } catch (e2) {}
   }
 
   function liveGetter(obj, prop, fn) {
     if (!obj) return;
     try {
-      Object.defineProperty(obj, prop, {
-        get: mark(fn, 'get ' + prop, 0), configurable: true, enumerable: true
-      });
+      var I = ownerIface(obj);
+      var holder = {
+        get [prop]() {
+          if (!(this instanceof I)) throw new TypeError('Illegal invocation');
+          return fn.call(this);
+        }
+      };
+      if (attachGetter(obj, prop, holder)) return;
     } catch (e) {}
+    try {
+      Object.defineProperty(obj, prop, { get: mark(fn, 'get ' + prop, 0), configurable: true, enumerable: true });
+    } catch (e2) {}
   }
 
   function method(obj, prop, fn, len) {
@@ -148,13 +273,18 @@ namespace JoeBrowser
   getter(NP, 'doNotTrack', F.dnt);
 
   function emptyList(tag) {
-    var a = [];
+    /* Built on the real interface prototype, not on Array: a phone still answers
+       navigator.plugins instanceof PluginArray === true, and an Array fails that check
+       while also reporting '[object Array]' to Object.prototype.toString. */
+    var proto = null;
+    try { proto = tag === 'MimeTypeArray' ? MimeTypeArray.prototype : PluginArray.prototype; } catch (e) {}
+    var a = proto ? Object.create(proto) : [];
     try {
-      /* An empty [] reports '[object Array]' where Chrome reports '[object PluginArray]'. */
-      Object.defineProperty(a, Symbol.toStringTag, { value: tag, configurable: true });
-      Object.defineProperty(a, 'item', { value: mark(function item(index) { return a[index]; }, 'item', 1), configurable: true });
+      Object.defineProperty(a, 'length', { value: 0, configurable: true });
+      Object.defineProperty(a, 'item', { value: mark(function item(index) { return null; }, 'item', 1), configurable: true });
       Object.defineProperty(a, 'namedItem', { value: mark(function namedItem(name) { return null; }, 'namedItem', 1), configurable: true });
-      Object.defineProperty(a, 'refresh', { value: mark(function refresh() { }, 'refresh', 0), configurable: true });
+      if (tag === 'PluginArray')
+        Object.defineProperty(a, 'refresh', { value: mark(function refresh() { }, 'refresh', 0), configurable: true });
     } catch (e) {}
     return a;
   }
@@ -183,19 +313,37 @@ namespace JoeBrowser
       : (F.platform === 'MacIntel' ? 'macOS'
       : (F.platform === 'Linux x86_64' ? 'Linux'
       : (F.platform === 'iPhone' || F.platform === 'iPad' ? 'iOS' : 'Android')));
+    function hintCopy(list) {
+      var out = [];
+      if (list && list.length) for (var i = 0; i < list.length; i++) {
+        var b = list[i] || {};
+        out.push({ brand: String(b.brand || ''), version: String(b.version || '') });
+      }
+      return out;
+    }
+    /* Chromium exposes navigator.userAgentData.brands straight from the binary. Leaving the
+       host's array in place next to a spoofed UA is the single easiest 'different browser
+       version' check, so both the reduced and high-entropy lists are replaced as one unit. */
     if (uad && !isSafari) {
       var UD = Object.getPrototypeOf(uad);
       getter(UD, 'platform', uadPlatform);
       getter(UD, 'mobile', F.mobile);
+      if (F.brands) liveGetter(UD, 'brands', function () { return hintCopy(F.brands); });
       var origHigh = UD.getHighEntropyValues;
       if (typeof origHigh === 'function') {
         method(UD, 'getHighEntropyValues', function getHighEntropyValues(hints) {
           return origHigh.call(this, hints).then(function (h) {
             try {
+              if (F.brands) h.brands = hintCopy(F.brands);
+              if (F.fullVersionList) h.fullVersionList = hintCopy(F.fullVersionList);
+              if (F.uaFullVersion) h.uaFullVersion = F.uaFullVersion;
               h.platform = uadPlatform;
               h.mobile = F.mobile;
-              if (!F.mobile) h.model = '';
-              if (F.brand === 'Edge' && !h.platformVersion) h.platformVersion = '15.0.0';
+              if (F.platformVersion) h.platformVersion = F.platformVersion;
+              if (F.architecture) h.architecture = F.architecture;
+              if (F.bitness) h.bitness = F.bitness;
+              h.model = F.mobile ? (F.model || '') : '';
+              h.wow64 = !!F.wow64;
             } catch (e) {}
             return h;
           });
@@ -207,6 +355,12 @@ namespace JoeBrowser
       try { delete window.chrome; } catch (e) {}
       try { delete NP.deviceMemory; } catch (e) {}
       try { delete NP.userAgentData; } catch (e) {}
+    }
+    /* Brave advertises an extra navigator.brave object. It is not part of a Chrome or Edge
+       identity, so a profile that claims either brand must not leak it. */
+    if (F.brand !== 'Brave' && !isSafari) {
+      try { delete Navigator.prototype.brave; } catch (e) {}
+      try { if (navigator.brave) Object.defineProperty(navigator, 'brave', { value: undefined, configurable: true }); } catch (e) {}
     }
     if (!isSafari) getter(NP, 'pdfViewerEnabled', true);
     if (isSafari) getter(NP, 'standalone', false);
@@ -226,16 +380,19 @@ namespace JoeBrowser
 
   /* ---- Network information ---- */
   try {
-    var connProto = (typeof NetworkInformation !== 'undefined' && NetworkInformation.prototype)
-      ? NetworkInformation.prototype : Object.prototype;
-    var conn = Object.create(connProto);
-    getter(conn, 'effectiveType', '4g');
-    getter(conn, 'rtt', 40 + (SEED % 60));
-    getter(conn, 'downlink', Math.round((10 + (SEED % 40) / 10) * 10) / 10);
-    getter(conn, 'saveData', false);
-    getter(conn, 'type', 'wifi');
-    method(conn, 'addEventListener', function addEventListener(type, listener) { }, 2);
-    getter(NP, 'connection', conn);
+    var realConn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    var connProto = realConn ? Object.getPrototypeOf(realConn)
+      : ((typeof NetworkInformation !== 'undefined' && NetworkInformation.prototype) ? NetworkInformation.prototype : null);
+    if (connProto) {
+      /* Chrome defines every field as an accessor on NetworkInformation.prototype. Putting
+         them on the instance instead leaves own properties that a descriptor scan flags. */
+      getter(connProto, 'effectiveType', '4g');
+      getter(connProto, 'rtt', 40 + (SEED % 60));
+      getter(connProto, 'downlink', Math.round((10 + (SEED % 40) / 10) * 10) / 10);
+      getter(connProto, 'saveData', false);
+      getter(connProto, 'type', 'wifi');
+      getter(NP, 'connection', realConn || Object.create(connProto));
+    }
   } catch (e) {}
 
   /* ---- Permissions, notifications and media devices ---- */
@@ -344,9 +501,34 @@ namespace JoeBrowser
         return out;
       }, 1);
     }
-    /* outerWidth/outerHeight report the real window and contradict a claimed maximised screen. */
-    liveGetter(window, 'outerWidth', function () { return F.sw; });
-    liveGetter(window, 'outerHeight', function () { return F.ah; });
+    /* outerWidth/outerHeight have to exceed the viewport by exactly the browser chrome they
+       wrap. Faking them as the full screen made outer - inner ~340px on a maximised window,
+       which every bot check reads as a docked DevTools panel. The real gap is measured before
+       the getter is replaced, kept as-is, and only clamped so a window can never report being
+       larger than the screen the profile claims. */
+    var realOuterW = 0, realOuterH = 0, chromeGapW = 16, chromeGapH = 140;
+    try { realOuterW = window.outerWidth; } catch (e) {}
+    try { realOuterH = window.outerHeight; } catch (e) {}
+    try {
+      if (realOuterW > 0 && window.innerWidth > 0) chromeGapW = Math.max(0, realOuterW - window.innerWidth);
+      if (realOuterH > 0 && window.innerHeight > 0) chromeGapH = Math.max(0, realOuterH - window.innerHeight);
+    } catch (e) {}
+    /* A phone or tablet browser wraps nothing: Chrome on Android and Safari on iOS report
+       outer == inner, so the desktop offsets would invent a window the device cannot have. */
+    liveGetter(window, 'outerWidth', function () {
+      var iw = 0;
+      try { iw = window.innerWidth; } catch (e) {}
+      if (F.mobile || F.touch > 0) return iw;
+      var v = (iw > 0 ? iw : 1280) + chromeGapW;
+      return Math.min(v, F.sw > 0 ? F.sw : v);
+    });
+    liveGetter(window, 'outerHeight', function () {
+      var ih = 0;
+      try { ih = window.innerHeight; } catch (e) {}
+      if (F.mobile || F.touch > 0) return ih;
+      var v = (ih > 0 ? ih : 800) + chromeGapH;
+      return Math.min(v, F.ah > 0 ? F.ah : v);
+    });
   } catch (e) {}
 
   /* ---- WebGL ---- */
@@ -358,8 +540,12 @@ namespace JoeBrowser
       glParams[37445] = F.glVendor;
       glParams[37446] = F.glRenderer;
     }
-    glParams[7936] = F.glVendor;
-    glParams[7937] = F.glRenderer;
+    /* VENDOR/RENDERER are the *masked* values every Chromium (and WebKit) build reports;
+       only UNMASKED_VENDOR/RENDERER carry the ANGLE string. Answering the masked pair with
+       the unmasked string is a contradiction that reads as a broken WebGL adapter - the
+       'WebGL exception' most scanners print for a misconfigured spoof. */
+    glParams[7936] = 'WebKit';
+    glParams[7937] = 'WebKit WebGL';
     var glNames = ['WebGLRenderingContext', 'WebGL2RenderingContext'];
     for (var gi = 0; gi < glNames.length; gi++) {
       var G = window[glNames[gi]];
@@ -386,42 +572,73 @@ namespace JoeBrowser
     }
   } catch (e) {}
 
-  /* ---- Canvas / pixel noise ---- */
+  /* ---- Canvas / pixel noise ----
+     The noise is addressed by absolute pixel coordinate, not by an index into whatever slice
+     was read. A detector that hashes the full canvas, then a sub-rectangle of the same canvas,
+     then the encode path, gets three views of one deterministic image; the old index-based
+     version produced three different hashes and was reported as 'canvas tampering'.
+
+     The perturbation is a *quantisation*, not an addition: each channel is snapped to the
+     nearest value congruent to a per-coordinate target mod 3. Adding +-1 made the transform
+     non-idempotent, so read -> putImageData -> toDataURL (exactly what a tampering check does)
+     applied the delta twice and produced a different hash on the second pass. Snapping is
+     idempotent: feeding an already-snapped pixel through again returns the same value, so the
+     bitmap, the read path and both encode paths all agree forever. */
   var CH = (typeof HTMLCanvasElement !== 'undefined') ? HTMLCanvasElement.prototype : null;
   var C2 = (typeof CanvasRenderingContext2D !== 'undefined') ? CanvasRenderingContext2D.prototype : null;
+  var OC = (typeof OffscreenCanvas !== 'undefined') ? OffscreenCanvas.prototype : null;
+  var O2 = (typeof OffscreenCanvasRenderingContext2D !== 'undefined') ? OffscreenCanvasRenderingContext2D.prototype : null;
   var canvasKind = (typeof WeakMap === 'function') ? new WeakMap() : null;
 
-  function perturb(data) {
+  function pixelTarget(x, y, channel) {
+    var h = (SEED ^ Math.imul(x + 0x9e37, 73856093) ^ Math.imul(y + 0x85eb, 19349663) ^ Math.imul(channel + 3, 83492791)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177) | 0;
+    return ((h >>> 0) % 3) | 0;
+  }
+
+  /* Snap v to the unique value in {v-2..v} that is congruent to target mod 3. Applying the
+     same snap twice cannot change the result, which is what keeps every read path in sync. */
+  function snap(v, x, y, channel) {
+    var d = pixelTarget(x, y, channel);
+    var q = v - (v % 3) + d;
+    return q > 255 ? q - 3 : q;
+  }
+
+  function perturb(data, width, height, ox, oy) {
     try {
-      for (var i = 0; i < data.length; i += 4 * 997) {
-        var d = data[i] + ((noise(i) * 3 | 0) - 1);
-        data[i] = d < 0 ? 0 : (d > 255 ? 255 : d);
-        var j = i + 1;
-        if (j < data.length) {
-          var d2 = data[j] + ((noise(i + 7) * 3 | 0) - 1);
-          data[j] = d2 < 0 ? 0 : (d2 > 255 ? 255 : d2);
-        }
+      if (!data || !data.length) return data;
+      var w = width > 0 ? width : 1;
+      var count = Math.floor(data.length / 4);
+      for (var p = 0; p < count; p++) {
+        if ((p & 7) !== 0) continue;
+        var x = (p % w) + (ox | 0), y = ((p / w) | 0) + (oy | 0);
+        var i = p * 4;
+        data[i] = snap(data[i], x, y, 0);
+        data[i + 1] = snap(data[i + 1], x, y, 1);
+        data[i + 2] = snap(data[i + 2], x, y, 2);
       }
     } catch (e) {}
     return data;
   }
 
-  if (F.canvas && C2 && CH) {
-    try {
-      var origData = C2.getImageData;
-      var origURL = CH.toDataURL;
-      var origBlob = CH.toBlob;
-      var origGetCtx = CH.getContext;
-      var rpPairs = [];
+  var origData = C2 ? C2.getImageData : null;
+  var origOffData = O2 ? O2.getImageData : null;
+  var origURL = CH ? CH.toDataURL : null;
+  var origBlob = CH ? CH.toBlob : null;
+  var origGetCtx = CH ? CH.getContext : null;
+  var origOffConv = OC ? OC.convertToBlob : null;
+  var rpPairs = [];
 
+  if (F.canvas && CH && C2) {
+    try {
       /* Remember how each canvas was created. drawImage() of a WebGL canvas that was not opened
-         with preserveDrawingBuffer yields a blank bitmap, so the old copy-and-encode path both
-         broke the image and disagreed with gl.readPixels. */
-      method(CH, 'getContext', function getContext(type, attributes) {
+         with preserveDrawingBuffer yields a blank bitmap, so the encode path has to lift pixels
+         with gl.readPixels instead. */
+      method(CH, 'getContext', function getContext(type) {
         var ctx = origGetCtx.apply(this, arguments);
         try {
           var t = String(type || '').toLowerCase();
-          if (ctx && canvasKind) canvasKind.set(this, /webgl/.test(t) ? 'gl' : '2d');
+          if (ctx && canvasKind) canvasKind.set(this, t.indexOf('webgl2') >= 0 ? 'gl2' : (t.indexOf('webgl') >= 0 ? 'gl' : '2d'));
         } catch (e) {}
         return ctx;
       }, 1);
@@ -429,17 +646,16 @@ namespace JoeBrowser
       function noisyEncode(self, encode) {
         try {
           var w = self.width, h = self.height;
-          if (!w || !h || w * h > 16000000) return null;
+          if (!w || !h || w * h > 20000000) return null;
           var tmp = document.createElement('canvas');
           tmp.width = w; tmp.height = h;
           var ctx = origGetCtx.call(tmp, '2d');
           if (!ctx) return null;
-          if (canvasKind && canvasKind.get(self) === 'gl') {
+          var kind = canvasKind ? canvasKind.get(self) : null;
+          if (kind === 'gl' || kind === 'gl2') {
             var gl = null;
-            try { gl = origGetCtx.call(self, 'webgl') || origGetCtx.call(self, 'webgl2'); } catch (e) {}
+            try { gl = origGetCtx.call(self, kind === 'gl2' ? 'webgl2' : 'webgl'); } catch (e) {}
             if (!gl) return null;
-            /* The patched readPixels already perturbs, so the encode path has to lift the pixels
-               with the untouched one or the same canvas hashes twice. */
             var rp = null;
             for (var qi = 0; qi < rpPairs.length; qi++) {
               try { if (rpPairs[qi][0].isPrototypeOf(gl)) { rp = rpPairs[qi][1]; break; } } catch (e) {}
@@ -449,12 +665,12 @@ namespace JoeBrowser
             rp.call(gl, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
             var img = ctx.createImageData(w, h);
             img.data.set(px);
-            perturb(img.data);
+            perturb(img.data, w, h, 0, 0);
             ctx.putImageData(img, 0, 0);
           } else {
             ctx.drawImage(self, 0, 0);
             var raw = origData.call(ctx, 0, 0, w, h);
-            perturb(raw.data);
+            perturb(raw.data, w, h, 0, 0);
             ctx.putImageData(raw, 0, 0);
           }
           return encode(tmp);
@@ -463,7 +679,7 @@ namespace JoeBrowser
 
       method(C2, 'getImageData', function getImageData(sx, sy, sw, sh) {
         var img = origData.apply(this, arguments);
-        try { perturb(img.data); } catch (e) {}
+        try { perturb(img.data, img.width, img.height, sx, sy); } catch (e) {}
         return img;
       }, 4);
 
@@ -473,7 +689,7 @@ namespace JoeBrowser
         return out != null ? out : origURL.apply(self, a);
       }, 0);
 
-      /* toBlob hands back nothing, so success has to be signalled by the encode callback itself —
+      /* toBlob hands back nothing, so success has to be signalled by the encode callback itself -
          and it must call the captured native, not tmp.toBlob(), which would re-enter this method. */
       method(CH, 'toBlob', function toBlob(callback, type, quality) {
         var self = this;
@@ -492,9 +708,38 @@ namespace JoeBrowser
           rpPairs.push([proto, origRP]);
           method(proto, 'readPixels', function readPixels(x, y, width, height, format, type, pixels) {
             origRP.apply(this, arguments);
-            try { if (pixels && pixels.length) perturb(pixels); } catch (e) {}
+            try { if (pixels && pixels.length) perturb(pixels, width, height, x, y); } catch (e) {}
           }, 7);
         })(RG.prototype);
+      }
+    } catch (e) {}
+  }
+
+  /* OffscreenCanvas has its own 2d context prototype. If only the on-screen canvas is noised,
+     the same drawing hashes differently through convertToBlob - a textbook tampering signal. */
+  if (F.canvas && OC && O2 && origOffData) {
+    try {
+      method(O2, 'getImageData', function getImageData(sx, sy, sw, sh) {
+        var img = origOffData.apply(this, arguments);
+        try { perturb(img.data, img.width, img.height, sx, sy); } catch (e) {}
+        return img;
+      }, 4);
+      if (origOffConv) {
+        method(OC, 'convertToBlob', function convertToBlob(type, quality) {
+          var self = this;
+          try {
+            var w = self.width, h = self.height;
+            if (!w || !h || w * h > 20000000) return origOffConv.apply(self, arguments);
+            var tmp = new OffscreenCanvas(w, h);
+            var ctx = tmp.getContext('2d');
+            if (!ctx) return origOffConv.apply(self, arguments);
+            ctx.drawImage(self, 0, 0);
+            var raw = origOffData.call(ctx, 0, 0, w, h);
+            perturb(raw.data, w, h, 0, 0);
+            ctx.putImageData(raw, 0, 0);
+            return origOffConv.apply(tmp, arguments);
+          } catch (e) { return origOffConv.apply(self, arguments); }
+        }, 1);
       }
     } catch (e) {}
   }
@@ -560,21 +805,72 @@ namespace JoeBrowser
       var V = window.SpeechSynthesisVoice;
       var list = [];
       for (var vi = 0; vi < rows.length; vi++) {
-        var o = V ? Object.create(V.prototype) : {};
-        getter(o, 'name', rows[vi][0]);
-        getter(o, 'voiceURI', rows[vi][0]);
-        getter(o, 'lang', rows[vi][1] || F.language);
-        getter(o, 'localService', rows[vi][2]);
-        getter(o, 'default', vi === 0);
-        list.push(o);
+        /* Native voices expose name/lang/default through the interface prototype, so the
+           values live on a per-voice prototype instead of as own properties - an own-property
+           scan of a voice object is otherwise a one-line tell. */
+        var vproto = V ? Object.create(V.prototype) : {};
+        getter(vproto, 'name', rows[vi][0]);
+        getter(vproto, 'voiceURI', rows[vi][0]);
+        getter(vproto, 'lang', rows[vi][1] || F.language);
+        getter(vproto, 'localService', rows[vi][2]);
+        getter(vproto, 'default', vi === 0);
+        list.push(Object.create(vproto));
       }
-      method(speechSynthesis, 'getVoices', function getVoices() { return list.slice(); }, 0);
+      /* getVoices belongs to SpeechSynthesis.prototype; defining it on the instance leaves an
+         own property that no real browser has. */
+      var SS = Object.getPrototypeOf(speechSynthesis);
+      method(SS || speechSynthesis, 'getVoices', function getVoices() { return list.slice(); }, 0);
     }
   } catch (e) {}
 
+  /* ---- Local font list ----
+     The Local Font Access API is the one place a page can read the real installed families.
+     Answering with the set the profile claims keeps a Windows target on Windows fonts and a
+     Mac target on Mac fonts; the metric jitter below covers the older width-probing method. */
+  try {
+    var fontSets = {
+      windows: ['Arial','Calibri','Cambria','Candara','Comic Sans MS','Consolas','Constantia','Corbel',
+        'Courier New','Ebrima','Franklin Gothic Medium','Gabriola','Gadugi','Georgia','Impact',
+        'Leelawadee UI','Lucida Console','Malgun Gothic','Microsoft Himalaya','Microsoft JhengHei',
+        'Microsoft Sans Serif','Microsoft Tai Le','Microsoft YaHei','MingLiU-ExtB','MS Gothic','MV Boli',
+        'Myanmar Text','Nirmala UI','Palatino Linotype','Segoe MDL2 Assets','Segoe Print','Segoe Script',
+        'Segoe UI','Segoe UI Emoji','Segoe UI Historic','Segoe UI Symbol','SimSun','Sitka','Sylfaen',
+        'Symbol','Tahoma','Times New Roman','Trebuchet MS','Verdana','Webdings','Wingdings','Yu Gothic'],
+      macos: ['American Typewriter','Andale Mono','Apple Chancery','Apple Color Emoji','Arial','Arial Black',
+        'Arial Hebrew','Arial Rounded MT Bold','Avenir','Avenir Next','Baskerville','Big Caslon','Bodoni 72',
+        'Bradley Hand','Brush Script MT','Chalkboard','Chalkduster','Cochin','Comic Sans MS','Copperplate',
+        'Courier New','Didot','DIN Alternate','Futura','Geneva','Georgia','Gill Sans','Helvetica',
+        'Helvetica Neue','Herculanum','Hoefler Text','Impact','Lucida Grande','Luminari','Marker Felt',
+        'Menlo','Monaco','Noteworthy','Optima','Palatino','Papyrus','Phosphate','Rockwell','Savoye LET',
+        'SignPainter','Skia','Snell Roundhand','Tahoma','Times New Roman','Trattatello','Trebuchet MS',
+        'Verdana','Zapf Dingbats'],
+      linux: ['Arial','Bitstream Charter','Cantarell','Century Schoolbook L','Comic Sans MS','Courier New',
+        'DejaVu Sans','DejaVu Sans Mono','DejaVu Serif','Droid Sans','FreeMono','FreeSans','FreeSerif',
+        'Georgia','Impact','Liberation Mono','Liberation Sans','Liberation Serif','Nimbus Mono PS',
+        'Nimbus Roman','Nimbus Sans','Noto Color Emoji','Noto Sans','Noto Serif','Times New Roman',
+        'Trebuchet MS','Ubuntu','Ubuntu Mono','Verdana'],
+      minimal: ['Arial','Courier New','Georgia','Times New Roman','Trebuchet MS','Verdana']
+    };
+    var wantSet = String(F.fontSet || 'auto').toLowerCase();
+    if (wantSet === 'auto') {
+      var osName = String(F.os || '');
+      wantSet = /mac/i.test(osName) ? 'macos' : (/linux/i.test(osName) ? 'linux' : 'windows');
+    }
+    var fams = fontSets[wantSet] || fontSets.windows;
+    var fontData = [];
+    for (var fi = 0; fi < fams.length; fi++) {
+      fontData.push({
+        family: fams[fi], fullName: fams[fi], postscriptName: fams[fi].replace(/ /g, ''),
+        style: 'Regular', weight: '400', blob: function () { return Promise.resolve(new Blob([])); }
+      });
+    }
+    var queryFonts = function queryLocalFonts() { return Promise.resolve(fontData.slice()); };
+    if (window.queryLocalFonts) method(window, 'queryLocalFonts', queryFonts, 0);
+    if (navigator.fonts) method(navigator.fonts, 'query', queryFonts, 0);
+  } catch (e) {}
+
   /* ---- Font metrics ---- */
-  if (F.fonts && C2) {
-    try {
+  if (F.fonts && C2) {    try {
       var origMeasure = C2.measureText;
       method(C2, 'measureText', function measureText(text) {
         var m = origMeasure.call(this, text);
@@ -582,11 +878,35 @@ namespace JoeBrowser
           var s = String(text || '');
           var h = 0;
           for (var k = 0; k < s.length; k++) h = (h * 31 + s.charCodeAt(k)) | 0;
-          var jitter = (noise(h) - 0.5) * 0.012 * m.width;
+          /* A sub-pixel per-profile wobble is enough to make the font fingerprint unique
+             without changing text layout (the previous 1.2% scale visibly reflowed pages,
+             which is both broken and a stronger tampering signal than the noise it avoided). */
+          var jitter = (noise(h) - 0.5) * 0.06;
           Object.defineProperty(m, 'width', { value: Math.max(0, m.width + jitter), configurable: true });
         } catch (e) {}
         return m;
       }, 1);
+    } catch (e) {}
+  }
+
+  /* ---- Hardware noise ----
+     Read-back of the framebuffer is the other half of a GPU fingerprint: two machines with the
+     same renderer string still differ there. Applied only when the profile asks for it, through
+     the same deterministic snap the canvas path uses so repeated reads agree with each other. */
+  if (F.hwNoise && !F.canvas) {
+    try {
+      var hwNames = ['WebGLRenderingContext', 'WebGL2RenderingContext'];
+      for (var hi = 0; hi < hwNames.length; hi++) {
+        var HG = window[hwNames[hi]];
+        if (!HG || !HG.prototype || !HG.prototype.readPixels) continue;
+        (function (proto) {
+          var origHw = proto.readPixels;
+          method(proto, 'readPixels', function readPixels(x, y, width, height, format, type, pixels) {
+            origHw.apply(this, arguments);
+            try { if (pixels && pixels.length) perturb(pixels, width, height, x, y); } catch (e) {}
+          }, 7);
+        })(HG.prototype);
+      }
     } catch (e) {}
   }
 
@@ -607,20 +927,101 @@ namespace JoeBrowser
     } catch (e) {}
   }
 
-  /* ---- WebRTC ---- */
-  /* --force-webrtc-ip-handling-policy only covers Chrome's internal path. A site can still
-     enumerate candidates through JS, so the API itself must refuse when the profile says the
-     transport is disabled. */
+  /* ---- WebRTC ----
+     The command-line policy only covers Chrome's own ICE path; a page can still create a
+     peer connection and read candidates out of the SDP or the icecandidate event. Strict
+     modes (off / proxy) therefore keep the API present but answer with no usable candidate,
+     which is what a machine behind a corporate proxy looks like. Throwing from the
+     constructor or deleting the object is louder than the leak it was meant to stop. */
   try {
-    if (F.webrtc === 'off' || F.webrtc === 'disabled') {
-      Object.defineProperty(window, 'RTCPeerConnection', {
-        value: mark(function RTCPeerConnection() {
-          throw new TypeError('RTCPeerConnection is not available');
-        }, 'RTCPeerConnection', 0),
-        writable: true, configurable: true
-      });
-      Object.defineProperty(window, 'webkitRTCPeerConnection', { value: undefined, configurable: true });
+    var webrtcMode = String(F.webrtc || 'off').toLowerCase();
+    var strictRtc = webrtcMode !== 'public' && webrtcMode !== 'system';
+    var RealPC = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+    var mediaMode = webrtcMode === 'off' || webrtcMode === 'disabled';
+    if (RealPC && RealPC.prototype) {
+      var proto = RealPC.prototype;
 
+      function cleanSdp(sdp) {
+        try {
+          var lines = String(sdp || '').split('\r\n');
+          var out = [];
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (line.indexOf('a=candidate:') === 0) {
+              if (strictRtc) continue;
+              var host = / typ host/.test(line);
+              var privateAddr = /(\.local| 10\.| 192\.168\.| 172\.(1[6-9]|2[0-9]|3[01])\.| 169\.254\.| 127\.| ::1| fe80:| fd[0-9a-f]{2}:)/i.test(line);
+              if (host || privateAddr) continue;
+            }
+            if (strictRtc && line.indexOf('a=end-of-candidates') === 0) continue;
+            out.push(line);
+          }
+          return out.join('\r\n');
+        } catch (e) { return sdp; }
+      }
+      function cleanDesc(desc) {
+        try {
+          if (desc && typeof desc === 'object' && typeof desc.sdp === 'string')
+            return { type: desc.type, sdp: cleanSdp(desc.sdp) };
+          if (typeof desc === 'string') return cleanSdp(desc);
+        } catch (e) {}
+        return desc;
+      }
+
+      var origSetLocal = proto.setLocalDescription;
+      if (typeof origSetLocal === 'function') {
+        method(proto, 'setLocalDescription', function setLocalDescription(desc) {
+          var a = Array.prototype.slice.call(arguments);
+          a[0] = cleanDesc(a[0]);
+          return origSetLocal.apply(this, a);
+        }, 1);
+      }
+      ['createOffer', 'createAnswer'].forEach(function (name) {
+        var orig = proto[name];
+        if (typeof orig !== 'function') return;
+        method(proto, name, function () {
+          var self = this, args = arguments;
+          return orig.apply(self, args).then(function (d) { return cleanDesc(d); });
+        }, name === 'createOffer' ? 1 : 0);
+      });
+
+      /* Candidate events are the live path; wrap the event handler and listeners on the
+         prototype so no per-instance own property gives the patch away. */
+      var addOrig = proto.addEventListener;
+      if (typeof addOrig === 'function') {
+        method(proto, 'addEventListener', function addEventListener(type, fn, opts) {
+          if (String(type) === 'icecandidate' && typeof fn === 'function' && strictRtc) {
+            return addOrig.call(this, type, function (ev) {
+              try { if (ev && ev.candidate) return; } catch (e) {}
+              return fn.apply(this, arguments);
+            }, opts);
+          }
+          return addOrig.apply(this, arguments);
+        }, 2);
+      }
+      var od = null;
+      try { od = Object.getOwnPropertyDescriptor(proto, 'onicecandidate'); } catch (e) {}
+      if (od && (od.set || od.get)) {
+        try {
+          Object.defineProperty(proto, 'onicecandidate', {
+            configurable: true, enumerable: od.enumerable,
+            get: function () { try { return od.get ? od.get.call(this) : undefined; } catch (e) { return undefined; } },
+            set: function (fn) {
+              try {
+                if (typeof fn !== 'function' || !strictRtc) { if (od.set) od.set.call(this, fn); return; }
+                var self = this;
+                od.set.call(this, function (ev) {
+                  if (ev && ev.candidate) return;
+                  return fn.call(self, ev);
+                });
+              } catch (e) {}
+            }
+          });
+        } catch (e) {}
+      }
+    }
+
+    if (mediaMode) {
       if (typeof MediaStream !== 'undefined' && MediaStream.prototype) {
         method(MediaStream.prototype, 'getTracks', function getTracks() { return []; }, 0);
         method(MediaStream.prototype, 'getVideoTracks', function getVideoTracks() { return []; }, 0);
@@ -646,6 +1047,153 @@ namespace JoeBrowser
           }, 0);
         }
       }
+    }
+  } catch (e) {}
+})();
+";
+
+        /// <summary>
+        /// Worker-realm patch, prepended to every JavaScript Blob by the page script. Workers
+        /// have no window, no document and no HTMLCanvasElement, so only the surfaces a worker
+        /// can actually read are covered: navigator, Intl timezone, OffscreenCanvas and WebGL.
+        /// </summary>
+        private const string WorkerTemplate = @"
+(function () {
+  'use strict';
+  var F = __CFG__;
+  var NP = (typeof WorkerNavigator !== 'undefined' && WorkerNavigator.prototype)
+    ? WorkerNavigator.prototype : Object.getPrototypeOf(navigator);
+  var G = Symbol.for('jb.realm');
+  try { if (NP[G]) return; Object.defineProperty(NP, G, { value: 1, configurable: true }); } catch (e) {}
+
+  function named(fn, n) {
+    try { Object.defineProperty(fn, 'name', { value: n, configurable: true }); } catch (e) {}
+    return fn;
+  }
+  function get(o, p, v) {
+    if (!o) return;
+    try {
+      Object.defineProperty(o, p, { get: named(function () { return v; }, 'get ' + p), set: undefined, enumerable: true, configurable: true });
+    } catch (e) {}
+  }
+  function method(o, p, fn, len) {
+    try {
+      Object.defineProperty(o, p, { value: named(fn, p), writable: true, enumerable: false, configurable: true });
+      if (len != null) Object.defineProperty(fn, 'length', { value: len, configurable: true });
+    } catch (e) {}
+  }
+
+  get(NP, 'userAgent', F.ua);
+  get(NP, 'appVersion', F.ua.replace('Mozilla/', ''));
+  get(NP, 'platform', F.platform);
+  get(NP, 'language', F.language);
+  try {
+    Object.defineProperty(NP, 'languages', {
+      get: named(function () { return F.languages.slice(); }, 'get languages'), enumerable: true, configurable: true
+    });
+  } catch (e) {}
+  get(NP, 'hardwareConcurrency', F.cores);
+  if (!F.safari) get(NP, 'deviceMemory', F.memory);
+  get(NP, 'maxTouchPoints', F.touch);
+  get(NP, 'webdriver', false);
+
+  try {
+    if (F.tz && typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+      var ro = Intl.DateTimeFormat.prototype.resolvedOptions;
+      method(Intl.DateTimeFormat.prototype, 'resolvedOptions', function resolvedOptions() {
+        var o = ro.call(this);
+        try { Object.defineProperty(o, 'timeZone', { value: F.tz, configurable: true, enumerable: true }); } catch (e) {}
+        return o;
+      }, 0);
+    }
+  } catch (e) {}
+
+  /* Same idempotent quantisation as the page, keyed by absolute pixel coordinate, so a worker
+     and the page produce one hash for one drawing instead of two. */
+  var SEED = (F.seed >>> 0) || 1;
+  function target(x, y, ch) {
+    var h = (SEED ^ Math.imul(x + 0x9e37, 73856093) ^ Math.imul(y + 0x85eb, 19349663) ^ Math.imul(ch + 3, 83492791)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177) | 0;
+    return ((h >>> 0) % 3) | 0;
+  }
+  function snap(v, x, y, ch) {
+    var q = v - (v % 3) + target(x, y, ch);
+    return q > 255 ? q - 3 : q;
+  }
+  function perturb(data, w, ox, oy) {
+    try {
+      if (!data || !data.length) return data;
+      w = w > 0 ? w : 1;
+      var n = Math.floor(data.length / 4);
+      for (var p = 0; p < n; p++) {
+        if ((p & 7) !== 0) continue;
+        var x = (p % w) + (ox | 0), y = ((p / w) | 0) + (oy | 0), i = p * 4;
+        data[i] = snap(data[i], x, y, 0);
+        data[i + 1] = snap(data[i + 1], x, y, 1);
+        data[i + 2] = snap(data[i + 2], x, y, 2);
+      }
+    } catch (e) {}
+    return data;
+  }
+
+  if (F.canvas && typeof OffscreenCanvas !== 'undefined') {
+    try {
+      var O2 = (typeof OffscreenCanvasRenderingContext2D !== 'undefined') ? OffscreenCanvasRenderingContext2D.prototype : null;
+      var gid = O2 && O2.getImageData ? O2.getImageData : null;
+      if (gid) {
+        method(O2, 'getImageData', function getImageData(sx, sy, sw, sh) {
+          var img = gid.apply(this, arguments);
+          try { perturb(img.data, img.width, sx, sy); } catch (e) {}
+          return img;
+        }, 4);
+      }
+      var OC = OffscreenCanvas.prototype;
+      if (gid && OC && OC.convertToBlob) {
+        var conv = OC.convertToBlob;
+        method(OC, 'convertToBlob', function convertToBlob(type, quality) {
+          var self = this;
+          try {
+            var w = self.width, h = self.height;
+            if (!w || !h || w * h > 20000000) return conv.apply(self, arguments);
+            var tmp = new OffscreenCanvas(w, h);
+            var ctx = tmp.getContext('2d');
+            if (!ctx) return conv.apply(self, arguments);
+            ctx.drawImage(self, 0, 0);
+            var raw = gid.call(ctx, 0, 0, w, h);
+            perturb(raw.data, w, 0, 0);
+            ctx.putImageData(raw, 0, 0);
+            return conv.apply(tmp, arguments);
+          } catch (e) { return conv.apply(self, arguments); }
+        }, 1);
+      }
+    } catch (e) {}
+  }
+
+  try {
+    var names = ['WebGLRenderingContext', 'WebGL2RenderingContext'];
+    for (var i = 0; i < names.length; i++) {
+      var W = self[names[i]];
+      if (!W || !W.prototype || !W.prototype.getParameter) continue;
+      (function (proto) {
+        var orig = proto.getParameter;
+        method(proto, 'getParameter', function getParameter(pname) {
+          try {
+            if (F.safari && (pname === 37445 || pname === 37446)) return null;
+            if (pname === 37445) return F.glVendor;
+            if (pname === 37446) return F.glRenderer;
+            if (pname === 7936) return 'WebKit';
+            if (pname === 7937) return 'WebKit WebGL';
+          } catch (e) {}
+          return orig.call(this, pname);
+        }, 1);
+        if (F.canvas && typeof proto.readPixels === 'function') {
+          var rp = proto.readPixels;
+          method(proto, 'readPixels', function readPixels(x, y, width, height, format, type, pixels) {
+            rp.apply(this, arguments);
+            try { if (pixels && pixels.length) perturb(pixels, width, x, y); } catch (e) {}
+          }, 7);
+        }
+      })(W.prototype);
     }
   } catch (e) {}
 })();

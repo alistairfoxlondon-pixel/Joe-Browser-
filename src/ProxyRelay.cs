@@ -21,6 +21,12 @@ namespace JoeBrowser
 
         public int Port { get; private set; }
 
+        /// <summary>Raised once when an unreachable proxy is replaced by a direct connection,
+        /// so the window can say so instead of the tabs simply going quiet.</summary>
+        public event Action<string> Fallback;
+
+        private int _fellBack;
+
         public ProxyRelay(ProxyConfig proxy)
             : this(delegate { return proxy; })
         {
@@ -154,15 +160,48 @@ namespace JoeBrowser
             {
                 if (proxy == null || !proxy.Enabled)
                     return await ConnectTcpAsync(host, port, ct).ConfigureAwait(false);
-                if (proxy.Type.Equals("socks5", StringComparison.OrdinalIgnoreCase))
-                    return await Socks5ConnectAsync(proxy, host, port, ct).ConfigureAwait(false);
-                return await HttpConnectAsync(proxy, host, port, ct).ConfigureAwait(false);
+
+                TcpClient tcp = proxy.Type.Equals("socks5", StringComparison.OrdinalIgnoreCase)
+                    ? await Socks5ConnectAsync(proxy, host, port, ct).ConfigureAwait(false)
+                    : await HttpConnectAsync(proxy, host, port, ct).ConfigureAwait(false);
+
+                if (tcp != null)
+                {
+                    Interlocked.Exchange(ref _fellBack, 0);
+                    return tcp;
+                }
+                if (proxy.FallbackDirect) return await FallBackAsync(proxy, host, port, ct).ConfigureAwait(false);
+                return null;
             }
             catch (Exception ex)
             {
                 Log.Error("Proxy connect failed " + host + ":" + port, ex);
+                if (proxy != null && proxy.Enabled && proxy.FallbackDirect)
+                    return await FallBackAsync(proxy, host, port, ct).ConfigureAwait(false);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Keeps the session usable when the proxy stops answering. The alternative - every tab
+        /// hanging until the profile is closed - is what makes an expired proxy look like a
+        /// broken app. The caller is told exactly once per outage, and the warning is repeated
+        /// only after the proxy has worked again in between.
+        /// </summary>
+        private async Task<TcpClient> FallBackAsync(ProxyConfig proxy, string host, int port, CancellationToken ct)
+        {
+            var tcp = await ConnectTcpAsync(host, port, ct).ConfigureAwait(false);
+            if (tcp == null) return null;
+            if (Interlocked.Exchange(ref _fellBack, 1) == 0)
+            {
+                Log.Info("Proxy " + proxy.Host + ":" + proxy.Port + " unreachable; using a direct connection");
+                var h = Fallback;
+                if (h != null)
+                {
+                    try { h(proxy.Host + ":" + proxy.Port); } catch { }
+                }
+            }
+            return tcp;
         }
 
         private async Task<TcpClient> HttpConnectAsync(ProxyConfig proxy, string host, int port, CancellationToken ct)

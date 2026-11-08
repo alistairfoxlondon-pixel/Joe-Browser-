@@ -1,4 +1,9 @@
-﻿# Joe Browser 1.1.0
+﻿# Joe Browser 1.2.0
+
+> **Joe Browser** — a free, local-first **anti-detect browser** for Windows.
+> Unlimited multi-profile browser management with per-profile proxies,
+> automatic browser-fingerprint spoofing, kernel pinning, and leak testing.
+> No cloud, no accounts, no telemetry — everything runs on your own PC.
 
 A local-first anti-detect browser workspace for Windows, built by **Joe Goldberg**
 (Telegram: [@joegoldberg2025](https://t.me/joegoldberg2025)).
@@ -10,7 +15,8 @@ Everything runs and stays on your own PC.
 ## Highlights
 
 - **Unlimited profiles** — every profile is an isolated browser with its own cookies,
-  history, logins and storage in its own `--user-data-dir`.
+  history, logins and storage in its own `--user-data-dir`. The free plan holds 3
+  profiles and runs one at a time; Pro removes both caps.
 - **Coherent fingerprints by default** — a full identity is generated locally and
   applied consistently: user agent and client hints, platform, language and
   Accept-Language, screen, timezone, device memory/cores, WebGL vendor/renderer,
@@ -18,8 +24,35 @@ Everything runs and stays on your own PC.
   country and user agent are kept in agreement, and each profile gets a unique
   noise seed. No configuration is required — but every part can be customized.
 - **Browser choice** — Google Chrome, Chromium, Brave, Microsoft Edge and Firefox.
-  Chrome/Chromium/Brave/Edge are auto-detected; if none is installed, Joe Browser can
-  download an official Chromium snapshot in-app.
+  The **Browsers** page shows what is installed on this PC, with the version and the
+  exact file, and installs the missing ones from the vendor's official download
+  without leaving the app (Chromium as a portable build inside the app folder, the
+  others through their own signed installer).
+- **Pinned kernels, like AdsPower** — download whole browser builds and keep them
+  side by side under `%APPDATA%\JoeBrowser\browsers\kernels`, then pin a profile to
+  an exact version so a vendor update never moves it. Chrome (Stable/Beta/Dev/Canary),
+  Brave and Chromium snapshots are fetched from the publishers' own endpoints; each
+  build is a portable folder, nothing is registered with Windows.
+- **Fingerprint check inside the session** — a 15-point probe (webdriver, driver
+  artefacts, `window.chrome`, plugins, UA, platform, cores, memory, timezone, screen,
+  DPR, touch, languages, WebGL vendor/renderer, canvas, WebRTC candidates) run in the
+  profile's own tab, with one-click buttons that open browserscan.net and
+  ipfighter.com in that same session.
+- **Network diagnostics** — exit IP, country, city, timezone, provider, DNS resolver,
+  latency and clock skew for this PC or any saved proxy, cross-checked against three
+  lookup services; a disagreement or a resolver in another country is called out.
+- **Clear data per profile** — cache, cookies, site data or everything, either on a
+  closed profile (on disk) or in a running one (through the DevTools protocol), with
+  the size shown before anything is deleted.
+- **Report a problem** — one box, one button: **Tools & data → Report a problem**
+  (also in Settings, in the fingerprint-check dialog, and on the crash dialog) opens
+  Telegram on a chat with the developer with your message pre-typed, while the app
+  version, plan, detected browser, kernels and the last log lines are copied to the
+  clipboard for you to paste. Nothing is sent anywhere by itself.
+- **Small-disk safety net** — when the drive holding the profile store falls below
+  1.5 GB, the app quietly clears the HTTP/GPU/code caches of closed profiles (never
+  cookies or logins), on startup, after a profile closes, and when a launch fails
+  because the disk is full.
 - **Per-profile proxy** — HTTP, HTTPS and SOCKS5 with authentication. A local relay
   forwards the browser's traffic and applies the credentials, so proxy passwords
   never appear in the browser command line. Timezone and language can auto-match
@@ -31,10 +64,16 @@ Everything runs and stays on your own PC.
   cookie import/export, batch proxy testing, and cache clearing that keeps logins.
 - **Proper language picker** — circular vector flags and full language names, with
   search and keyboard support. Raw codes such as `en`/`de`/`ru` are never shown.
-- **100% local, no cloud, no registration** — profile data lives in
-  `%APPDATA%\JoeBrowser`, proxy passwords are encrypted with Windows DPAPI, and
-  there is no telemetry.
-- **Free and open source** — MIT license. No limits, no accounts.
+- **Local account gate** — sign up with an email address and a password (no
+  verification email, no server round-trip), or continue with Google. Optional
+  two-factor authentication through any authenticator app (QR code) and an
+  optional PIN lock for shared machines. Everything is verified on this PC.
+- **100% local, no cloud** — profile data lives in `%APPDATA%\JoeBrowser`, proxy
+  passwords and the account store are encrypted with Windows DPAPI, and there is
+  no telemetry and no server.
+- **$1 a month, paid in crypto** — no card, no account, no checkout in the middle.
+  The app reads the chain itself (see below).
+- **Free and open source** — MIT license. The free plan is a real product, not a trial.
 
 ## Built-in extensions (written by Joe Browser)
 
@@ -55,6 +94,34 @@ runtime via CDP into every document, including new tabs and popups. Either path
 working is enough for the features to be usable. You can also add your own
 unpacked extension folders from the Tools tab — one absolute path per line.
 
+## Kernels (pinned browser builds)
+
+A profile normally runs whatever version of Chrome, Brave or Chromium is installed,
+which means a vendor update silently changes the fingerprint. A **kernel** fixes that:
+the build is downloaded once into its own folder and the profile always opens that
+exact version.
+
+- Open **Browsers → Kernels** (or the **Kernels** button next to the engine picker in
+  a profile's General tab) and pick an engine: Chrome, Brave or Chromium.
+- Every build on offer shows its version, channel and size, and whether it is already
+  on disk. Download and Remove are the only two actions.
+- Pin one per profile under **General → Engine build**. If the build is later removed,
+  the profile falls back to the installed browser instead of refusing to open.
+
+Sources are the publishers' own endpoints: Chrome for Testing
+(`last-known-good-versions-with-downloads.json`), Brave's GitHub releases, and the
+Chromium snapshot archive. All three publish a plain Windows zip, so a build is
+unpacked into `%APPDATA%\JoeBrowser\browsers\kernels\<engine>\<version>` and never
+touches the registry or the user's own browser.
+
+**Firefox is deliberately not offered.** Mozilla ships installers only for Windows, and
+the MSI carries its payload as an embedded 7z that Windows Installer expands only
+during a real install — an administrative install copies the MSI alone. Supporting it
+would mean registering a second Firefox with Windows (which can replace the user's
+own) or bundling a 7z decoder. Firefox profiles keep using the installed Firefox,
+which is also what AdsPower does. A pinned build also disables the Chromium sandbox
+in an elevated session, because a copy under `AppData` cannot start one there.
+
 ## Tools & data
 
 - Batch create profiles (with optional per-profile proxy list)
@@ -63,6 +130,8 @@ unpacked extension folders from the Tools tab — one absolute path per line.
 - Profile import / export
 - Recycle bin with restore and permanent delete
 - Clear cache without losing cookies or logins
+- Fingerprint check in the profile's own session (browserscan.net / ipfighter.com)
+- Network diagnostics for this PC or any saved proxy
 - Open the built-in extensions folder
 
 ## Requirements
@@ -73,9 +142,96 @@ unpacked extension folders from the Tools tab — one absolute path per line.
 - Firefox is optional and only needs to be installed to be used.
 - Proxies are optional.
 
+## Accounts & sign-in
+
+The first launch asks for an account. It is created and verified on this PC only —
+nothing is sent anywhere and no confirmation email is involved.
+
+- **Email + password** — 6 characters minimum. Stored as a PBKDF2-SHA1 hash
+  (100,000 iterations, per-account salt), never in plain text.
+- **Continue with Google** — a real OAuth 2.0 loopback flow with PKCE, opened in
+  your default browser. Google never sees a password from this app and the app
+  never sees one from Google. It needs one thing that cannot ship inside the
+  binary: an OAuth client id belonging to your own Google account.
+
+  **Creating it (about a minute, once):**
+
+  1. Open <https://console.cloud.google.com/apis/credentials> and create a project
+     (any name).
+  2. **OAuth consent screen** → *External* → add your own address as a **test user**.
+  3. **Create credentials** → **OAuth client ID** → application type **Desktop app**.
+  4. Copy the **client ID** (ends with `.apps.googleusercontent.com`) and the
+     **client secret**, then paste both into **Settings → Account & security**.
+
+  No redirect URI has to be registered: a *Desktop app* client accepts
+  `http://localhost` on any port. Press **Test** next to the field — it runs the
+  real flow and reports exactly what Google answered (`redirect_uri_mismatch`,
+  `invalid_client`, `access_denied`, …) instead of failing silently. **Set up**
+  opens the console and repeats these steps.
+- **Two-factor authentication** — turn it on in **Settings → Account & security**.
+  Scan the QR code with any authenticator app (or type the key by hand) and
+  confirm a 6-digit code. Standard RFC 6238 TOTP, SHA-1, 30-second steps.
+- **PIN lock** — an optional short code asked for on every launch, on top of the
+  remembered sign-in. Useful when several people share the machine.
+- **Stay signed in** — after a successful sign-in the session is remembered for
+  this Windows user through a DPAPI-protected marker, so normal use is a
+  double-click. **Sign out** in Settings clears it.
+
+## Plan and payment
+
+The free plan holds **3 profiles** and runs **one browser at a time**. Everything
+else in the app is available on it. **$1 a month** removes both caps.
+
+Payment is a plain transfer of crypto to a fixed address. There is no third-party
+checkout, no API key and no server: the app reads the chain itself.
+
+- **Coins** — USDC, USDT and DAI on BNB Chain (BEP20), USDC on Polygon, USDT on
+  Tron (TRC20), USDC/USDT/SOL on Solana, BNB on BNB Chain, and Litecoin. Every coin
+  and network is shown with its official mark.
+- **Network first, then coin** — the same USDT exists on three chains, so the network
+  is a separate, explicit choice and the coin list is rebuilt from it. Sending on the
+  wrong chain destroys the funds; the app never guesses which one you meant. The chain
+  you picked is restated in an amber warning strip under the grid, because that is the
+  one decision on the page that cannot be undone.
+- **Numbered steps** — the page is a three-step flow (network, coin, payment) with a
+  numbered header on each step, so the order is visible rather than implied.
+- **Terms before the first payment** — a short, concrete agreement covering the
+  network, the locked amount, how confirmation works and that crypto is final. It is
+  stored with a version, so changed wording asks again.
+- **Live rate, locked for the session** — CoinGecko is read once a minute, the exact
+  amount is fixed when the session opens, and a 30-minute timer runs on the page. The
+  QR code is a wallet URI (`EIP-681`, `Solana Pay`, `tron:`, `litecoin:`). The address
+  is set in a tabular face: `0` and `O` must not look alike when money is being typed.
+- **Confirmed automatically** — while the page is open the chain is polled every
+  8 seconds; **I have paid** asks immediately. Confirmation means: a matching
+  transfer to the address, at least the invoiced amount (1 % tolerance for rounding
+  and fees), with enough confirmations (BSC 3, Polygon 2, Solana finalised, Tron and
+  Litecoin 1). Only then is Pro activated.
+- **A payment is never lost or reused** — the block time must be later than the
+  session start, so a transfer from last week cannot unlock anything; every redeemed
+  transaction id is stored in the licence file, so one hash can never pay twice; and
+  the open session is remembered, so a payment made just before closing the app is
+  still confirmed on the next start instead of being rejected as too old.
+- **30-day subscription timer** — the plan card is a status card: an icon chip, the
+  plan name, an `ACTIVE` / `FREE` pill, the days left and the end date, and a countdown
+  bar showing how much of the current 30-day period remains. It turns red in the last
+  five days.
+- **Referrals, verified on-chain** — every account has a code. A friend enters it
+  before paying; after their payment confirms they get a short receipt
+  (`JBR1.CODE.CHAIN.TXID`) to send you, and your copy of the app looks that
+  transaction up before adding 7 days. A receipt that names a transaction which did
+  not pay the publisher's address is refused, and one transaction can only be
+  claimed once.
+
+The licence lives in `%APPDATA%\JoeBrowser\license.dat`, DPAPI-encrypted for the
+current Windows user. Pro is therefore tied to this Windows account; reinstalling
+on the same account restores it. That is the honest limit of a local app — someone
+who controls the machine can always patch a binary — but it stops casual editing
+and it stops a payment being spent twice.
+
 ## Getting started
 
-1. Run `JoeBrowser.exe`.
+1. Run `JoeBrowser.exe` and create an account (or continue with Google).
 2. Click **New profile** — a full fingerprint is generated automatically.
 3. Optionally use the **Proxy** tab and **Test connection**. With locale matching
    enabled, timezone and language follow the IP.
@@ -86,6 +242,7 @@ unpacked extension folders from the Tools tab — one absolute path per line.
 
 Folders:
 
+- Account store: `%APPDATA%\JoeBrowser\accounts.json` (DPAPI-encrypted)
 - Profiles & settings: `%APPDATA%\JoeBrowser\profiles` (small JSON files)
 - Browser data per profile: `%APPDATA%\JoeBrowser\data\<profile id>`
 - Built-in extensions: `%APPDATA%\JoeBrowser\extensions`
@@ -104,11 +261,53 @@ powershell -ExecutionPolicy Bypass -File build\build.ps1
 ```
 
 The script compiles all `src/*.cs` files against the .NET Framework 4.8 reference
-assemblies and produces `dist\JoeBrowser.exe` (~638 KB, no runtime dependencies
+assemblies and produces `dist\JoeBrowser.exe` (~1.3 MB, no runtime dependencies
 beyond .NET Framework 4.8, which ships with Windows). A modern C# compiler is
 located automatically; install the .NET Framework 4.8 Developer Pack if none is
 found, or pass `-Csc <path to csc.exe>`. New `.cs` files are picked up
 automatically. `build\make-icon.ps1` regenerates the application icon.
+
+`build\audit.ps1` builds the test harness, which compiles the same sources:
+
+```powershell
+tools\audit\audit.exe --ui            # layout overflow on every page, two window sizes
+tools\audit\audit.exe --ui --shot     # ...and one PNG per page, painted off-screen
+tools\audit\audit.exe --ui --shot --dark  # the same pages through the dark palette
+tools\audit\audit.exe --glyphs glyphs.png  # every glyph, both faces, every size in use
+tools\audit\audit.exe --mainform      # account creation and the main window
+tools\audit\audit.exe --pay           # live rates, invoice maths, wallet URIs, replay guard,
+                                      #   and one real chain round-trip per coin
+tools\audit\audit.exe --pay --detect  # takes a transfer that really happened on-chain and
+                                      #   requires the gateway to report it
+tools\audit\audit.exe --pay --entitlements  # free caps hold, Pro is genuinely unlimited
+tools\audit\audit.exe --dialogs       # renders the kernel, network and fingerprint dialogs
+tools\audit\audit.exe --ui --shot --editor  # every tab of the profile editor, desktop + Android
+tools\audit\audit.exe --kernels --catalog   # every publisher answers with a usable build
+tools\audit\audit.exe --kernels --install chrome  # downloads a build, unpacks it, launches a
+                                      #   profile pinned to it and reads the version back
+                                      #   out of the page
+tools\audit\audit.exe --sites         # opens browserscan, ipfighter, pixelscan, iphey and
+                                      #   whoer in one live session, reads each verdict back,
+                                      #   screenshots every page and checks WebRTC for leaks
+                                      #   (--raw runs the same pages with the spoofing off)
+```
+
+`--ui --shot` renders each page through the window's own paint path rather than
+grabbing the desktop, so it works on a locked or headless session. It also loads the
+bundled type and icon faces, which the harness does not get from `Program.Main`;
+without that the audit would measure a fallback font and every icon would silently
+disappear from the screenshot. `--dark` flips the palette after the window is built
+and re-runs the same restyle pass the in-app switch uses, so the dark screenshots go
+through the real code path.
+
+`--glyphs` writes a contact sheet of every icon at 16, 18, 20, 22, 24 and 28 px, on
+both the solid and the outlined face. Material ships two faces and they do not scale
+alike: at 16-25 px the solid face collapses multi-part glyphs (layers, copy, gift,
+crown, terminal) into a filled blob, while the outlined face keeps the structure.
+`Icons.Draw` therefore uses the outline up to 25 px and the solid face above it, and
+keeps the solid face for the handful of single-stroke glyphs (check, plus, play,
+close, chevrons) at the very smallest sizes, where an outline thins to a grey hairline.
+The sheet is the evidence for that rule; regenerate it before changing it.
 
 ## How spoofing works (and its limits)
 
@@ -136,3 +335,12 @@ proxy. No anti-detect tool can guarantee a specific detection outcome.
 
 MIT — see [LICENSE](LICENSE). Use responsibly and comply with the law and with
 websites' terms of service.
+
+## Keywords
+
+Joe Browser, anti-detect browser, multi-profile browser, browser fingerprint spoofing,
+antidetect, fingerprint switcher, browser isolation, per-profile proxy, SOCKS5 proxy
+browser, MMO account manager, adsense/ad account farm browser, Chrome profile manager,
+Chromium portable, kernel pinning, WebRTC leak guard, cookie per profile, Windows
+anti-detect browser, free antidetect, AdsPower alternative, GoLogin alternative,
+Multilogin alternative, Dolphin anty alternative.

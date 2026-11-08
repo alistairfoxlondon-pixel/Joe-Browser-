@@ -1,7 +1,10 @@
 # Builds JoeBrowser.exe (WinForms, .NET Framework 4.8, no external dependencies at runtime)
 param(
     [string]$Csc = "",
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [string]$CertThumbprint = "",
+    [string]$PfxPath = "",
+    [string]$PfxPassword = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,7 +33,11 @@ Write-Host "Using compiler: $cscPath ($version)"
 
 if (-not (Test-Path $dist)) { New-Item -ItemType Directory -Path $dist | Out-Null }
 
-$sources = Get-ChildItem -Path $src -Filter *.cs -Recurse | ForEach-Object { $_.FullName }
+# Setup.cs has its own entry point and is compiled by build\setup.ps1 into the installer,
+# so it must stay out of the application binary.
+$sources = Get-ChildItem -Path $src -Filter *.cs -Recurse |
+    Where-Object { $_.Name -ne "Setup.cs" } |
+    ForEach-Object { $_.FullName }
 if (-not $sources) { throw "No source files found." }
 
 $refNames = @("System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.Forms.dll", "System.Web.Extensions.dll", "System.Security.dll", "System.IO.Compression.dll", "System.IO.Compression.FileSystem.dll")
@@ -45,6 +52,14 @@ $lines.Add("/optimize+")
 $lines.Add("/debug-")
 $lines.Add('/win32icon:"' + (Join-Path $src "app.ico") + '"')
 $lines.Add('/win32manifest:"' + (Join-Path $src "app.manifest") + '"')
+# Embed the same artwork as a managed resource so windows, dialogs and the About page can
+# load real multi-size icons instead of the generic Windows placeholder.
+$lines.Add('/resource:"' + (Join-Path $src "app.ico") + '",JoeBrowser.app.ico')
+# Official browser and coin logos, embedded so the app never depends on an installed browser,
+# a network fetch or a text placeholder to draw a recognisable icon.
+foreach ($logo in @("chrome", "chromium", "brave", "firefox", "edge", "usdc", "usdt", "dai", "bnb", "sol", "ltc", "matic", "trx")) {
+    $lines.Add('/resource:"' + (Join-Path $src ("logos\" + $logo + ".png")) + '",JoeBrowser.logos.' + $logo + '.png')
+}
 $lines.Add('/out:"' + $out + '"')
 foreach ($r in $refNames) { $lines.Add('/r:"' + (Join-Path $fw $r) + '"') }
 foreach ($s in $sources) { $lines.Add('"' + $s + '"') }
@@ -76,6 +91,41 @@ if (Test-Path $fontSrc) {
 }
 Copy-Item (Join-Path $root "README.md") $dist -Force
 Copy-Item (Join-Path $root "LICENSE") $dist -Force
+
+# SmartScreen and antivirus reputation come from a code-signing certificate, not from anything
+# the code does. When a certificate is available, pass -CertThumbprint (a cert in the user or
+# machine store) or -PfxPath plus -PfxPassword, and the exe is signed as part of the build.
+# Without it the build stays unsigned and Windows shows its usual "unknown publisher" warning.
+$signTarget = Join-Path $dist "JoeBrowser.exe"
+$signArgs = $null
+if ($CertThumbprint) {
+    $cert = Get-ChildItem Cert:\CurrentUser\My, Cert:\LocalMachine\My -ErrorAction SilentlyContinue |
+        Where-Object { $_.Thumbprint -eq $CertThumbprint } | Select-Object -First 1
+    if (-not $cert) { throw "No certificate with thumbprint $CertThumbprint was found." }
+    $signArgs = @("sign", "/sha1", $CertThumbprint, "/fd", "sha256", "/tr", "http://timestamp.digicert.com", "/td", "sha256")
+} elseif ($PfxPath) {
+    if (-not (Test-Path $PfxPath)) { throw "PFX not found: $PfxPath" }
+    $signArgs = @("sign", "/f", $PfxPath, "/fd", "sha256", "/tr", "http://timestamp.digicert.com", "/td", "sha256")
+    if ($PfxPassword) { $signArgs += @("/p", $PfxPassword) }
+}
+if ($signArgs) {
+    $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if (-not $signtool) {
+        $kit = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+        if (Test-Path $kit) {
+            $signtool = Get-ChildItem $kit -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -notmatch "arm" } | Sort-Object FullName -Descending | Select-Object -First 1
+        }
+    }
+    if ($signtool) {
+        $tool = if ($signtool.Source) { $signtool.Source } else { $signtool.Path }
+        & $tool @signArgs $signTarget
+        if ($LASTEXITCODE -ne 0) { throw "Signing failed with exit code $LASTEXITCODE" }
+        Write-Host "Signed: $signTarget"
+    } else {
+        Write-Warning "signtool.exe was not found; the exe was built unsigned."
+    }
+}
 
 Write-Host ""
 Write-Host "Built: $out"

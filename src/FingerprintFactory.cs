@@ -34,6 +34,23 @@ namespace JoeBrowser
 
         public static readonly int[] CoreOptions = new[] { 2, 4, 6, 8, 10, 12, 16, 24 };
 
+        /// <summary>Android releases a Chromium build still runs on, newest first. "auto" takes
+        /// the build the handset behind the viewport actually shipped.</summary>
+        public static readonly string[] AndroidVersions = new[] { "auto", "16", "15", "14", "13", "12", "11" };
+
+        /// <summary>iOS versions used in the Safari user agent. "auto" follows the device table.</summary>
+        public static readonly string[] IosVersions = new[] { "auto", "26.2", "26.1", "18.3", "17.6", "16.7" };
+
+        /// <summary>Font lists a profile can advertise. Auto derives it from the device target.</summary>
+        public static readonly string[][] FontSets = new[]
+        {
+            new[] { "auto", "Automatic" },
+            new[] { "windows", "Windows" },
+            new[] { "macos", "macOS" },
+            new[] { "linux", "Linux" },
+            new[] { "minimal", "Minimal" }
+        };
+
         /// <summary>Chrome rounds deviceMemory down to a power of two and caps it at 8, so anything larger is a tell.</summary>
         public static readonly int[] MemoryOptions = new[] { 2, 4, 8 };
 
@@ -437,6 +454,11 @@ namespace JoeBrowser
             fp.GeoMode = "proxy";
             fp.AutoUserAgent = true;
             fp.UserAgentOverride = "";
+            /* Regenerating rolls the hardware, not the user's explicit picks: an Android
+               version or font list chosen by hand is a decision, not a random value. */
+            if (string.IsNullOrEmpty(fp.AndroidVersion)) fp.AndroidVersion = "auto";
+            if (string.IsNullOrEmpty(fp.IosVersion)) fp.IosVersion = "auto";
+            if (string.IsNullOrEmpty(fp.FontSet)) fp.FontSet = "auto";
 
             ApplyLocale(fp, proxy, r);
 
@@ -462,6 +484,7 @@ namespace JoeBrowser
         /// real device reports, so it is also what ties the model token in the user agent and the
         /// model in the client hints to the same phone or tablet.
         /// </summary>
+        /// <summary>Table row for the viewport the profile advertises.</summary>
         public static string[] DeviceIdentity(FingerprintConfig fp)
         {
             string[] none = { "", "" };
@@ -477,6 +500,44 @@ namespace JoeBrowser
         }
 
         /// <summary>
+        /// Android release the profile reports. A pinned value has to reach every surface that
+        /// mentions it - the user agent, the client hint and the device model line - or the
+        /// browser contradicts itself inside a single request.
+        /// </summary>
+        public static string AndroidVersionFor(FingerprintConfig fp)
+        {
+            if (fp != null && !string.IsNullOrEmpty(fp.AndroidVersion) &&
+                !fp.AndroidVersion.Equals("auto", StringComparison.OrdinalIgnoreCase))
+                return fp.AndroidVersion.Trim();
+            string[] d = DeviceIdentity(fp);
+            return d.Length > 1 && d[1].Length > 0 ? d[1] : "16";
+        }
+
+        /// <summary>iOS release in dotted form, e.g. "17.6".</summary>
+        public static string IosVersionFor(FingerprintConfig fp)
+        {
+            if (fp != null && !string.IsNullOrEmpty(fp.IosVersion) &&
+                !fp.IosVersion.Equals("auto", StringComparison.OrdinalIgnoreCase))
+                return fp.IosVersion.Trim();
+            string[] d = DeviceIdentity(fp);
+            return d.Length > 2 && d[2].Length > 0 ? d[2] : "26.1";
+        }
+
+        /// <summary>The same version in the underscore form Safari puts in its user agent.</summary>
+        public static string IosVersionToken(FingerprintConfig fp)
+        {
+            return IosVersionFor(fp).Replace('.', '_');
+        }
+
+        public static string OsVersionLabel(FingerprintConfig fp)
+        {
+            if (fp == null) return "";
+            if (IsAndroid(fp.Os)) return "Android " + AndroidVersionFor(fp);
+            if (IsIos(fp.Os)) return "iOS " + IosVersionFor(fp);
+            return "";
+        }
+
+        /// <summary>
         /// The public IP a site actually sees wins. That is the proxy IP when one is set, and the
         /// machine's own detected IP on a direct connection. The clock, the language and the
         /// Accept-Language header must all describe the same country or a single request can
@@ -486,6 +547,17 @@ namespace JoeBrowser
         {
             if (proxy != null && fp.AutoMatchProxy)
             {
+                /* The IP's own timezone is the strongest signal: a geo lookup that says
+                   "Los Angeles" but a clock on America/New_York is a country-level guess that
+                   every IP-intelligence page flags. Use the exact zone from the lookup first,
+                   and only fall back to the country default when the lookup had no zone. */
+                if (proxy.Enabled && !string.IsNullOrEmpty(proxy.LastTimezone))
+                {
+                    fp.Timezone = proxy.LastTimezone;
+                    fp.Language = LanguageForTimezone(proxy.LastTimezone);
+                    fp.AcceptLanguage = AcceptLanguageFor(fp.Language);
+                    return;
+                }
                 string[] loc;
                 if (!string.IsNullOrEmpty(proxy.LastCountryCode) &&
                     (proxy.Enabled || !string.IsNullOrEmpty(proxy.LastIp)) &&
@@ -493,13 +565,6 @@ namespace JoeBrowser
                 {
                     fp.Timezone = loc[0];
                     fp.Language = loc[1];
-                    fp.AcceptLanguage = AcceptLanguageFor(fp.Language);
-                    return;
-                }
-                if (proxy.Enabled && !string.IsNullOrEmpty(proxy.LastTimezone))
-                {
-                    fp.Timezone = proxy.LastTimezone;
-                    fp.Language = LanguageForTimezone(proxy.LastTimezone);
                     fp.AcceptLanguage = AcceptLanguageFor(fp.Language);
                     return;
                 }
@@ -750,7 +815,9 @@ namespace JoeBrowser
                 ApplyPlatformFromUa(fp);
                 return;
             }
-            if (!string.IsNullOrWhiteSpace(fp.UserAgent)) return;
+            /* An auto user agent is rebuilt from the browser that is actually launching. Keeping
+               the cached string meant a profile created before a Chrome update kept advertising
+               the old version - the exact "different browser version" mismatch scanners print. */
 
             int major = browser != null && browser.MajorVersion > 0 ? browser.MajorVersion : 131;
             bool edge = browser != null && browser.IsEdge;
@@ -763,9 +830,8 @@ namespace JoeBrowser
                 // and the OS build come from the advertised viewport, so the UA, the screen and the
                 // pixel density all describe the same device.
                 bool pad = fp.Os.StartsWith("iPad", StringComparison.OrdinalIgnoreCase);
-                string[] dev = DeviceIdentity(fp);
-                string token = dev.Length > 1 && dev[1].Length > 0 ? dev[1] : "26_1";
-                string ver = dev.Length > 2 && dev[2].Length > 0 ? dev[2] : "26.1";
+                string token = IosVersionToken(fp);
+                string ver = IosVersionFor(fp);
                 string head = pad ? "iPad; CPU OS " + token : "iPhone; CPU iPhone OS " + token;
                 fp.UserAgent = "Mozilla/5.0 (" + head + " like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/" +
                     ver + " Mobile/15E148 Safari/604.1";
@@ -782,7 +848,7 @@ namespace JoeBrowser
                 else if (IsAndroid(fp.Os))
                 {
                     string[] dev = DeviceIdentity(fp);
-                    platToken = "Android " + (dev.Length > 1 && dev[1].Length > 0 ? dev[1] : "16") + "; " +
+                    platToken = "Android " + AndroidVersionFor(fp) + "; " +
                         (device == "tablet" ? "Tablet" : "Mobile");
                     // Firefox on Android reports its own platform token, never a desktop one.
                     navPlatformFf = "Android";
@@ -805,17 +871,22 @@ namespace JoeBrowser
                    "Android 10; K" string Chrome actually still ships, rather than a flagship model
                    attached to a screen that model never had. */
                 string[] dev = DeviceIdentity(fp);
-                if (dev.Length > 1 && dev[1].Length > 0 && dev[0].Length > 0)
-                    platToken2 = "Linux; Android " + dev[1] + "; " + dev[0];
-                else platToken2 = "Linux; Android 10; K";
+                if (dev.Length > 1 && dev[0].Length > 0)
+                    platToken2 = "Linux; Android " + AndroidVersionFor(fp) + "; " + dev[0];
+                else platToken2 = "Linux; Android " + AndroidVersionFor(fp) + "; K";
                 navPlatform = "Linux armv8l";
             }
             else { platToken2 = "Windows NT 10.0; Win64; x64"; navPlatform = "Win32"; }
 
-            string full = FullChromiumVersion(browser, major);
-            string ua = "Mozilla/5.0 (" + platToken2 + ") AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + full + " Safari/537.36";
+            /* Chrome has shipped the reduced user agent since M113: the UA string carries the
+               major version and zeros for the rest ("Chrome/141.0.0.0"), while the real build
+               number only appears in the client hints. Emitting a four-part build here is a
+               self-inflicted "different browser version" flag, because no current Chrome or
+               Edge ever puts its build number in navigator.userAgent. */
+            string uaVer = major + ".0.0.0";
+            string ua = "Mozilla/5.0 (" + platToken2 + ") AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + uaVer + " Safari/537.36";
             if (IsMobileOs(fp.Os)) ua = ua.Replace("Safari/537.36", device == "tablet" ? "Safari/537.36" : "Mobile Safari/537.36");
-            if (edge) ua += " Edg/" + full;
+            if (edge) ua += " Edg/" + uaVer;
 
             fp.UserAgent = ua;
             fp.Platform = navPlatform;

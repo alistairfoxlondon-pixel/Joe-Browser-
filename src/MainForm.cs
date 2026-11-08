@@ -27,7 +27,8 @@ namespace JoeBrowser
         private List<ExtensionItem> _extensions = new List<ExtensionItem>();
 
         // Sidebar
-        private JBButton _navProfiles, _navProxies, _navExtensions, _navSettings, _navTools, _navAbout;
+        private JBButton _navProfiles, _navProxies, _navExtensions, _navBrowsers, _navSettings, _navTools, _navAbout, _navPlan;
+        private JBLabel _navGroupWorkspace, _navGroupSystem;
         private JBThemeSwitch _themeSwitch;
 
         // Caption buttons
@@ -53,13 +54,23 @@ namespace JoeBrowser
         private ToolsPage _toolsPage;
         private ProxyPage _proxyPage;
         private ExtensionPage _extensionPage;
+        private BrowsersPage _browsersPage;
+        private UpgradePage _upgradePage;
+        private Timer _planTimer;
+        private int _payTicks;
+        private bool _payBusy;
+        private const int PayPollSeconds = 8;
         private JBButton _emptyBtn, _aboutTelegram;
         private JBToast _toast;
 
         // Settings controls
         private JBLabel _setBrowserInfo, _setStoragePath;
         private JBTextBox _setBrowserPath, _setStartUrl, _setDefaultGroup;
-        private JBButton _setBrowse, _setDetect, _setOpenData, _setDownload;
+        private JBButton _setBrowse, _setDetect, _setOpenData, _setDownload, _setClearCache, _setReport;
+        private JBLabel _setAccountWho;
+        private JBTextBox _setGoogleId;
+        private JBTextBox _setGoogleSecret;
+        private JBButton _setSecurity, _setSignOut, _setGoogleGuide, _setGoogleTest;
         private JBLangPicker _setLang;
         private JBToggle _setExtensions, _setCustomExt, _setTrash;
         private Panel _settingsColumn;
@@ -125,6 +136,32 @@ namespace JoeBrowser
             LayoutAll();
             ShowInTaskbar = true;
             _search.Box.AccessibleName = "Search profiles";
+
+            /* Running elevated is the single most common cause of "it behaves strangely"
+               reports: Windows Defender prompts for the elevated process, the bundled
+               Chromium cannot start its sandbox, and browsers launched from an elevated app
+               inherit the administrator token. Tell the user once, in plain words. */
+            if (SystemProbe.IsElevated())
+            {
+                Log.Info("Started elevated; recommending a normal (non-administrator) launch.");
+                Toast("Running as administrator. Close Joe Browser and open it normally - "
+                      + "elevated browsers can trigger security prompts and behave worse.",
+                      ToastKind.Warn);
+            }
+            else
+            {
+                /* A full drive is the second most common cause of "the browser will not open":
+                   Chromium needs room for its cache and profile data and fails obscurely
+                   without it. Warn while there is still time to act. */
+                long free = DiskSpace.Free(AppPaths.Root);
+                if (free >= 0 && free < 500L * 1024 * 1024)
+                {
+                    Log.Info("Low disk space: " + DiskSpace.Human(free) + " free.");
+                    Toast("Only " + DiskSpace.Human(free) + " free on this drive. Browsers need room "
+                          + "for their cache - free some space to avoid failed launches.",
+                          ToastKind.Warn);
+                }
+            }
         }
 
         /// <summary>
@@ -196,14 +233,27 @@ namespace JoeBrowser
             return b;
         }
 
+        /// <summary>Small caption above a cluster of navigation items.</summary>
+        private JBLabel NavGroup(string text)
+        {
+            var l = new JBLabel(LabelRole.Faint, text.ToUpperInvariant());
+            l.AutoEllipsis = false;
+            return l;
+        }
+
         private void Build()
         {
             _navProfiles = Nav(L10n.T("nav.profiles"), "layers", delegate { SetPage(0); });
             _navProxies = Nav(L10n.T("nav.proxies"), "proxy", delegate { SetPage(1); });
             _navExtensions = Nav(L10n.T("nav.extensions"), "apps", delegate { SetPage(2); });
-            _navSettings = Nav(L10n.T("nav.settings"), "sliders", delegate { SetPage(3); });
-            _navTools = Nav(L10n.T("header.tools"), "command", delegate { SetPage(4); });
-            _navAbout = Nav(L10n.T("nav.about"), "info", delegate { SetPage(5); });
+            _navBrowsers = Nav(L10n.T("nav.browsers"), "window", delegate { SetPage(3); });
+            _navSettings = Nav(L10n.T("nav.settings"), "sliders", delegate { SetPage(4); });
+            _navTools = Nav(L10n.T("header.tools"), "command", delegate { SetPage(5); });
+            _navAbout = Nav(L10n.T("nav.about"), "info", delegate { SetPage(6); });
+            _navPlan = Nav(L10n.T("nav.plan"), "crown", delegate { SetPage(7); });
+
+            _navGroupWorkspace = NavGroup(L10n.T("nav.workspace"));
+            _navGroupSystem = NavGroup(L10n.T("nav.system"));
 
             _themeSwitch = new JBThemeSwitch { Checked = Theme.Dark };
             _themeSwitch.NightText = L10n.T("theme.night");
@@ -284,6 +334,26 @@ namespace JoeBrowser
             _extensionPage.ActionRequested += delegate(object sender, ExtensionActionEventArgs e) { ExtensionAction(e.Key, e.Index); };
             _extensionPage.SetItems(_extensions);
 
+            _browsersPage = new BrowsersPage { Visible = false };
+            _browsersPage.ActionRequested += delegate(object sender, BrowserActionEventArgs e) { BrowserAction(e.Key, e.Engine); };
+
+            _upgradePage = new UpgradePage { Visible = false };
+            _upgradePage.ActionRequested += delegate(object sender, UpgradeActionEventArgs e) { PlanAction(e.Key); };
+            _planTimer = new Timer { Interval = 1000 };
+            _planTimer.Tick += delegate
+            {
+                if (_page != 7) return;
+                _upgradePage.TickTimer();
+                /* The chain is watched while the page is open, so a payment confirms on its own.
+                   The manual button stays for someone who wants an answer immediately. */
+                if (!Plan.IsPro && _upgradePage.Current != null && _upgradePage.Current.Left > TimeSpan.Zero
+                    && !_payBusy && ++_payTicks >= PayPollSeconds)
+                {
+                    _payTicks = 0;
+                    var _ = CheckPaymentAsync(true);
+                }
+            };
+
             // The About page grows past a short window, so it scrolls like the settings page.
             _aboutPage = new Panel { BackColor = Theme.Bg, Visible = false };
             _aboutColumn = new Panel { BackColor = Theme.Bg };
@@ -294,12 +364,16 @@ namespace JoeBrowser
             _aboutColumn.Controls.Add(_aboutTelegram);
             _aboutPage.Controls.Add(_aboutHost);
 
+            Controls.Add(_navGroupWorkspace);
+            Controls.Add(_navGroupSystem);
             Controls.Add(_navProfiles);
             Controls.Add(_navProxies);
             Controls.Add(_navExtensions);
+            Controls.Add(_navBrowsers);
             Controls.Add(_navSettings);
             Controls.Add(_navTools);
             Controls.Add(_navAbout);
+            Controls.Add(_navPlan);
             Controls.Add(_themeSwitch);
             Controls.Add(_search);
             Controls.Add(_sortBtn);
@@ -312,6 +386,8 @@ namespace JoeBrowser
             Controls.Add(_toolsPage);
             Controls.Add(_proxyPage);
             Controls.Add(_extensionPage);
+            Controls.Add(_browsersPage);
+            Controls.Add(_upgradePage);
             Controls.Add(_aboutPage);
             Controls.Add(_toast);
             Controls.Add(_minBtn);
@@ -330,6 +406,7 @@ namespace JoeBrowser
 
             _built = true;
             ApplyLanguage();
+            RefreshPlanState();
         }
 
         private void OpenUrl(string url)
@@ -362,9 +439,11 @@ namespace JoeBrowser
             _navProfiles.Text = L10n.T("nav.profiles");
             _navProxies.Text = L10n.T("nav.proxies");
             _navExtensions.Text = L10n.T("nav.extensions");
+            _navBrowsers.Text = L10n.T("nav.browsers");
             _navSettings.Text = L10n.T("nav.settings");
             _navTools.Text = L10n.T("header.tools");
             _navAbout.Text = L10n.T("nav.about");
+            _navPlan.Text = L10n.T("nav.plan");
             _themeSwitch.NightText = L10n.T("theme.night");
             _themeSwitch.DayText = L10n.T("theme.day");
             _themeSwitch.Invalidate();
@@ -410,11 +489,13 @@ namespace JoeBrowser
                     case "import": ImportProfiles(); break;
                     case "export": ExportProfiles(); break;
                     case "proxy": ProxyBatchTest(); break;
+                    case "net": NetworkDiagnostics(); break;
                     case "cookies": CookieManager(); break;
                     case "ext": OpenExtensionFolder(); break;
                     case "trash": RecycleBin(); break;
                     case "shortcuts": ShortcutHelp(); break;
                     case "clean": ClearCaches(); break;
+                    case "report": Report.OpenForm(this, ""); break;
                 }
             }
             catch (Exception ex)
@@ -424,21 +505,35 @@ namespace JoeBrowser
             }
         }
 
-        private void BatchCreate()
+        /// <summary>Exit IP, resolver and clock for this PC or any saved proxy.</summary>
+        private void NetworkDiagnostics()
         {
-            string prefix, group, proxyText;
+            using (var dlg = new NetworkForm(_proxies)) dlg.ShowDialog(this);
+        }
+
+        private void BatchCreate()
+        {            string prefix, group, proxyText;
             int count;
+
+            /* Checked before the dialog opens, so nobody fills in a form that cannot be used. */
+            int slots = Entitlements.ProfileSlotsLeft(_profiles.Count);
+            if (slots <= 0)
+            {
+                OfferUpgrade(Entitlements.ProfileReason(_profiles.Count));
+                return;
+            }
 
             using (var dlg = new ToolDialog("Batch create", "Create", "Cancel", 520, 660))
             {
                 dlg.AddNote("Every profile gets its own fingerprint, cookies and browser data.");
                 var prefixBox = dlg.AddField("NAME PREFIX", "Profile", "", "pencil", false, 33);
-                var countBox = dlg.AddSelect("HOW MANY", new[] { "5", "10", "25", "50", "100" }, 1, "layers");
+                var countBox = dlg.AddSelect(Entitlements.IsPro ? "HOW MANY" : "HOW MANY  \u00b7  " + slots + " LEFT",
+                    new[] { "5", "10", "25", "50", "100" }, 1, "layers");
                 var groupBox = dlg.AddField("GROUP / FOLDER", _settings.DefaultGroup ?? "",
                     L10n.T("set.group.hint"), "folder", false, 33);
                 var proxyBox = dlg.AddField("PROXIES · ONE PER LINE (OPTIONAL)", "",
                     "http://user:pass@host:port", "proxy", true, 120);
-                dlg.AddNote("Also accepts socks5://host:port and host:port:user:pass. Lines are reused in order.");
+                dlg.AddNote("Also accepts socks5:// and host:port:user:pass.");
 
                 dlg.Validator = delegate
                 {
@@ -455,6 +550,10 @@ namespace JoeBrowser
                 if (count > 200) count = 200;
             }
 
+            /* The plan decides how many can actually be made. Clamping here rather than
+               refusing outright keeps the dialog honest: the user still gets what they can. */
+            count = AllowProfiles(count);
+            if (count <= 0) return;
             string[] lines = proxyText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(x => x.Trim()).Where(x => x.Length > 0).ToArray();
 
@@ -535,6 +634,15 @@ namespace JoeBrowser
                 if (ofd.ShowDialog(this) != DialogResult.OK) return;
                 var list = _store.ImportFrom(ofd.FileName);
                 if (list.Count == 0) { Toast("No profiles found in that file", ToastKind.Error); return; }
+
+                int allowed = AllowProfiles(list.Count);
+                if (allowed <= 0) return;
+                if (allowed < list.Count)
+                {
+                    list = list.Take(allowed).ToList();
+                    Toast("Imported the first " + allowed + " \u2014 the plan is full", ToastKind.Info);
+                }
+
                 foreach (var p in list) _store.Save(p);
                 ReloadCards(true);
                 Toast(list.Count + " profiles imported · re-enter proxy passwords", ToastKind.Success);
@@ -561,6 +669,7 @@ namespace JoeBrowser
 
         private void ProxyBatchTest()
         {
+            if (!RequirePro(Entitlements.BatchProxyTest)) return;
             using (var dlg = new ToolDialog("Proxy batch test", "Close", "", 620, 640))
             {
                 dlg.Secondary.Visible = false;
@@ -697,7 +806,7 @@ namespace JoeBrowser
                 dlg.AddRow(null, list, Ui.S(200));
                 dlg.AddNote(items.Count == 0
                     ? "The recycle bin is empty."
-                    : "Select a profile and choose Restore to bring it back with its cookies.");
+                    : "Select a profile, then Restore.");
                 dlg.Validator = delegate
                 {
                     chosen = list.SelectedItem as ProfileStore.TrashItem;
@@ -718,6 +827,9 @@ namespace JoeBrowser
             }
 
             if (chosen == null) return;
+            /* Restoring puts a profile back in the live list, so it needs a slot like any
+               other creation. */
+            if (!AllowAnotherProfile()) return;
             if (_store.Restore(chosen.File))
             {
                 ReloadCards(true);
@@ -818,8 +930,8 @@ namespace JoeBrowser
             using (var dlg = new ToolDialog(isNew ? "Add proxy" : "Edit proxy", "Save", "Cancel", 540, 560))
             {
                 dlg.AddNote(isNew
-                    ? "Saved proxies can be picked when creating a profile, or applied to a running browser."
-                    : "Changes apply the next time a profile uses this proxy.");
+                    ? "Available when creating a profile."
+                    : "Applies next time a profile uses it.");
                 var nameBox = dlg.AddField("NAME", isNew ? "" : entry.Name, "Home IP · Frankfurt", "pencil", false, 33);
                 var typeBox = dlg.AddSelect("TYPE", new[] { "HTTP", "HTTPS", "SOCKS5" },
                     cfg.Type == "socks5" ? 2 : cfg.Type == "https" ? 1 : 0, "proxy");
@@ -828,7 +940,7 @@ namespace JoeBrowser
                 var userBox = dlg.AddField("USERNAME (OPTIONAL)", cfg.User, "Optional", "user", false, 33);
                 var passBox = dlg.AddField("PASSWORD (OPTIONAL)", cfg.Password, "Optional", "key", false, 33);
                 var noteBox = dlg.AddField("NOTE (OPTIONAL)", isNew ? "" : entry.Note, "Optional", "file", false, 33);
-                dlg.AddNote("Passwords are encrypted on this device with Windows DPAPI and never written to exports.");
+                dlg.AddNote("Passwords are encrypted on this device.");
 
                 dlg.Validator = delegate
                 {
@@ -1005,7 +1117,7 @@ namespace JoeBrowser
             int picked;
             using (var dlg = new ToolDialog("Change proxy, keep the tab open", "Apply now", "Cancel", 540, 400))
             {
-                dlg.AddNote("The current browser window stays open. Cookies, logins and form data are untouched; only new connections use the new proxy.");
+                dlg.AddNote("Cookies and logins stay. Only new connections use the new proxy.");
                 var sel = dlg.AddSelect("RUNNING PROFILE", names, 0, "window");
                 dlg.AddNote("New proxy: " + e.Connection);
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
@@ -1049,6 +1161,90 @@ namespace JoeBrowser
             }
         }
 
+        private static string HostOf(string url)
+        {
+            try { return new Uri(url).Host; } catch { return url; }
+        }
+
+        private async void BrowserAction(string key, string engine)
+        {
+            try
+            {
+                if (key == "rescan")
+                {
+                    _browsersPage.Rescan();
+                    int n = 0;
+                    foreach (var e in BrowsersPage.EngineCatalog())
+                        if (BrowsersPage.FindInstalled(e.Key) != null) n++;
+                    Toast(n + " of 5 engines available on this PC", ToastKind.Info);
+                    return;
+                }
+
+                if (key == "openfolder")
+                {
+                    Directory.CreateDirectory(AppPaths.Browsers);
+                    Process.Start("explorer.exe", "\"" + AppPaths.Browsers + "\"");
+                    return;
+                }
+
+                if (key == "kernels")
+                {
+                    using (var dlg = new KernelForm()) dlg.ShowDialog(this);
+                    _browsersPage.Rescan();
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(engine)) return;
+
+                if (key == "reveal")
+                {
+                    var info = BrowsersPage.FindInstalled(engine);
+                    if (info == null || !info.Found)
+                    {
+                        _browsersPage.Rescan();
+                        Toast(BrowserFetcher.Label(engine) + " is no longer installed", ToastKind.Warn);
+                        return;
+                    }
+                    Process.Start("explorer.exe", "/select,\"" + info.Path + "\"");
+                    return;
+                }
+
+                if (key != "install") return;
+
+                /* Edge ships with Windows; a "download" button there would only open a page. */
+                if (!BrowserFetcher.Supports(engine))
+                {
+                    OpenUrl(BrowserFetcher.HomePage(engine));
+                    return;
+                }
+
+                string label = BrowserFetcher.Label(engine);
+                /* Chromium is unpacked into this app's folder; the other three run the vendor's
+                   own installer, which writes outside the app. That deserves a yes first. */
+                if (engine != "chromium")
+                {
+                    if (!ConfirmForm.Ask(this, "Install " + label,
+                        "Download and run " + label + "'s official installer now?",
+                        "It is fetched from " + HostOf(BrowserFetcher.HomePage(engine)) +
+                        " and installed the normal way. Windows may ask for permission, and " + label +
+                        " will be available to every app on this PC, not only Joe Browser.",
+                        "Install", BtnKind.Primary)) return;
+                }
+
+                _browsersPage.SetBusy(engine, true, "Downloading " + label + "\u2026");
+                bool ok = await DownloadBrowserAsync(engine);
+                _browsersPage.SetBusy(null, false, null);
+                _browsersPage.Rescan();
+                if (ok) Invalidate();
+            }
+            catch (Exception ex)
+            {
+                _browsersPage.SetBusy(null, false, null);
+                Log.Error("Browser action failed: " + key, ex);
+                Toast(ShortError(ex), ToastKind.Error);
+            }
+        }
+
         private void SaveExtensions()
         {
             ExtensionCatalog.Save(_extensions);
@@ -1060,9 +1256,9 @@ namespace JoeBrowser
             string url;
             using (var dlg = new ToolDialog("Add extension by store link", "Import", "Cancel", 560, 340))
             {
-                dlg.AddNote("Paste a Chrome Web Store link (or its 32-character id). The public CRX is downloaded and unpacked into Joe Browser's own extensions folder.");
+                dlg.AddNote("Paste a Chrome Web Store link or its 32-character id.");
                 var field = dlg.AddField("CHROME WEB STORE LINK", "", "https://chromewebstore.google.com/detail/...", "link", false, 33);
-                dlg.AddNote("No store account or system browser is touched. If the store blocks a direct download, add the unpacked folder instead.");
+                dlg.AddNote("Downloaded into Joe Browser's own extensions folder. No store account needed.");
                 dlg.Validator = delegate
                 {
                     if (!string.IsNullOrWhiteSpace(field.Value)) return true;
@@ -1114,7 +1310,7 @@ namespace JoeBrowser
             if (index < 0 || index >= _extensions.Count) return;
             var item = _extensions[index];
             if (!ConfirmForm.Ask(this, "Remove extension", "Remove \"" + item.Name + "\" from Joe Browser?",
-                "The copied files stay on disk; nothing is removed from your system browser.", "Remove", BtnKind.Danger)) return;
+                "The files stay on disk.", "Remove", BtnKind.Danger)) return;
             _extensions.RemoveAt(index);
             SaveExtensions();
             Toast("Extension removed", ToastKind.Success);
@@ -1141,6 +1337,10 @@ namespace JoeBrowser
             _setBrowserInfo.TextAlign = ContentAlignment.MiddleRight;
             _setStoragePath = Label(LabelRole.Body, AppPaths.Root);
             _setStoragePath.TextAlign = ContentAlignment.MiddleRight;
+            /* The folder path is longer than the row on a normal window, so the label elides
+               it. The tooltip is what makes the elision harmless: the full path is one hover
+               away and the Open button sits right beside it. */
+            ToolTips.Attach(_setStoragePath, AppPaths.Root);
 
             _setBrowserPath = Field("Automatic (recommended)");
             _setBrowserPath.Value = _settings.BrowserPath ?? "";
@@ -1151,6 +1351,8 @@ namespace JoeBrowser
             _setDefaultGroup.Value = _settings.DefaultGroup ?? "";
             _setOpenData = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.opendata"), Radius = 4, Height = Ui.S(33) };
             _setDownload = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.download"), Radius = 4, Height = Ui.S(33) };
+            _setClearCache = new JBButton { Kind = BtnKind.Soft, Icon = "sync", Text = L10n.T("btn.clean"), Radius = 4, Height = Ui.S(33) };
+            _setClearCache.Click += delegate { ClearCaches(); };
 
             /* Interface language: circular flag + full language name, never a bare code. */
             _setLang = new JBLangPicker();
@@ -1196,7 +1398,55 @@ namespace JoeBrowser
 
             var storage = Card("set.storage");
             Row(storage, "set.row.data", new[] { Ui.S(96) }, _setOpenData, _setStoragePath);
+            Row(storage, "set.row.cache", new[] { Ui.S(120) }, _setClearCache);
             Row(storage, "set.row.build", new[] { Ui.S(110) }, _setDownload);
+
+            /* The one line to the developer when anything looks wrong. It opens Telegram with
+               the user's own words; the technical details ride on the clipboard. */
+            _setReport = new JBButton { Kind = BtnKind.Soft, Icon = "error", Text = L10n.T("btn.report"), Radius = 4, Height = Ui.S(33) };
+            _setReport.Click += delegate { Report.OpenForm(this, ""); };
+            Row(storage, "set.row.report", new[] { Ui.S(96) }, _setReport);
+
+            /* Account and security. Everything here is optional for daily use: the email
+               account only exists so the sign-in gate can remember who is using the app, and
+               the Google client id is needed only for the Continue with Google button. */
+            _setAccountWho = Label(LabelRole.Body, Session.Current != null ? Session.Current.Email : L10n.T("acct.signedout"));
+            _setAccountWho.TextAlign = ContentAlignment.MiddleRight;
+            _setGoogleId = Field("1234567890-abc.apps.googleusercontent.com");
+            _setGoogleId.Value = GoogleSignIn.ClientId();
+            /* A "Desktop app" client comes with a secret. Google accepts the code exchange with
+               PKCE alone, but sending the secret too is what Google's own sample does, so it is
+               worth a field - it removes a whole class of "invalid_request" failures. */
+            _setGoogleSecret = Field("GOCSPX-…  (optional)");
+            _setGoogleSecret.Value = string.IsNullOrWhiteSpace(_settings.GoogleClientSecret)
+                ? GoogleSignIn.DefaultClientSecret : _settings.GoogleClientSecret;
+            _setSecurity = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.security"), Radius = 4, Height = Ui.S(33) };
+            /* The Google client id is the only setting that cannot be pre-filled by the app,
+               so it gets a guided setup and a button that actually runs the flow and reports
+               what Google said. Without those two, a wrong id just looks like a dead button. */
+            _setGoogleGuide = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "Set up", Radius = 4, Height = Ui.S(33), Tip = "How to create the OAuth client id" };
+            _setGoogleTest = new JBButton { Kind = BtnKind.Soft, Icon = "check", Text = "Test", Radius = 4, Height = Ui.S(33), Tip = "Run the real Google sign-in now" };
+            _setGoogleGuide.Click += delegate { GoogleSetupHelp(); };
+            _setGoogleTest.Click += delegate { TestGoogleSignIn(); };            _setSignOut = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("set.row.signout"), Radius = 4, Height = Ui.S(33) };
+            _setSecurity.Click += delegate
+            {
+                if (Session.Current == null) { Toast("Sign in first.", ToastKind.Error); return; }
+                using (var dlg = new SecurityDialog(Session.Current.Email)) dlg.ShowDialog(this);
+            };
+            _setSignOut.Click += delegate
+            {
+                if (MessageBox.Show(this, "Sign out of this device?\r\nYour profiles stay where they are.",
+                        "Sign out", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                Session.SignOut();
+                Application.Restart();
+                Environment.Exit(0);
+            };
+
+            var account = Card("set.account");
+            Row(account, "set.row.signed", null, _setAccountWho);
+            Row(account, "set.row.google", new[] { Ui.S(360), Ui.S(96), Ui.S(84) }, _setGoogleId, _setGoogleGuide, _setGoogleTest);
+            Row(account, "set.row.gsecret", new[] { Ui.S(360) }, _setGoogleSecret);
+            Row(account, "set.row.security", new[] { Ui.S(104), Ui.S(88) }, _setSecurity, _setSignOut);
 
             foreach (var c in _setCards) page.Controls.Add(c.Panel);
         }
@@ -1267,6 +1517,336 @@ namespace JoeBrowser
             }
         }
 
+        /* ------------------------------------------------------------------ *
+         * Google sign-in setup. The OAuth client id can only be created by the
+         * owner of the Google account, so the app explains the four console
+         * steps and then proves the result by running the real flow.
+         * ------------------------------------------------------------------ */
+
+        private void GoogleSetupHelp()
+        {
+            using (var dlg = new ToolDialog("Set up Google sign-in", "Open Google Cloud", "Close", 620, 470))
+            {
+                dlg.AddNote("1.  Create a project \u2014 any name.");
+                dlg.AddNote("2.  OAuth consent screen \u2192 External \u2192 add your address as a test user.");
+                dlg.AddNote("3.  Credentials \u2192 Create credentials \u2192 OAuth client ID \u2192 Desktop app.");
+                dlg.AddNote("4.  Paste the client ID and secret here.");
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                    OpenUrl(GoogleSignIn.ConsoleCredentialsUrl);
+            }
+        }
+
+        private async void TestGoogleSignIn()
+        {
+            string id = (_setGoogleId.Value ?? "").Trim();
+            if (!GoogleSignIn.LooksValid(id))
+            {
+                MessageBox.Show(this,
+                    "Paste a Google OAuth client id first. It looks like\r\n\r\n" +
+                    "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com",
+                    "Test Google sign-in", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                _setGoogleId.Box.Focus();
+                return;
+            }
+
+            /* The test has to run against exactly what the sign-in gate will read, so the id is
+               saved before the flow starts rather than after it succeeds. */
+            _settings.GoogleClientId = id;
+            _settings.GoogleClientSecret = (_setGoogleSecret.Value ?? "").Trim();
+            try { _store.SaveSettings(_settings); } catch { }
+
+            _setGoogleTest.Enabled = false;
+            _setGoogleTest.Text = "Testing\u2026";
+            _setGoogleTest.Invalidate();
+            GoogleResult result;
+            try
+            {
+                result = await Task.Run(new Func<GoogleResult>(delegate { return GoogleSignIn.SignIn(id); }));
+            }
+            finally
+            {
+                _setGoogleTest.Enabled = true;
+                _setGoogleTest.Text = "Test";
+                _setGoogleTest.Invalidate();
+            }
+
+            if (result.Ok)
+            {
+                Toast("Google sign-in works \u2014 " + result.Identity.Email, ToastKind.Success);
+                MessageBox.Show(this,
+                    "Google sign-in works.\r\n\r\nSigned in as: " + result.Identity.Email +
+                    (string.IsNullOrEmpty(result.Identity.Name) ? "" : "\r\nName: " + result.Identity.Name),
+                    "Test Google sign-in", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show(this, result.Message + "\r\n\r\nError code: " + result.Code,
+                    "Test Google sign-in", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        /* ------------------------------------------------------------------ *
+         * Plan, limits and crypto payment.
+         * ------------------------------------------------------------------ */
+
+        /// <summary>Free plan caps the number of profiles; Pro does not.</summary>
+        private bool AllowAnotherProfile()
+        {
+            if (Entitlements.ProfileSlotsLeft(_profiles.Count) >= 1) return true;
+            OfferUpgrade(Entitlements.ProfileReason(_profiles.Count));
+            return false;
+        }
+
+        /// <summary>
+        /// Asks for <paramref name="adding"/> new profiles at once. Returns how many are allowed
+        /// and says so when the plan cannot take them all.
+        /// </summary>
+        private int AllowProfiles(int adding)
+        {
+            int left = Entitlements.ProfileSlotsLeft(_profiles.Count);
+            if (left >= adding) return adding;
+            if (left <= 0)
+            {
+                OfferUpgrade(Entitlements.ProfileReason(_profiles.Count));
+                return 0;
+            }
+            Toast("Free plan: " + left + " more profile" + (left == 1 ? "" : "s") + " available", ToastKind.Info);
+            return left;
+        }
+
+        /// <summary>Free plan runs one browser at a time.</summary>
+        private bool AllowAnotherBrowser()
+        {
+            int running = 0;
+            foreach (var s in _sessions.Values) if (s.IsRunning) running++;
+            if (Entitlements.ConcurrentSlotsLeft(running) >= 1) return true;
+            OfferUpgrade(Entitlements.ConcurrentReason());
+            return false;
+        }
+
+        /// <summary>Refuses a Pro-only tool on the free plan and offers the upgrade.</summary>
+        private bool RequirePro(string feature)
+        {
+            if (Entitlements.Allows(feature)) return true;
+            OfferUpgrade(Entitlements.Reason(feature));
+            return false;
+        }
+
+        /// <summary>
+        /// Re-reads the plan and updates everything that depends on it. One method rather than
+        /// scattered calls: a lock that is set in one place and not another is a bug that only
+        /// shows up on the machine of the person who just paid.
+        /// </summary>
+        private void RefreshPlanState()
+        {
+            _upgradePage.RefreshPlan();
+            if (_toolsPage != null) _toolsPage.SetLocked("proxy", !Entitlements.IsPro);
+            Invalidate();
+        }
+
+        private void OfferUpgrade(string why)
+        {
+            if (ConfirmForm.Ask(this, "Free plan", why,
+                    "Everything else in the app stays available on the free plan.",
+                    "See the plan", BtnKind.Primary))
+                SetPage(7);
+            else
+                Toast("Free plan: " + Entitlements.FreeProfiles + " profiles, one open at a time", ToastKind.Info);
+        }
+
+        private void PlanAction(string key)
+        {
+            if (key == "copy")
+            {
+                var inv = _upgradePage.Current;
+                if (inv == null) return;
+                try { Clipboard.SetText(inv.Coin.Address); Toast("Address copied", ToastKind.Success); }
+                catch (Exception ex) { Log.Error("Clipboard", ex); Toast("Could not copy", ToastKind.Error); }
+                return;
+            }
+            if (key == "restore")
+            {
+                RestorePurchase();
+                return;
+            }
+            if (key == "terms")
+            {
+                ShowTerms();
+                return;
+            }
+            if (key == "invite")
+            {
+                try
+                {
+                    Clipboard.SetText(Referral.Invite());
+                    Toast("Invite copied \u2014 your code is " + Referral.MyCode, ToastKind.Success);
+                }
+                catch (Exception ex) { Log.Error("Clipboard", ex); Toast("Could not copy", ToastKind.Error); }
+                return;
+            }
+            if (key == "claim")
+            {
+                ClaimReferral();
+                return;
+            }
+            if (key == "check")
+            {
+                /* An expired session cannot be paid into, so the button becomes "New session". */
+                if (_upgradePage.Current == null || _upgradePage.Current.Left <= TimeSpan.Zero)
+                {
+                    if (_upgradePage.Selected == null) return;
+                    _upgradePage.NewInvoice(_upgradePage.Selected);
+                    _payTicks = 0;
+                    Toast("New 30-minute session at the current rate", ToastKind.Info);
+                    return;
+                }
+                var _ = CheckPaymentAsync();
+            }
+        }
+
+        /// <summary>
+        /// The payment terms, shown before the first payment. The same text is reachable later
+        /// from the Terms link, so nobody has to accept something they cannot re-read.
+        /// </summary>
+        /// <summary>
+        /// Redeems a receipt a referred friend sent. The transaction is checked on the chain
+        /// before any days are added, so a receipt cannot simply be typed out.
+        /// </summary>
+        private void ClaimReferral()
+        {
+            using (var dlg = new ToolDialog("Claim a referral", "Claim", "Cancel", 560, 400))
+            {
+                dlg.AddNote("Paste the receipt your friend sent after their payment. It is checked "
+                          + "on the chain before the days are added.");
+                var box = dlg.AddField("RECEIPT", "", "JBR1.JB7K2M4Q.bsc.0x\u2026", "copy", true, 74);
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+                bool credited;
+                string message = Referral.Claim(box.Value, out credited);
+                RefreshPlanState();
+                MessageBox.Show(this, message, credited ? "Referral claimed" : "Referral",
+                    MessageBoxButtons.OK, credited ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            }
+        }
+
+        /// <summary>
+        /// After a payment, a referred user gets the receipt to send on. It is only offered when
+        /// they actually entered somebody's code, so nobody is shown a receipt that means nothing.
+        /// </summary>
+        private void OfferReferralReceipt(Invoice inv, string txId)
+        {
+            string receipt = Referral.BuildReceipt(inv == null ? "" : inv.Coin.Chain, txId);
+            if (string.IsNullOrEmpty(receipt)) return;
+
+            using (var dlg = new ToolDialog("Your referral receipt", "Copy", "Close", 600, 380))
+            {
+                dlg.AddNote("Send this to " + Referral.MyReferrer() + " so they receive "
+                          + Referral.Days + " days. One payment, one receipt.");
+                var box = dlg.AddField("RECEIPT", receipt, "", "copy", true, 74);
+                box.Box.ReadOnly = true;
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    try { Clipboard.SetText(receipt); Toast("Receipt copied", ToastKind.Success); }
+                    catch (Exception ex) { Log.Error("Clipboard", ex); }
+                }
+            }
+        }
+
+        private void ShowTerms()
+        {
+            using (var dlg = new ToolDialog("Payment terms", "I accept", "Cancel", 660, 580))
+            {
+                dlg.AddNote("Version " + Terms.Version + "  \u00b7  crypto payments are final.");
+                foreach (var s in Terms.Sections())
+                {
+                    dlg.AddSection(s.Title.ToUpperInvariant());
+                    var body = new JBLabel(LabelRole.Body, s.Body);
+                    body.Wrap = true;
+                    body.TextAlign = ContentAlignment.TopLeft;
+                    dlg.AddRow(null, body, Ui.S(74));
+                }
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    _upgradePage.AcceptTerms();
+                    _payTicks = 0;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Reads the chain for the open invoice. Deliberately not a "trust the button" flow:
+        /// the amount, the block time and the transaction id are all checked, and a hash that
+        /// has already paid once is refused.
+        /// </summary>
+        private async Task CheckPaymentAsync(bool quiet = false)
+        {
+            var inv = _upgradePage.Current;
+            if (inv == null || _payBusy) return;
+            if (inv.Left <= TimeSpan.Zero)
+            {
+                _upgradePage.SetStatus("That session expired. Pick a coin to start a new one.", Theme.Danger);
+                return;
+            }
+
+            _payBusy = true;
+            _upgradePage.SetBusy(true);
+            if (!quiet) _upgradePage.SetStatus("Reading the " + inv.Coin.Network + " network\u2026", Theme.TextDim);
+            PaymentCheck result;
+            try
+            {
+                result = await Task.Run(new Func<PaymentCheck>(delegate { return Payments.Check(inv); }));
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Payment check", ex);
+                result = PaymentCheck.No("Could not reach the network. Try again in a moment.");
+            }
+            finally
+            {
+                _payBusy = false;
+                _upgradePage.SetBusy(false);
+            }
+
+            if (result.Found)
+            {
+                if (Plan.HasSpent(result.TxId))
+                {
+                    _upgradePage.SetStatus("That transaction has already been used.", Theme.Danger);
+                    return;
+                }
+                Plan.Activate(result.TxId, inv.Coin.Key + " " + Invoice.Fmt(result.Amount) + " " +
+                    inv.Coin.Symbol + "  tx " + result.TxId);
+                Plan.ClearPending();
+                RefreshPlanState();
+                _upgradePage.SetStatus("Payment confirmed. Pro is active until " +
+                    (Plan.Until.HasValue ? Plan.Until.Value.ToLocalTime().ToString("d MMMM") : "next month") + ".",
+                    Theme.Success);
+                Toast("Payment confirmed \u2014 Pro unlocked", ToastKind.Success);
+                Invalidate();
+                OfferReferralReceipt(inv, result.TxId);
+                return;
+            }
+
+            /* A background poll only speaks when it has something to say. */
+            if (!quiet || result.Pending) _upgradePage.SetStatus(result.Message, result.Pending ? Theme.Accent : Theme.TextDim);
+        }
+
+        private void RestorePurchase()
+        {
+            var history = Plan.History();
+            if (Plan.IsPro)
+            {
+                MessageBox.Show(this, "Pro is active.\r\n\r\n" + Plan.Summary() +
+                    (history.Count > 0 ? "\r\n\r\nLast payment: " + history[history.Count - 1] : ""),
+                    "Plan", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            MessageBox.Show(this,
+                "Pro is tied to this Windows user.\r\n\r\nReinstall and sign in to the same account to get it back. " +
+                "A transaction can never unlock twice.",
+                "Restore a purchase", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
         private void UpdateBrowserInfo()
         {
             if (_setBrowserInfo == null) return;
@@ -1286,6 +1866,18 @@ namespace JoeBrowser
             _settings.DefaultStartUrl = string.IsNullOrEmpty(url) ? "https://www.google.com" : url;
             _settings.ThemeMode = Theme.Dark ? 1 : 2;
             _settings.DefaultGroup = (_setDefaultGroup.Value ?? "").Trim();
+            string clientId = (_setGoogleId.Value ?? "").Trim();
+            /* A client id that is not a client id produces an opaque "invalid_client" from
+               Google later. Catch it at the point where it was typed instead. */
+            if (clientId.Length > 0 && !clientId.EndsWith(".apps.googleusercontent.com", StringComparison.OrdinalIgnoreCase))
+            {
+                Toast("That does not look like a Google OAuth client id (it ends with .apps.googleusercontent.com)", ToastKind.Warn);
+                _setGoogleId.Box.Focus();
+                _setGoogleId.Box.SelectAll();
+                return;
+            }
+            _settings.GoogleClientId = clientId;
+            _settings.GoogleClientSecret = (_setGoogleSecret.Value ?? "").Trim();
             _settings.EnableExtensions = _setExtensions.Checked;
             _settings.EnableCustomExtensions = _setCustomExt.Checked;
             _settings.UseTrash = _setTrash.Checked;
@@ -1303,6 +1895,9 @@ namespace JoeBrowser
                 try { _store.SaveSettings(_settings); } catch { }
             }
             _themeSwitch.Invalidate();
+            /* Pages paint from Theme.* live, but their BackColor and a few cached brushes are
+               captured at construction, so a theme flip has to walk the tree once. */
+            Theme.Restyle(this);
             LayoutAll();
             Invalidate();
         }
@@ -1341,8 +1936,10 @@ namespace JoeBrowser
                     break;
                 case 1: title = L10n.T("header.proxies"); sub = L10n.T("sub.proxies"); break;
                 case 2: title = L10n.T("header.extensions"); sub = L10n.T("sub.extensions"); break;
-                case 3: title = L10n.T("header.settings"); sub = L10n.T("sub.settings"); break;
-                case 4: title = L10n.T("header.tools"); sub = L10n.T("sub.tools"); break;
+                case 3: title = L10n.T("header.browsers"); sub = L10n.T("sub.browsers"); break;
+                case 4: title = L10n.T("header.settings"); sub = L10n.T("sub.settings"); break;
+                case 5: title = L10n.T("header.tools"); sub = L10n.T("sub.tools"); break;
+                case 7: title = L10n.T("header.plan"); sub = L10n.T("sub.plan"); break;
                 default: title = L10n.T("header.about"); sub = L10n.T("sub.about"); break;
             }
 
@@ -1368,16 +1965,23 @@ namespace JoeBrowser
             int sb = Ui.S(SidebarW);
             int headerH = Ui.S(HeaderH);
 
-            // navbar rows
+            // navbar rows, grouped the way a workspace actually reads: day-to-day work first,
+            // configuration second.
             int navX = Ui.S(10), navW = sb - Ui.S(20);
-            _themeSwitch.SetBounds(navX, Ui.S(64), navW, Ui.S(42));
-            int navY = Ui.S(122), navStep = Ui.S(45);
+            /* The theme switch belongs with the app chrome, not with navigation: at the top of
+               the rail it competed with the primary destinations for attention. */
+            _themeSwitch.SetBounds(navX, h - Ui.S(54), navW, Ui.S(38));
+            int navY = Ui.S(130), navStep = Ui.S(44);
+            _navGroupWorkspace.SetBounds(navX + Ui.S(8), Ui.S(112), navW, Ui.S(16));
             _navProfiles.SetBounds(navX, navY, navW, Ui.S(40));
             _navProxies.SetBounds(navX, navY + navStep, navW, Ui.S(40));
             _navExtensions.SetBounds(navX, navY + navStep * 2, navW, Ui.S(40));
-            _navSettings.SetBounds(navX, navY + navStep * 3, navW, Ui.S(40));
-            _navTools.SetBounds(navX, navY + navStep * 4, navW, Ui.S(40));
-            _navAbout.SetBounds(navX, navY + navStep * 5, navW, Ui.S(40));
+            _navBrowsers.SetBounds(navX, navY + navStep * 3, navW, Ui.S(40));
+            _navGroupSystem.SetBounds(navX + Ui.S(8), navY + navStep * 4 + Ui.S(2), navW, Ui.S(16));
+            _navSettings.SetBounds(navX, navY + navStep * 4 + Ui.S(22), navW, Ui.S(40));
+            _navTools.SetBounds(navX, navY + navStep * 5 + Ui.S(22), navW, Ui.S(40));
+            _navAbout.SetBounds(navX, navY + navStep * 6 + Ui.S(22), navW, Ui.S(40));
+            _navPlan.SetBounds(navX, navY + navStep * 7 + Ui.S(22), navW, Ui.S(40));
 
             // caption buttons, flush with the top right corner
             int cw = Ui.S(46), ch = Ui.S(32);
@@ -1420,11 +2024,13 @@ namespace JoeBrowser
             _toolsPage.SetBounds(contentX, headerH, contentW, pageH);
             _proxyPage.SetBounds(contentX, headerH, contentW, pageH);
             _extensionPage.SetBounds(contentX, headerH, contentW, pageH);
+            _browsersPage.SetBounds(contentX, headerH, contentW, pageH);
+            _upgradePage.SetBounds(contentX, headerH, contentW, pageH);
             _aboutPage.SetBounds(contentX, headerH, contentW, pageH);
             LayoutAbout();
 
             int tw = Math.Min(Ui.S(560), Math.Max(Ui.S(240), contentW - Ui.S(64)));
-            _toast.SetBounds(contentX + (contentW - tw) / 2, h - Ui.S(60), tw, Ui.S(44));
+            _toast.Place(contentX + (contentW - tw) / 2, h - Ui.S(16), tw);
 
             ResumeLayout(false);
             Invalidate();
@@ -1577,7 +2183,7 @@ namespace JoeBrowser
         {
             _page = page;
             SuspendLayout();
-            JBButton[] navs = { _navProfiles, _navProxies, _navExtensions, _navSettings, _navTools, _navAbout };
+            JBButton[] navs = { _navProfiles, _navProxies, _navExtensions, _navBrowsers, _navSettings, _navTools, _navAbout, _navPlan };
             for (int i = 0; i < navs.Length; i++)
             {
                 navs[i].Selected = i == page;
@@ -1591,16 +2197,18 @@ namespace JoeBrowser
             _emptyPanel.Visible = profiles && ShownCount() == 0;
             _proxyPage.Visible = page == 1;
             _extensionPage.Visible = page == 2;
-            _settingsPage.Visible = page == 3;
-            _toolsPage.Visible = page == 4;
-            _aboutPage.Visible = page == 5;
+            _browsersPage.Visible = page == 3;
+            _settingsPage.Visible = page == 4;
+            _toolsPage.Visible = page == 5;
+            _aboutPage.Visible = page == 6;
+            _upgradePage.Visible = page == 7;
             _search.Visible = profiles;
             _sortBtn.Visible = profiles;
             _newBtn.Visible = profiles;
-            _saveSettings.Visible = page == 3;
+            _saveSettings.Visible = page == 4;
             _themeSwitch.Visible = true;
 
-            Control[] pages = { _host, _emptyPanel, _proxyPage, _extensionPage, _settingsPage, _toolsPage, _aboutPage };
+            Control[] pages = { _host, _emptyPanel, _proxyPage, _extensionPage, _browsersPage, _settingsPage, _toolsPage, _aboutPage, _upgradePage };
             foreach (var p in pages) if (p.Visible) p.BringToFront();
             _toast.BringToFront();
 
@@ -1616,7 +2224,23 @@ namespace JoeBrowser
             }
             else if (page == 3)
             {
+                _browsersPage.Rescan();
+            }
+            else if (page == 7)
+            {
+                RefreshPlanState();
+                /* Re-open the session that was live when the app last closed, so a payment made
+                   just before closing is still watched instead of being treated as too old. */
+                _upgradePage.RestorePending();
+                _payTicks = 0;
+                if (!_planTimer.Enabled) _planTimer.Start();
+            }
+            else if (page == 4)
+            {
                 _setBrowserPath.Value = _settings.BrowserPath ?? "";
+                _setGoogleId.Value = GoogleSignIn.ClientId();
+                _setGoogleSecret.Value = string.IsNullOrWhiteSpace(_settings.GoogleClientSecret)
+                    ? GoogleSignIn.DefaultClientSecret : _settings.GoogleClientSecret;
                 _setStartUrl.Value = _settings.DefaultStartUrl ?? "";
                 _setStoragePath.Text = AppPaths.Root;
                 _setDefaultGroup.Value = _settings.DefaultGroup ?? "";
@@ -1656,6 +2280,9 @@ namespace JoeBrowser
                 card.CloseRequested += delegate { CloseSession(id); };
                 card.EditRequested += delegate { EditProfile(id); };
                 card.ProxyRequested += delegate { EditProfile(id, 3); };
+                card.RenameRequested += delegate { RenameProfile(id); };
+                card.ClearCacheRequested += delegate { ClearProfileData(id); };
+                card.LeakTestRequested += delegate { RunLeakTest(id); };
                 card.DuplicateRequested += delegate { DuplicateProfile(id); };
                 card.DeleteRequested += delegate { DeleteProfile(id); };
                 card.PickToggled += delegate { TogglePick(id, (ModifierKeys & Keys.Shift) != 0); };
@@ -1721,6 +2348,7 @@ namespace JoeBrowser
 
         private void NewProfile()
         {
+            if (!AllowAnotherProfile()) return;
             var p = new Profile();
             FingerprintFactory.Regenerate(p.Fp, "System default", null);
             using (var dlg = new EditorForm(p, true, _settings))
@@ -1756,12 +2384,98 @@ namespace JoeBrowser
             }
         }
 
-        private void DuplicateProfile(string id) { DuplicateProfile(id, true); }
+        /// <summary>Quick rename, so changing the label never means opening the whole editor.</summary>
+        private void RenameProfile(string id)
+        {
+            var p = _profiles.FirstOrDefault(x => x.Id == id);
+            if (p == null) return;
+            using (var dlg = new ToolDialog("Rename profile", "Rename", "Cancel", 460, 260))
+            {
+                var field = dlg.AddField("PROFILE NAME", p.Name, "Name this profile", "user", false, 40);
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                string name = (field.Value ?? "").Trim();
+                if (name.Length == 0) return;
+                p.Name = name;
+                try { _store.Save(p); }
+                catch (Exception ex)
+                {
+                    Log.Error("Rename failed", ex);
+                    Toast("Could not rename the profile", ToastKind.Error);
+                    return;
+                }
+                BrowserSession s;
+                if (_sessions.TryGetValue(id, out s) && s.IsRunning) s.UpdateProfile(p);
+                ReloadCards(true);
+                Toast("Renamed to " + name, ToastKind.Success);
+            }
+        }
 
+        /// <summary>
+        /// Clears this profile's cache - or its cache and cookies when it is closed. An open
+        /// profile is cleaned through the browser itself, so the tab survives.
+        /// </summary>
+        private async void ClearProfileData(string id)
+        {
+            var p = _profiles.FirstOrDefault(x => x.Id == id);
+            if (p == null) return;
+            BrowserSession s;
+            _sessions.TryGetValue(id, out s);
+            bool live = s != null && s.IsRunning;
+            long size = live ? ProfileData.CacheSize(p) : ProfileData.Size(p);
+
+            string title = live ? "Clear cache" : "Clear cache and cookies";
+            string body = live
+                ? "Clear the cached files of this open profile?\r\nThe tab stays open and you stay signed in."
+                : "Clear cached files and cookies for this profile?\r\n" + ProfileData.Human(size) +
+                  " will be removed and its sites will sign you out.";
+            if (!ConfirmForm.Ask(this, title, body, null, "Clear", BtnKind.Primary)) return;
+
+            try
+            {
+                long freed = await ProfileData.ClearAsync(p, live ? ClearScope.Cache : ClearScope.SiteData, s);
+                Toast(live ? "Cache cleared" : "Cleared " + ProfileData.Human(freed), ToastKind.Success);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Clear profile data failed", ex);
+                Toast(ex.Message, ToastKind.Error);
+            }
+        }
+
+        /// <summary>Reads the live tab back and reports what a fingerprint page would see.</summary>
+        private async void RunLeakTest(string id)
+        {
+            var p = _profiles.FirstOrDefault(x => x.Id == id);
+            if (p == null) return;
+            BrowserSession s;
+            if (!_sessions.TryGetValue(id, out s) || s == null || !s.IsRunning)
+            {
+                Toast("Open the profile first, then run the check.", ToastKind.Info);
+                return;
+            }
+            Toast("Reading the live session\u2026", ToastKind.Info);
+            LeakResult result;
+            try { result = await LeakTest.RunAsync(s, p.Fp); }
+            catch (Exception ex)
+            {
+                Log.Error("Leak test failed", ex);
+                Toast("The check could not run: " + ex.Message, ToastKind.Error);
+                return;
+            }
+            using (var dlg = new LeakForm(result, p.Name, s)) dlg.ShowDialog(this);
+            if (!string.IsNullOrEmpty(result.Error)) Toast(result.Error, ToastKind.Warn);
+            else if (result.Clean) Toast("No leak found in " + result.Total + " checks", ToastKind.Success);
+            else Toast(result.Verdict, ToastKind.Warn);
+        }
+
+        private void DuplicateProfile(string id) { DuplicateProfile(id, true); }
         private void DuplicateProfile(string id, bool announce)
         {
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
+            /* The bulk path is clamped once, up front: _profiles does not grow inside the loop,
+               so re-checking here would let a batch overshoot the cap. */
+            if (announce && !AllowAnotherProfile()) return;
             var copy = p.Copy(true);
             copy.Name = p.Name + " copy";
             copy.Proxy.Password = p.Proxy.Password;
@@ -1931,10 +2645,20 @@ namespace JoeBrowser
 
         private void BulkDuplicate()
         {
-            foreach (string id in _picks.ToArray()) DuplicateProfile(id, false);
+            var ids = _picks.ToArray();
+            int allowed = AllowProfiles(ids.Length);
+            if (allowed <= 0) { ClearPicks(); return; }
+
+            int made = 0;
+            foreach (string id in ids)
+            {
+                if (made >= allowed) break;
+                DuplicateProfile(id, false);
+                made++;
+            }
             ReloadCards(true);
             ClearPicks();
-            Toast("Profiles duplicated", ToastKind.Success);
+            Toast(made + (made == 1 ? " profile duplicated" : " profiles duplicated"), ToastKind.Success);
         }
 
         private void BulkDelete()
@@ -2015,6 +2739,7 @@ namespace JoeBrowser
             BrowserSession existing;
             if (_sessions.TryGetValue(id, out existing)) { existing.Focus(); return; }
             if (_launching.Contains(id)) return;
+            if (!AllowAnotherBrowser()) return;
 
             _launching.Add(id);
             RefreshCardState(id);
@@ -2034,6 +2759,21 @@ namespace JoeBrowser
                 var session = await BrowserSession.LaunchAsync(p, _settings.DefaultStartUrl, _settings.BrowserPath, _settings);
                 _sessions[id] = session;
                 session.Closed += delegate { SessionClosed(id); };
+                /* A proxy that dies mid-session no longer freezes the tabs: the relay moves to a
+                   direct connection and says so, loudly, because that means the real IP is out. */
+                session.ProxyFallback += delegate(string endpoint)
+                {
+                    if (IsDisposed) return;
+                    try
+                    {
+                        BeginInvoke(new Action(delegate
+                        {
+                            Toast("Proxy " + endpoint + " stopped responding. \u201c" + p.Name +
+                                  "\u201d is now on a direct connection \u2014 the real IP is visible.", ToastKind.Error);
+                        }));
+                    }
+                    catch { }
+                };
                 _store.Touch(p);
                 if (_cards.ContainsKey(id))
                 {
@@ -2062,6 +2802,16 @@ namespace JoeBrowser
                         return;
                     }
                 }
+                else if (DiskSpace.IsOutOfSpace(ex))
+                {
+                    /* The full disk has a one-click answer: the profile caches are the app's
+                       own data and always safe to drop. Clean now, say so, and the user can
+                       simply press Open again. */
+                    long freed = DiskSpace.AutoCleanCaches();
+                    Toast(freed > 0
+                        ? "The disk was full \u2014 " + DiskSpace.Human(freed) + " of cache was cleared. Try opening the profile again."
+                        : "The disk is full. Free some space or clear cached files in Settings.", ToastKind.Error);
+                }
                 else
                 {
                     Toast(ShortError(ex), ToastKind.Error);
@@ -2084,6 +2834,7 @@ namespace JoeBrowser
             }
 
             var dlg = new DownloadDialog("Get " + label);
+            dlg.CenterOn(this);
             dlg.Show(this);
             dlg.Activate();
             try
@@ -2148,6 +2899,9 @@ namespace JoeBrowser
                 Invalidate();
             }
             catch { }
+            /* A profile just released its cache handles - the moment a low disk can take the
+               space back. Fire-and-forget: the clean skips running profiles and never logs out. */
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate { DiskSpace.AutoCleanCaches(); });
         }
 
         private void Toast(string message, ToastKind kind)
@@ -2255,7 +3009,7 @@ namespace JoeBrowser
                 new[] { "proxy", L10n.T("about.f4"), L10n.T("about.f4d") },
                 new[] { "laptop", L10n.T("about.f5"), L10n.T("about.f5d") },
                 new[] { "route", L10n.T("about.f6"), L10n.T("about.f6d") },
-                new[] { "apps", L10n.T("about.f7"), L10n.T("about.f7d") },
+                new[] { "extension", L10n.T("about.f7"), L10n.T("about.f7d") },
                 new[] { "shield", L10n.T("about.f8"), L10n.T("about.f8d") }
             };
 
@@ -2270,15 +3024,23 @@ namespace JoeBrowser
                 Ui.Stroke(g, r, Ui.S(8), Theme.Line, 1f);
 
                 float chip = Ui.S(28);
-                var cr = new RectangleF(r.X + Ui.S(16), r.Y + Ui.S(16), chip, chip);
+                /* The block is centred in the tile: pinning the description to a fixed offset left
+                   a gap under the title and a different amount of padding on every row. */
+                float titleRow = Math.Max(chip, Theme.H3.GetHeight(g));
+                float descW = r.Width - Ui.S(32);
+                float descH = Ui.MeasureWrapped(g, features[i][2], Theme.Caption, descW, 2);
+                float blockH = titleRow + Ui.S(8) + descH;
+                float top = r.Y + Math.Max(Ui.S(12), (tileH - blockH) / 2f);
+
+                var cr = new RectangleF(r.X + Ui.S(16), top, chip, chip);
                 Ui.Fill(g, cr, Ui.S(6), Theme.AccentOnBg);
                 float ic = Ui.S(17);
                 Icons.Draw(g, features[i][0], new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
 
                 Ui.Text(g, features[i][1], Theme.H3, Theme.Text, cr.Right + Ui.S(10),
                     cr.Y + (chip - Theme.H3.GetHeight(g)) / 2f, r.Width - (cr.Right - r.X) - Ui.S(18));
-                Ui.Text(g, features[i][2], Theme.Caption, Theme.TextDim, r.X + Ui.S(16), r.Y + Ui.S(56),
-                    r.Width - Ui.S(32), "left", 2);
+                Ui.Text(g, features[i][2], Theme.Caption, Theme.TextDim, r.X + Ui.S(16), top + titleRow + Ui.S(8),
+                    descW, "left", 2);
             }
 
             float afterTiles = tileY + (float)Math.Ceiling(features.Length / (double)cols) * (tileH + gap);

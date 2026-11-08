@@ -175,12 +175,21 @@ namespace JoeBrowser
         /// Custom folders are copied into the profile-neutral extensions root so the command
         /// line never contains a path with a comma (Chrome's separator).
         /// </summary>
-        public static List<string> EnabledFolders(ToolConfig tools, bool masterSwitch, bool customExtensions = true)
+        public static List<string> EnabledFolders(ToolConfig tools, bool masterSwitch, bool customExtensions = true, bool hasProxy = true)
         {
             var result = new List<string>();
             if (!masterSwitch || tools == null) return result;
             EnsureAll();
+            /* The two store extensions requested for Chrome and Brave are fetched once into
+               the managed library. They load for every Chromium profile regardless of the
+               "custom extensions" switch, because they are shipped defaults, not user imports. */
+            try { ExtensionCatalog.EnsureDefaults(); } catch (Exception ex) { Log.Error("Default extensions", ex); }
+            foreach (string folder in ExtensionCatalog.DefaultFolders()) Add(result, folder);
             if (tools.HumanPaste) Add(result, Dir(HumanPaste));
+            /* The proxy watcher extension is always loaded so that adding a proxy to a running
+               profile works without a restart. It stays idle until the page runtime tells it
+               that a proxy is actually configured - on a direct connection it makes no
+               requests and shows nothing. */
             if (tools.ProxyWatch) Add(result, Dir(ProxyWatch));
             if (tools.EnableRightClick) Add(result, Dir(RightClickEnable));
 
@@ -237,7 +246,7 @@ namespace JoeBrowser
             sb.AppendLine("var CFG = {");
             sb.AppendLine("  human: " + (tools.HumanPaste ? "true" : "false") + ",");
             sb.AppendLine("  minDelay: " + minDelay + ", maxDelay: " + maxDelay + ",");
-            sb.AppendLine("  watch: " + (tools.ProxyWatch ? "true" : "false") + ",");
+            sb.AppendLine("  watch: " + ((tools.ProxyWatch && hasProxy) ? "true" : "false") + ",");
             sb.AppendLine("  hasProxy: " + (hasProxy ? "true" : "false") + ",");
             sb.AppendLine("  interval: " + interval + ",");
             sb.AppendLine("  rightClick: " + (tools.EnableRightClick ? "true" : "false") + ",");
@@ -260,42 +269,149 @@ namespace JoeBrowser
         /// <summary>Runtime shared by the injected script and the unpacked content scripts.</summary>
         public const string ToolRuntimeJs = @"
 /* ---------- Joe Browser tools runtime (first-party) ---------- */
-var JB = window.__JB_API__ = window.__JB_API__ || {};
+/* A named window property is the shortest detection shortcut there is, so the re-injection
+   guard is a symbol and the runtime API stays inside this closure. */
+var JB_GUARD = Symbol.for('jb.tools');
+try {
+  if (window[JB_GUARD]) return;
+  Object.defineProperty(window, JB_GUARD, { value: 1, configurable: true });
+} catch (e) {}
+var JB = {};
 var cfg = CFG;
 /* Keep the native method: the right-click unlocker below deliberately replaces
    preventDefault for page-driven events, but our own paste handler still needs it. */
 var nativePrevent = Event.prototype.preventDefault;
 
-function banner(title, body, tone, sticky){
+/* Windows 11 style notification stack: one card per event, newest at the bottom, so a
+   rotation notice is never overwritten by the back-online notice that follows it.
+   Neutral surface, one accent rule, an icon tile, a timestamp and a single quiet action. */
+function copyText(t){
   try {
-    var id = 'jb-banner';
-    var el = document.getElementById(id);
-    if (!el) {
-      if (!document.body) { document.addEventListener('DOMContentLoaded', function(){ banner(title, body, tone, sticky); }, {once:true}); return; }
-      el = document.createElement('div');
-      el.id = id;
-      el.setAttribute('style', 'position:fixed;z-index:2147483647;right:18px;bottom:18px;max-width:360px;' +
-        'font:13px/1.45 -apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:13px 15px;border-radius:10px;' +
-        'box-shadow:0 10px 34px rgba(0,0,0,.34);color:#fff;background:#1b2430;' +
-        'border-left:4px solid #3da9fc;opacity:.98;pointer-events:auto;');
-      document.body.appendChild(el);
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t); return; }
+  } catch(e) {}
+  try {
+    var ta = document.createElement('textarea');
+    ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  } catch(e) {}
+}
+
+function bannerHost(){
+  var host = document.getElementById('jb-banners');
+  if (!host) {
+    if (!document.body) return null;
+    host = document.createElement('div');
+    host.id = 'jb-banners';
+    host.setAttribute('style', 'position:fixed;z-index:2147483647;right:16px;bottom:16px;display:flex;' +
+      'flex-direction:column;gap:8px;width:372px;max-width:calc(100vw - 32px);pointer-events:none;' +
+      'text-align:left;direction:ltr;');
+    document.body.appendChild(host);
+  }
+  return host;
+}
+
+function stamp(){
+  try {
+    var d = new Date();
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
+  } catch(e) { return ''; }
+}
+
+function banner(title, body, tone, sticky, action){
+  try {
+    var host = bannerHost();
+    if (!host) {
+      document.addEventListener('DOMContentLoaded', function(){ banner(title, body, tone, sticky, action); }, { once: true });
+      return;
     }
-    el.style.borderLeftColor = tone === 'warn' ? '#ffb02e' : (tone === 'bad' ? '#ff5c5c' : '#3da9fc');
-    el.innerHTML = '';
+    var accent = tone === 'warn' ? '#f7b32b' : (tone === 'bad' ? '#e9494a' : '#4cc2ff');
+    var tint = tone === 'warn' ? 'rgba(247,179,43,.14)' : (tone === 'bad' ? 'rgba(233,73,74,.15)' : 'rgba(76,194,255,.14)');
+
+    var el = document.createElement('div');
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.setAttribute('style', 'position:relative;box-sizing:border-box;pointer-events:auto;overflow:hidden;' +
+      'text-align:left;direction:ltr;unicode-bidi:isolate;' +
+      'font:13px/1.45 ""Segoe UI Variable Text"",""Segoe UI"",system-ui,sans-serif;color:#fff;' +
+      'background:#202020;border:1px solid rgba(255,255,255,.09);border-radius:8px;' +
+      'box-shadow:0 14px 38px rgba(0,0,0,.46),0 2px 6px rgba(0,0,0,.28);' +
+      'transform:translateY(10px);opacity:0;transition:transform .18s ease,opacity .18s ease;');
+
+    var bar = document.createElement('div');
+    bar.setAttribute('style', 'height:3px;background:' + accent + ';');
+
+    var row = document.createElement('div');
+    row.setAttribute('style', 'display:flex;align-items:flex-start;gap:12px;padding:13px 14px 14px;');
+
+    var icon = document.createElement('div');
+    icon.textContent = tone === 'bad' ? '\u2715' : (tone === 'warn' ? '!' : '\u2713');
+    icon.setAttribute('style', 'flex:0 0 32px;width:32px;height:32px;border-radius:8px;display:flex;' +
+      'align-items:center;justify-content:center;font-size:15px;font-weight:600;color:' + accent + ';background:' + tint + ';');
+
+    var text = document.createElement('div');
+    text.setAttribute('style', 'flex:1 1 auto;min-width:0;');
+
     var h = document.createElement('div');
     h.textContent = title;
-    h.style.fontWeight = '600';
-    h.style.marginBottom = '4px';
+    h.setAttribute('style', 'font-size:13.5px;font-weight:600;letter-spacing:.1px;margin:0 0 3px;');
+
     var p = document.createElement('div');
     p.textContent = body;
-    p.style.opacity = '.86';
-    var x = document.createElement('span');
+    p.setAttribute('style', 'font-size:12px;line-height:1.5;color:rgba(255,255,255,.72);word-wrap:break-word;');
+
+    text.appendChild(h);
+    text.appendChild(p);
+
+    if (action && action.label) {
+      var act = document.createElement('button');
+      act.type = 'button';
+      act.textContent = action.label;
+      act.setAttribute('style', 'margin-top:9px;padding:4px 10px;border-radius:5px;border:1px solid rgba(255,255,255,.14);' +
+        'background:rgba(255,255,255,.06);color:rgba(255,255,255,.9);font:11.5px/1.4 ""Segoe UI"",sans-serif;cursor:pointer;');
+      act.onmouseenter = function(){ act.style.background = 'rgba(255,255,255,.12)'; };
+      act.onmouseleave = function(){ act.style.background = 'rgba(255,255,255,.06)'; };
+      act.onclick = function(){
+        try { if (action.onClick) action.onClick(); } catch(e) {}
+        act.textContent = 'Copied';
+        act.disabled = true;
+        setTimeout(function(){ if (act.parentNode) act.parentNode.removeChild(act); }, 1400);
+      };
+      text.appendChild(act);
+    }
+
+    var meta = document.createElement('div');
+    meta.textContent = stamp();
+    meta.setAttribute('style', 'margin-top:6px;font-size:11px;color:rgba(255,255,255,.42);font-variant-numeric:tabular-nums;');
+    text.appendChild(meta);
+
+    var x = document.createElement('button');
+    x.type = 'button';
     x.textContent = '\u00d7';
-    x.setAttribute('style', 'position:absolute;top:6px;right:10px;cursor:pointer;opacity:.6;font-size:17px');
-    x.onclick = function(){ el.remove(); };
-    el.appendChild(x); el.appendChild(h); el.appendChild(p);
-    clearTimeout(el.__timer);
-    if (!sticky) el.__timer = setTimeout(function(){ if (el.parentNode) el.remove(); }, 9000);
+    x.setAttribute('aria-label', 'Dismiss');
+    x.setAttribute('style', 'flex:0 0 auto;margin:-2px -2px 0 0;padding:0 2px;border:0;background:transparent;' +
+      'color:rgba(255,255,255,.5);font:16px/1 ""Segoe UI"",sans-serif;cursor:pointer;');
+    x.onmouseenter = function(){ x.style.color = 'rgba(255,255,255,.9)'; };
+    x.onmouseleave = function(){ x.style.color = 'rgba(255,255,255,.5)'; };
+    x.onclick = function(){ dismiss(); };
+
+    row.appendChild(icon); row.appendChild(text); row.appendChild(x);
+    el.appendChild(bar); el.appendChild(row);
+    host.appendChild(el);
+
+    /* A long session must not grow the stack without bound. */
+    while (host.children.length > 3) host.removeChild(host.firstChild);
+
+    requestAnimationFrame(function(){ el.style.transform = 'translateY(0)'; el.style.opacity = '1'; });
+
+    var timer = 0;
+    function dismiss(){
+      clearTimeout(timer);
+      try { el.style.opacity = '0'; el.style.transform = 'translateY(10px)'; } catch(e) {}
+      setTimeout(function(){ if (el.parentNode) el.parentNode.removeChild(el); }, 200);
+    }
+    if (!sticky) timer = setTimeout(dismiss, 9000);
   } catch(e) {}
 }
 JB.banner = banner;
@@ -312,12 +428,118 @@ function armPaste(){
 JB.armPaste = armPaste;
 function delay(base){ return cfg.minDelay + Math.random() * (cfg.maxDelay - cfg.minDelay) + base; }
 function wait(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
-function insertChar(ch){
-  try {
-    if (document.execCommand) return document.execCommand('insertText', false, ch);
-  } catch(e) {}
-  return false;
+/* A paste that only calls execCommand leaves zero keydown/keyup events behind, so a page that
+   counts keystrokes sees characters appear from nowhere - the classic automated-paste tell.
+   Each character now goes through the same order a physical key produces:
+   keydown -> keypress -> beforeinput -> DOM change -> input -> keyup, with the real key, code,
+   keyCode, charCode and shiftKey for the character. */
+var SHIFTED = {'!':'1','@':'2','#':'3','$':'4','%':'5','^':'6','&':'7','*':'8','(':'9',')':'0',
+  '_':'-','+':'=','{':'[','}':']','|':'\\',':':';','<':',','>':'.','?':'/','~':'`'};
+var PUNCT = {'`':'Backquote','-':'Minus','=':'Equal','[':'BracketLeft',']':'BracketRight',
+  '\\':'Backslash',';':'Semicolon',',':'Comma','.':'Period','/':'Slash'};
+var VK = {'Backquote':192,'Minus':189,'Equal':187,'BracketLeft':219,'BracketRight':221,
+  'Backslash':220,'Semicolon':186,'Quote':222,'Comma':188,'Period':190,'Slash':191};
+/* The two quote characters are built from char codes so this file needs no literal quotes. */
+SHIFTED[String.fromCharCode(34)] = String.fromCharCode(39);
+PUNCT[String.fromCharCode(39)] = 'Quote';
+
+function keyInfo(ch){
+  if (ch === ' ') return { key: ' ', code: 'Space', keyCode: 32, shift: false, printable: true };
+  if (ch === '\n') return { key: 'Enter', code: 'Enter', keyCode: 13, shift: false, printable: false };
+  if (ch === '\t') return { key: 'Tab', code: 'Tab', keyCode: 9, shift: false, printable: false };
+  var cc = ch.charCodeAt(0);
+  /* Outside ASCII there is no physical key. An IME reports keyCode 229 and an empty code,
+     which is exactly what a real non-Latin keystroke looks like. */
+  if (cc > 126 || cc < 32) return { key: ch, code: '', keyCode: 229, shift: false, printable: true };
+  var lower = ch.toLowerCase(), upper = ch.toUpperCase();
+  if (lower >= 'a' && lower <= 'z')
+    return { key: ch, code: 'Key' + upper, keyCode: upper.charCodeAt(0), shift: ch !== lower, printable: true };
+  if (ch >= '0' && ch <= '9')
+    return { key: ch, code: 'Digit' + ch, keyCode: cc, shift: false, printable: true };
+  if (SHIFTED[ch]) {
+    var base = SHIFTED[ch];
+    var code = PUNCT[base] || ((base >= '0' && base <= '9') ? 'Digit' + base : 'Key' + base.toUpperCase());
+    return { key: ch, code: code, keyCode: VK[code] || base.charCodeAt(0), shift: true, printable: true };
+  }
+  var pc = PUNCT[ch] || '';
+  return { key: ch, code: pc, keyCode: VK[pc] || cc, shift: false, printable: true };
 }
+
+function makeKeyEvent(type, info, charCode){
+  var ev;
+  try {
+    ev = new KeyboardEvent(type, {
+      key: info.key, code: info.code, location: 0,
+      ctrlKey: false, shiftKey: !!info.shift, altKey: false, metaKey: false,
+      repeat: false, isComposing: false, bubbles: true, cancelable: true, composed: true
+    });
+  } catch(e) {
+    try {
+      ev = document.createEvent('KeyboardEvent');
+      ev.initKeyboardEvent(type, true, true, window, info.key, 0, '', false, '');
+    } catch(_) { ev = document.createEvent('Event'); ev.initEvent(type, true, true); }
+  }
+  var kc = info.keyCode, isPress = type === 'keypress';
+  try { Object.defineProperty(ev, 'keyCode', { get: function(){ return kc; } }); } catch(e) {}
+  try { Object.defineProperty(ev, 'charCode', { get: function(){ return isPress ? (charCode || 0) : 0; } }); } catch(e) {}
+  try { Object.defineProperty(ev, 'which', { get: function(){ return isPress ? (charCode || 0) : kc; } }); } catch(e) {}
+  return ev;
+}
+
+/* React and Vue install their own value tracker on the instance. Assigning .value directly
+   updates the tracker first and the framework then sees no change, so the paste looks fine
+   but the state stays empty. Calling the prototype setter and dispatching InputEvent is the
+   path a real keystroke follows. */
+function setNativeValue(a, value, ch){
+  try {
+    var proto = (a.tagName === 'TEXTAREA') ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    var d = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (d && d.set) d.set.call(a, value); else a.value = value;
+  } catch(e) { try { a.value = value; } catch(_) {} }
+  try {
+    a.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: false, inputType: 'insertText', data: ch }));
+  } catch(e) {
+    try { a.dispatchEvent(new Event('input', { bubbles: true })); } catch(_) {}
+  }
+}
+
+function typeTarget(){
+  var a = document.activeElement;
+  if (a && a !== document.body && a !== document.documentElement) return a;
+  try {
+    var sel = window.getSelection();
+    if (sel && sel.anchorNode) {
+      var n = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+      if (n) return n;
+    }
+  } catch(e) {}
+  return a || document.body;
+}
+
+function insertAt(target, ch){
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+    var s = target.selectionStart == null ? target.value.length : target.selectionStart;
+    var e = target.selectionEnd == null ? s : target.selectionEnd;
+    setNativeValue(target, target.value.substring(0, s) + ch + target.value.substring(e), ch);
+    try { target.setSelectionRange(s + 1, s + 1); } catch(_) {}
+    return;
+  }
+  try { if (document.execCommand) document.execCommand('insertText', false, ch); } catch(e) {}
+}
+
+function typeChar(target, ch){
+  var info = keyInfo(ch);
+  var allowed = target.dispatchEvent(makeKeyEvent('keydown', info, 0));
+  if (allowed && info.printable) target.dispatchEvent(makeKeyEvent('keypress', info, ch.charCodeAt(0)));
+  if (allowed) {
+    try {
+      target.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: ch }));
+    } catch(e) {}
+    insertAt(target, ch);
+  }
+  target.dispatchEvent(makeKeyEvent('keyup', info, 0));
+}
+
 async function humanType(text){
   if (typing) return;
   typing = true;
@@ -326,17 +548,7 @@ async function humanType(text){
     var lastWasSpace = false;
     for (var i = 0; i < text.length; i++) {
       var ch = text.charAt(i);
-      var ok = insertChar(ch === '\n' ? '\n' : ch);
-      if (!ok) {
-        var a = document.activeElement;
-        if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) {
-          var s = a.selectionStart == null ? a.value.length : a.selectionStart;
-          var e = a.selectionEnd == null ? s : a.selectionEnd;
-          a.value = a.value.substring(0, s) + ch + a.value.substring(e);
-          try { a.setSelectionRange(s + 1, s + 1); } catch(_){}
-          a.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-      }
+      typeChar(typeTarget(), ch);
       var pause = 0;
       if (ch === ' ' || ch === '\n' || ch === '.' || ch === ',' || ch === '!' || ch === '?') {
         if (!lastWasSpace && Math.random() < 0.28) pause = 130 + Math.random() * 320;
@@ -353,10 +565,13 @@ if (cfg.human) {
     if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); armPaste(); }
   }, true);
   document.addEventListener('paste', function(e){
-    var arm = armed || e.shiftKey;
+    /* Automatic by default: any paste into a page is typed in with human timing. Alt+V is
+       still there as an explicit arm for clipboard managers that synthesize a paste without
+       clipboardData, but it is no longer required for the feature to do anything. */
+    var arm = cfg.human || armed || e.shiftKey;
     if (!arm || typing) return;
-    var text = (e.clipboardData || window.clipboardData);
-    text = text ? text.getData('text/plain') : '';
+    var clip = (e.clipboardData || window.clipboardData);
+    var text = clip ? clip.getData('text/plain') : '';
     if (!text) return;
     nativePrevent.call(e); e.stopPropagation();
     armed = false;
@@ -369,8 +584,20 @@ if (cfg.human) {
     else if (m.__jb === 'rightClick') cfg.rightClick = !!m.enabled;
     else if (m.__jb === 'checkProxy' && JB.checkProxy) JB.checkProxy();
     else if (m.__jb === 'proxyState') {
-      if (m.state === 'rotated') banner('Proxy IP rotated', (m.from || '?') + ' \u2192 ' + (m.to || '?') + (m.country ? ' (' + m.country + ')' : '') + '. Pause logins.', 'warn', true);
-      else if (m.state === 'offline') { if (cfg.hasProxy) banner('Proxy appears offline', 'The connection check failed twice. Check it before logging in.', 'bad', true); }
+      if (m.state === 'rotated') {
+        var from = m.from || 'unknown', to = m.to || 'unknown';
+        var where = m.country ? ' \u00b7 ' + m.country : '';
+        banner('IP address rotated', from + ' \u2192 ' + to + where +
+          '. Re-check any open session before you sign in.', 'warn', true, {
+            label: 'Copy new IP',
+            onClick: function(){ copyText(m.to || ''); }
+          });
+      }
+      else if (m.state === 'offline') {
+        /* Only meaningful for a profile that actually routes through a proxy; on a direct
+           connection a failed lookup is not something the user needs to be told about. */
+        if (cfg.hasProxy) banner('Proxy appears offline', 'The connection check failed twice. Check it before logging in.', 'bad', true);
+      }
       else if (m.state === 'online') banner('Proxy is back online', m.ip || '', 'info', false);
     }
   });
@@ -445,7 +672,18 @@ async function probe(){
   }
   return null;
 }
+/* Tell the Proxy Watch extension whether this profile really has a proxy, so it can stay
+   quiet on a direct connection instead of warning about a proxy that does not exist. */
+try {
+  window.postMessage({ __jb: 'proxyConfig', hasProxy: !!cfg.hasProxy }, '*');
+} catch (e) {}
+
 if (cfg.watch) {
+  /* When the Proxy Watch extension is loaded it owns the polling and the desktop
+     notification, and it broadcasts the state back to the page. Polling from both places
+     would double the requests to the IP services for no gain, so the in-page fallback
+     only runs when the extension is not present. */
+  var extPolling = !!(window.chrome && chrome.runtime && chrome.runtime.id);
   var KEY = 'jb.proxy.baseline';
   var FAIL = 'jb.proxy.fails';
   var SEEN = 'jb.proxy.event';
@@ -473,7 +711,11 @@ if (cfg.watch) {
       writeStore(KEY, now.ip);
       writeStore(SEEN, 'rotate');
       var where = now.country ? ' (' + now.country + ')' : '';
-      banner('Proxy IP rotated', base + ' \u2192 ' + now.ip + where + '. Pause logins and check the account.', 'warn', true);
+      banner('IP address rotated', base + ' \u2192 ' + now.ip + where +
+        '. Re-check any open session before you sign in.', 'warn', true, {
+          label: 'Copy new IP',
+          onClick: function(){ copyText(now.ip || ''); }
+        });
       try { if (window.Notification && Notification.permission === 'granted') new Notification('Joe Browser', { body: 'Proxy IP changed: ' + base + ' \u2192 ' + now.ip }); } catch(e){}
       window.dispatchEvent(new CustomEvent('jb-proxy-rotated', { detail: { from: base, to: now.ip } }));
     } else if (readStore(SEEN, '') === 'offline') {
@@ -481,8 +723,10 @@ if (cfg.watch) {
       banner('Proxy is back online', now.ip + (now.country ? ' \u00b7 ' + now.country : ''), 'info', false);
     }
   }
-  setTimeout(check, 3500);
-  setInterval(check, Math.max(30000, cfg.interval * 1000));
+  if (!extPolling) {
+    setTimeout(check, 3500);
+    setInterval(check, Math.max(30000, cfg.interval * 1000));
+  }
   JB.checkProxy = check;
 }
 ";
@@ -549,6 +793,7 @@ async function notify(title, message){
   try { await chrome.action.setBadgeText({ text: '!' }); await chrome.action.setBadgeBackgroundColor({ color: '#d94841' }); } catch(e) {}
 }
 async function check(){
+  if (!armed()) return;
   const cur = await probe();
   const st = await chrome.storage.local.get([KEY, FAIL, LAST]);
   if (!cur) {
@@ -579,13 +824,31 @@ function broadcast(msg){
     for (const t of tabs) if (t.id != null) chrome.tabs.sendMessage(t.id, msg, () => void chrome.runtime.lastError);
   });
 }
+/* The watcher is only meaningful when the profile routes through a proxy. The page runtime
+   tells the worker whether one is configured; without that signal the worker stays quiet
+   rather than polling public IP services on every profile and warning about a proxy that
+   does not exist. */
+let HAS_PROXY = false;
+function armed(){
+  return HAS_PROXY;
+}
 chrome.runtime.onInstalled.addListener(function(){
   chrome.alarms.create('jb-proxy-check', { periodInMinutes: 1 });
-  check();
 });
-chrome.alarms.onAlarm.addListener(function(a){ if (a.name === 'jb-proxy-check') check(); });
+chrome.alarms.onAlarm.addListener(function(a){ if (a.name === 'jb-proxy-check' && armed()) check(); });
 chrome.runtime.onMessage.addListener(function(m, s, send){
-  if (m && m.__jb === 'checkNow') { check().then(() => send({ ok: true })); return true; }
+  if (m && m.__jb === 'proxyConfig') {
+    HAS_PROXY = !!m.hasProxy;
+    chrome.storage.local.set({ hasProxy: HAS_PROXY });
+    if (HAS_PROXY) check();
+    if (send) send({ ok: true });
+    return true;
+  }
+  if (m && m.__jb === 'checkNow') {
+    if (!armed()) { if (send) send({ ok: true, skipped: true }); return true; }
+    check().then(() => send({ ok: true }));
+    return true;
+  }
 });
 ";
 
@@ -596,6 +859,12 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
   if (!chrome.runtime || !chrome.runtime.onMessage) return;
   chrome.runtime.onMessage.addListener(function(m){
     if (m && m.__jb === 'proxyState') window.postMessage(m, '*');
+  });
+  /* The main-world runtime knows whether this profile has a proxy configured. Forward that
+     to the worker so it can stay silent on a direct connection. */
+  window.addEventListener('message', function(e){
+    if (!e.data || e.data.__jb !== 'proxyConfig') return;
+    try { chrome.runtime.sendMessage({ __jb: 'proxyConfig', hasProxy: !!e.data.hasProxy }); } catch(err){}
   });
 })();
 ";

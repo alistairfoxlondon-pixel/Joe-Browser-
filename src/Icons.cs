@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 
 namespace JoeBrowser
@@ -12,6 +13,14 @@ namespace JoeBrowser
     internal static class Icons
     {
         private static readonly Dictionary<string, string> Glyph = Build();
+
+        /// <summary>Single-stroke glyphs that stay legible on the solid face at the smallest sizes.</summary>
+        private static readonly HashSet<string> Strokes = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "plus", "min", "close", "x", "check", "play", "dots", "dots-h", "menu",
+            "chevron-down", "chevron-up", "chevron-left", "chevron-right", "arrow-right",
+            "sort", "filter", "sync", "refresh", "power"
+        };
 
         private static string Ch(int cp) { return ((char)cp).ToString(); }
 
@@ -45,6 +54,7 @@ namespace JoeBrowser
             d["layers"] = Ch(0xE53B);
             d["grid"] = Ch(0xE9B0);         // grid_view
             d["apps"] = Ch(0xE5C3);
+            d["extension"] = Ch(0xE87B);    // extension (puzzle piece)
             d["folder"] = Ch(0xE2C7);
             d["file"] = Ch(0xE873);         // description
             d["pencil"] = Ch(0xE3C9);       // edit
@@ -111,12 +121,32 @@ namespace JoeBrowser
             d["texture"] = Ch(0xE421);      // canvas noise
             d["wave"] = Ch(0xE798);         // water_drop, audio noise
             d["speed"] = Ch(0xE9E4);
+            // plan, payment and referral
+            d["crown"] = Ch(0xE7EF);        // workspace_premium
+            d["gift"] = Ch(0xE8F6);         // card_giftcard
+            d["wallet"] = Ch(0xE850);       // account_balance_wallet
+            d["receipt"] = Ch(0xEF6E);      // receipt_long
+            d["timer"] = Ch(0xE425);
+            d["hourglass"] = Ch(0xE88B);    // hourglass_empty
+            d["verified"] = Ch(0xEF76);
+            d["rocket"] = Ch(0xEBA7);       // rocket_launch
+            d["qr"] = Ch(0xE00A);           // qr_code_2
+            d["swap"] = Ch(0xEB70);         // currency_exchange
+            d["percent"] = Ch(0xEB58);
+            d["paste"] = Ch(0xE14F);        // content_paste
             return d;
         }
 
         public static bool Has(string name)
         {
             return name != null && Glyph.ContainsKey(name);
+        }
+
+        /// <summary>The raw glyph string for a name, for tooling that renders its own sheet.</summary>
+        internal static string GlyphFor(string name)
+        {
+            string g;
+            return name != null && Glyph.TryGetValue(name, out g) ? g : null;
         }
 
         /// <summary>
@@ -136,28 +166,47 @@ namespace JoeBrowser
             if (name == null || !Glyph.TryGetValue(name, out glyph))
                 if (!Glyph.TryGetValue("circle", out glyph)) return;
 
-            // Material glyphs are drawn inside a 24 dp box with 2 dp of padding on every side, so
-            // a glyph set to the box size always reads two steps smaller than the control around
-            // it. Scaling the em up by that padding makes an 18 px box hold an 18 px icon.
-            float fit = Math.Min(box.Width, box.Height) * 1.2f;
-            Font f = Theme.IconFont(fit);
+            /* Material glyphs sit inside a 24 dp box with 2 dp of padding, so an em equal to the
+               box always reads two steps smaller than the control around it. Scaling by 1.2
+               makes an 18 px box hold an 18 px icon.
+               The size is rounded to a whole pixel and the origin snapped to the pixel grid:
+               a glyph drawn at 21.6 px on a half-pixel boundary is resampled and turns soft,
+               which is what "the icons look low quality" actually is. */
+            float want = Math.Min(box.Width, box.Height) * 1.2f;
+            int px = Math.Max(6, (int)Math.Round(want));
+
+            /* Material ships two faces and they do not scale the same way. At 16-25 px the solid
+               face collapses every multi-part glyph - layers, copy, gift, crown, terminal - into a
+               filled blob, while the outlined face keeps the structure legible. Above 26 px the
+               solid face is the denser, better-balanced one.
+               Below 18 px even an outline thins out to a grey hairline, so the handful of
+               single-stroke glyphs (a check, a plus, a triangle) keep the solid face all the way
+               down. tools\audit --glyphs renders both faces at every size the UI uses. */
+            bool solid = px >= 26 || (px < 18 && Strokes.Contains(name));
+            Font f = solid ? Theme.IconFontSolid(px) : Theme.IconFont(px);
             if (f == null) return;
 
-            var old = g.TextRenderingHint;
-            // Icons are shapes: grayscale AA keeps their weight even, ClearType tints the edges.
-            g.TextRenderingHint = TextRenderingHint.AntiAlias;
+            float x = (float)Math.Floor(box.X + (box.Width - px) / 2f);
+            float y = (float)Math.Floor(box.Y + (box.Height - px) / 2f);
+
+            var oldHint = g.TextRenderingHint;
+            var oldOffset = g.PixelOffsetMode;
+            /* Icons are shapes: grayscale AA keeps their weight even, ClearType tints the edges.
+               Grid-fit is what turns a soft grey outline into a crisp edge at 20 px - unhinted
+               grayscale AA is the reason the small glyphs read as "low quality". */
+            g.TextRenderingHint = px <= 30
+                ? TextRenderingHint.AntiAliasGridFit
+                : TextRenderingHint.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.None;
             try
             {
                 using (var b = new SolidBrush(color))
-                {
-                    g.DrawString(glyph, f, b,
-                        box.X + (box.Width - fit) / 2f,
-                        box.Y + (box.Height - fit) / 2f);
-                }
+                    g.DrawString(glyph, f, b, x, y);
             }
             finally
             {
-                g.TextRenderingHint = old;
+                g.TextRenderingHint = oldHint;
+                g.PixelOffsetMode = oldOffset;
             }
         }
     }

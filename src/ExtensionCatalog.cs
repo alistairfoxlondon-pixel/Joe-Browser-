@@ -43,6 +43,114 @@ namespace JoeBrowser
         public static string FilePath { get { return Path.Combine(AppPaths.Root, "extensions.json"); } }
         public static string ImportedRoot { get { return Path.Combine(AppPaths.Extensions, "imported"); } }
 
+        /// <summary>
+        /// Extensions the user asked to ship with every Chromium profile. They are fetched from
+        /// the official Chrome Web Store update endpoint once, unpacked into the app's own
+        /// extensions folder, and then loaded exactly like the built-in tools. The library entry
+        /// keeps them visible and removable on the Extensions page.
+        /// </summary>
+        public static readonly string[][] DefaultStoreExtensions = new[]
+        {
+            new[] { "fklakbbaaknbgcedidhblbnhclijnhbi", "HTTP Tracker" },
+            new[] { "okaeekdeohehbdanbbohcfhhlblcmjkm", "Absolute Enable Right Click & Copy" }
+        };
+
+        public static string StoreUrlFor(string id)
+        {
+            return "https://chromewebstore.google.com/detail/" + id;
+        }
+
+        /// <summary>Ensures the shipped store extensions are present in the library, once.</summary>
+        public static void EnsureDefaults()
+        {
+            try
+            {
+                var items = Load();
+                bool changed = false;
+                foreach (var entry in DefaultStoreExtensions)
+                {
+                    string id = entry[0];
+                    string target = Path.Combine(ImportedRoot, id);
+                    bool listed = false;
+                    foreach (var e in items)
+                    {
+                        if (e == null || string.IsNullOrEmpty(e.Folder)) continue;
+                        try
+                        {
+                            if (e.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase))
+                            { listed = true; break; }
+                        }
+                        catch { }
+                    }
+                    if (listed) continue;
+
+                    if (File.Exists(Path.Combine(target, "manifest.json")))
+                    {
+                        items.Add(new ExtensionItem
+                        {
+                            Name = entry[1],
+                            Folder = target,
+                            Enabled = true,
+                            Source = "store",
+                            StoreUrl = StoreUrlFor(id),
+                            Version = VersionFromManifest(Path.Combine(target, "manifest.json"))
+                        });
+                        changed = true;
+                        continue;
+                    }
+
+                    /* A failed download must not stop a browser from launching. Retry at most
+                       once a day; the manual import box on the Extensions page remains available. */
+                    string skip = Path.Combine(AppPaths.Extensions, ".store-" + id + ".skip");
+                    try
+                    {
+                        if (File.Exists(skip) &&
+                            (DateTime.UtcNow - File.GetLastWriteTimeUtc(skip)).TotalHours < 24) continue;
+                    }
+                    catch { }
+
+                    try
+                    {
+                        var item = ImportFromUrl(StoreUrlFor(id));
+                        item.Name = entry[1];
+                        item.Source = "store";
+                        items.Add(item);
+                        changed = true;
+                        try { if (File.Exists(skip)) File.Delete(skip); } catch { }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error("Could not fetch default extension " + id, ex);
+                        try
+                        {
+                            Directory.CreateDirectory(AppPaths.Extensions);
+                            File.WriteAllText(skip, ex.Message ?? "failed", new UTF8Encoding(false));
+                        }
+                        catch { }
+                    }
+                }
+                if (changed) Save(items);
+            }
+            catch (Exception ex) { Log.Error("Default extension setup failed", ex); }
+        }
+
+        /// <summary>Folders of the shipped store extensions that are actually present.</summary>
+        public static List<string> DefaultFolders()
+        {
+            var result = new List<string>();
+            foreach (var entry in DefaultStoreExtensions)
+            {
+                string folder = Path.Combine(ImportedRoot, entry[0]);
+                try
+                {
+                    if (Directory.Exists(folder) && File.Exists(Path.Combine(folder, "manifest.json")))
+                        result.Add(folder);
+                }
+                catch { }
+            }
+            return result;
+        }
+
         public static List<ExtensionItem> Load()
         {
             var list = new List<ExtensionItem>();
@@ -147,11 +255,17 @@ namespace JoeBrowser
                     Uri.EscapeDataString("id=" + id + "&uc");
 
                 ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-                using (var wc = new WebClient())
-                {
-                    wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) JoeBrowser/1.2");
-                    wc.DownloadFile(endpoint, crx);
-                }
+                /* A store outage or a captive portal must fail in seconds, not freeze the
+                   browser launch behind WebClient's two-minute default. */
+                var req = (HttpWebRequest)WebRequest.Create(endpoint);
+                req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) JoeBrowser/1.2";
+                req.Timeout = 15000;
+                req.ReadWriteTimeout = 15000;
+                req.AllowAutoRedirect = true;
+                using (var resp = (HttpWebResponse)req.GetResponse())
+                using (var input = resp.GetResponseStream())
+                using (var output = File.Create(crx))
+                    input.CopyTo(output);
 
                 byte[] raw = File.ReadAllBytes(crx);
                 int start = FindZipStart(raw);

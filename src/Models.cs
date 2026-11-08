@@ -22,6 +22,11 @@ namespace JoeBrowser
         public string LastTimezone { get; set; }
         public string LastCity { get; set; }
 
+        /// <summary>When the proxy stops answering, keep the session alive on a direct
+        /// connection instead of freezing every tab. The user is told in the window; the
+        /// alternative is a profile that looks broken until it is closed and reopened.</summary>
+        public bool FallbackDirect { get; set; }
+
         public ProxyConfig()
         {
             Type = "none";
@@ -34,6 +39,7 @@ namespace JoeBrowser
             LastCountryCode = "";
             LastTimezone = "";
             LastCity = "";
+            FallbackDirect = true;
         }
 
         public bool Enabled
@@ -79,7 +85,8 @@ namespace JoeBrowser
                 LastCountry = LastCountry,
                 LastCountryCode = LastCountryCode,
                 LastTimezone = LastTimezone,
-                LastCity = LastCity
+                LastCity = LastCity,
+                FallbackDirect = FallbackDirect
             };
         }
     }
@@ -160,6 +167,17 @@ namespace JoeBrowser
         public bool AutoMatchProxy { get; set; }
         public bool AutoUserAgent { get; set; }
 
+        /// <summary>"auto" follows the handset the viewport belongs to; otherwise a version
+        /// string such as "14" or "16" that every Android surface in the profile reports.</summary>
+        public string AndroidVersion { get; set; }
+        /// <summary>"auto" or an iOS version such as "17.5" used in the Safari user agent.</summary>
+        public string IosVersion { get; set; }
+        /// <summary>Which font list the profile advertises: auto | windows | macos | linux | minimal.</summary>
+        public string FontSet { get; set; }
+        /// <summary>Adds a per-profile jitter to timing and hardware counters, so two profiles
+        /// on one machine never answer the same performance probes.</summary>
+        public bool HardwareNoise { get; set; }
+
         // resolved at launch time
         [ScriptIgnore]
         public string UserAgent { get; set; }
@@ -199,6 +217,10 @@ namespace JoeBrowser
             GeoLng = "";
             AutoMatchProxy = true;
             AutoUserAgent = true;
+            AndroidVersion = "auto";
+            IosVersion = "auto";
+            FontSet = "auto";
+            HardwareNoise = true;
             WebGlVendor = "Google Inc. (NVIDIA)";
             WebGlRenderer = "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)";
             Platform = "Win32";
@@ -232,6 +254,10 @@ namespace JoeBrowser
         public string StartUrl { get; set; }
         public string BrowserKind { get; set; }   // auto | chrome | edge | brave | chromium | firefox | custom
         public string BrowserPath { get; set; }
+        /// <summary>Pinned engine build ("kernel"). Empty means the installed browser of
+        /// BrowserKind is used; otherwise this profile always opens this exact version.</summary>
+        public string KernelEngine { get; set; }
+        public string KernelVersion { get; set; }
         /// <summary>Folder-style grouping, as in AdsPower / Dolphin Anty.</summary>
         public string Group { get; set; }
         /// <summary>Comma separated labels, searchable and shown on the card.</summary>
@@ -253,6 +279,8 @@ namespace JoeBrowser
             StartUrl = "";
             BrowserKind = "auto";
             BrowserPath = "";
+            KernelEngine = "";
+            KernelVersion = "";
             Group = "";
             Tags = "";
             Status = "";
@@ -305,6 +333,8 @@ namespace JoeBrowser
                 StartUrl = StartUrl,
                 BrowserKind = BrowserKind,
                 BrowserPath = BrowserPath,
+                KernelEngine = KernelEngine,
+                KernelVersion = KernelVersion,
                 Group = Group,
                 Tags = Tags,
                 Status = Status,
@@ -339,6 +369,17 @@ namespace JoeBrowser
         public bool StartMaximized { get; set; }
         /// <summary>Keep deleted profile JSON in a recycle bin instead of erasing it.</summary>
         public bool UseTrash { get; set; }
+        /// <summary>Google OAuth client id for the Continue with Google button. Belongs to
+        /// the publisher's Google Cloud project and is pasted in once, in Settings.</summary>
+        public string GoogleClientId { get; set; }
+        /// <summary>Optional client secret when the OAuth client was created as "Web" rather
+        /// than "Desktop". Desktop clients leave this empty.</summary>
+        public string GoogleClientSecret { get; set; }
+        /// <summary>Version of the payment terms the user accepted, e.g. "1". Empty means the
+        /// terms have not been accepted on this machine yet.</summary>
+        public string TermsAccepted { get; set; }
+        /// <summary>Referral code entered by this user, if any.</summary>
+        public string ReferralCode { get; set; }
         /// <summary>Window was maximized when the app last closed.</summary>
         public bool WinMaximized { get; set; }
         /// <summary>Restored window size from the last session, in device-independent pixels.</summary>

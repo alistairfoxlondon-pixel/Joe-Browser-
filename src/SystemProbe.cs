@@ -40,6 +40,33 @@ namespace JoeBrowser
 
         private static int _hardwareGl = -1;
 
+        private static int _elevated = -1;
+
+        /// <summary>
+        /// True when this process runs with administrator rights.
+        /// Chromium cannot initialise its sandbox in an elevated session: the sandboxed
+        /// child processes are created from a restricted token, and an elevated parent
+        /// cannot produce one. Chromium then reports "Sandbox cannot access executable",
+        /// the network service crashes and restarts, and every page load gets slower and
+        /// flakier. Edge and Chrome handle the same situation, but the bundled Chromium
+        /// build does not, so the app has to know.
+        /// </summary>
+        public static bool IsElevated()
+        {
+            int cached = _elevated;
+            if (cached >= 0) return cached == 1;
+            bool elevated = false;
+            try
+            {
+                var id = System.Security.Principal.WindowsIdentity.GetCurrent();
+                var principal = new System.Security.Principal.WindowsPrincipal(id);
+                elevated = principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+            }
+            catch { }
+            _elevated = elevated ? 1 : 0;
+            return elevated;
+        }
+
         /// <summary>
         /// True when at least one attached adapter looks like real graphics hardware. Servers,
         /// cloud desktops and RDP sessions only expose the Microsoft basic adapter, and Chrome

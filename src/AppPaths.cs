@@ -14,6 +14,8 @@ namespace JoeBrowser
         public static string Browsers { get { return Path.Combine(Root, "browsers"); } }
         public static string ChromiumDir { get { return Path.Combine(Browsers, "chromium"); } }
         public static string ChromiumExe { get { return Path.Combine(ChromiumDir, "chrome-win", "chrome.exe"); } }
+        /// <summary>Pinned browser builds, one folder per engine and version.</summary>
+        public static string Kernels { get { return Path.Combine(Browsers, "kernels"); } }
         public static string SettingsFile { get { return Path.Combine(Root, "settings.json"); } }
         /// <summary>Original unpacked extensions, written by Joe Browser itself.</summary>
         public static string Extensions { get { return Path.Combine(Root, "extensions"); } }

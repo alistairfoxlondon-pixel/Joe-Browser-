@@ -25,6 +25,9 @@ namespace JoeBrowser
         public event EventHandler FocusRequested;
         public event EventHandler CloseRequested;
         public event EventHandler PickToggled;
+        public event EventHandler RenameRequested;
+        public event EventHandler ClearCacheRequested;
+        public event EventHandler LeakTestRequested;
 
         // CSS pixel metrics for the whole card.
         public const double CardH = 200;
@@ -175,8 +178,18 @@ namespace JoeBrowser
             if (Running)
                 JBMenu.Add(menu, "Close browser", "power", delegate { var h = CloseRequested; if (h != null) h(this, EventArgs.Empty); });
             JBMenu.Add(menu, "Edit profile", "pencil", delegate { var h = EditRequested; if (h != null) h(this, EventArgs.Empty); });
+            JBMenu.Add(menu, "Rename", "file", delegate { var h = RenameRequested; if (h != null) h(this, EventArgs.Empty); });
             JBMenu.Add(menu, "Change proxy (live, keep tab open)", "route",
                 delegate { var h = ProxyRequested; if (h != null) h(this, EventArgs.Empty); });
+            JBMenu.Add(menu, Running ? "Check fingerprint" : "Clear cache and cookies", "shield",
+                delegate
+                {
+                    var h = Running ? LeakTestRequested : ClearCacheRequested;
+                    if (h != null) h(this, EventArgs.Empty);
+                });
+            if (Running)
+                JBMenu.Add(menu, "Clear cache (keeps tab open)", "refresh",
+                    delegate { var h = ClearCacheRequested; if (h != null) h(this, EventArgs.Empty); });
             JBMenu.Add(menu, Picked ? "Remove from selection" : "Add to selection", "check",
                 delegate { var h = PickToggled; if (h != null) h(this, EventArgs.Empty); });
             JBMenu.Add(menu, "Duplicate", "copy", delegate { var h = DuplicateRequested; if (h != null) h(this, EventArgs.Empty); });
@@ -375,7 +388,11 @@ namespace JoeBrowser
         private void PaintTags(Graphics g)
         {
             var tags = SplitTags(Model.Tags);
-            if (tags.Count == 0 && string.IsNullOrWhiteSpace(Model.Status)) return;
+            if (tags.Count == 0 && string.IsNullOrWhiteSpace(Model.Status))
+            {
+                PaintMeta(g);
+                return;
+            }
 
             float y = Ui.S(108);
             float h = Ui.S(TagH);
@@ -413,6 +430,49 @@ namespace JoeBrowser
                 Ui.Text(g, "+" + hidden, Theme.Micro, Theme.TextFaint, rect.X,
                     rect.Y + (h - Theme.Micro.GetHeight(g)) / 2f, rect.Width);
             }
+        }
+
+        /// <summary>
+        /// A profile with no tags and no status would otherwise leave the meta row empty, which
+        /// left a hole between the chips and the action bar on most cards. The row is filled with
+        /// the two fingerprint facts the card does not show anywhere else - timezone and
+        /// language - so every card keeps the same height and the row still carries information.
+        /// </summary>
+        private void PaintMeta(Graphics g)
+        {
+            if (Model.Fp == null) return;
+            float y = Ui.S(108);
+            float h = Ui.S(TagH);
+            float x = Ui.S(Pad);
+            float right = Width - Ui.S(Pad);
+
+            string tz = (Model.Fp.Timezone ?? "").Trim();
+            if (tz.Length > 0)
+                x = DrawMetaChip(g, x, y, h, right, "clock", tz);
+
+            string lang = FingerprintFactory.LanguageName(Model.Fp.Language);
+            if (!string.IsNullOrWhiteSpace(lang) && x + Ui.S(60) <= right)
+                DrawMetaChip(g, x + Ui.S(6), y, h, right, "language", lang.Trim());
+        }
+
+        /// <summary>One low-emphasis chip; returns the right edge it consumed.</summary>
+        private float DrawMetaChip(Graphics g, float x, float y, float h, float right,
+            string icon, string text)
+        {
+            float padX = Ui.S(8);
+            float ic = Ui.S(12);
+            float gap = Ui.S(5);
+            float budget = Math.Max(Ui.S(24), right - x - padX * 2 - ic - gap);
+            string shown = Ui.Clip(g, text, Theme.Micro, budget);
+            float tw = Ui.Measure(g, shown, Theme.Micro).Width;
+            float w = Math.Min(right - x, padX * 2 + ic + gap + tw);
+
+            var rect = new RectangleF(x, y, w, h);
+            Ui.Fill(g, rect, Ui.S(5), Theme.Panel2);
+            Icons.Draw(g, icon, new RectangleF(x + padX, y + (h - ic) / 2f, ic, ic), Theme.TextFaint);
+            Ui.Text(g, shown, Theme.Micro, Theme.TextDim, x + padX + ic + gap,
+                y + (h - Theme.Micro.GetHeight(g)) / 2f, tw + Ui.S(2));
+            return rect.Right;
         }
 
         private static List<string> SplitTags(string raw)

@@ -24,7 +24,7 @@ namespace JoeBrowser
         private readonly List<ExtensionRow> _rows = new List<ExtensionRow>();
         private readonly List<RecommendCard> _cards = new List<RecommendCard>();
         private JBButton _addUrl, _addFolder, _openFolder;
-        private JBLabel _title, _sub, _section;
+        private JBLabel _section;
         private JBPanel _empty;
         private bool _layingOut;
         private bool _ready;
@@ -41,13 +41,7 @@ namespace JoeBrowser
             _host = new JBScrollHost(_column);
             Controls.Add(_host);
 
-            _title = new JBLabel(LabelRole.Strong, "Extensions");
-            _sub = new JBLabel(LabelRole.Faint,
-                "Add once, switch on or off here. Enabled extensions load into every Chromium profile you open.");
-            _sub.Wrap = true;
-            _column.Controls.Add(_title);
-            _column.Controls.Add(_sub);
-
+            /* The header band above already names the page; no second title here. */
             _addUrl = MakeButton("Add by store link", "link", BtnKind.Primary, "url");
             _addFolder = MakeButton("Add unpacked folder", "folder", BtnKind.Soft, "folder");
             _openFolder = MakeButton("Open folder", "external", BtnKind.Soft, "openfolder");
@@ -138,7 +132,7 @@ namespace JoeBrowser
             var cr = new RectangleF(Ui.S(22), (Ui.S(92) - chip) / 2f, chip, chip);
             Ui.Fill(g, cr, Ui.S(8), Theme.AccentOnBg);
             float ic = Ui.S(22);
-            Icons.Draw(g, "apps", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
+            Icons.Draw(g, "extension", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
             Ui.Text(g, "No extensions added yet", Theme.H3, Theme.Text, cr.Right + Ui.S(16), Ui.S(26), w - cr.Right - Ui.S(30));
             Ui.Text(g, "Paste a Chrome Web Store link, or choose a folder that contains manifest.json.",
                 Theme.Small, Theme.TextDim, cr.Right + Ui.S(16), Ui.S(50), w - cr.Right - Ui.S(30), "left", 2);
@@ -167,13 +161,10 @@ namespace JoeBrowser
                 int pad = Ui.S(28);
                 int inner = Math.Max(Ui.S(280), _host.Width - Ui.S(10) - pad * 2);
 
-                _title.SetBounds(pad, Ui.S(6), inner, Ui.S(22));
-                _sub.SetBounds(pad, Ui.S(30), inner, Ui.S(20));
-
                 int b1 = _addUrl.PreferredWidth(Ui.S(150));
                 int b2 = _addFolder.PreferredWidth(Ui.S(160));
                 int b3 = _openFolder.PreferredWidth(Ui.S(130));
-                int by = Ui.S(60);
+                int by = Ui.S(6);
                 _addUrl.SetBounds(pad, by, b1, Ui.S(33));
                 _addFolder.SetBounds(pad + b1 + Ui.S(10), by, b2, Ui.S(33));
                 _openFolder.SetBounds(pad + b1 + b2 + Ui.S(20), by, b3, Ui.S(33));
@@ -196,7 +187,9 @@ namespace JoeBrowser
                 int gap = Ui.S(12);
                 int cols = inner >= Ui.S(1080) ? 3 : inner >= Ui.S(660) ? 2 : 1;
                 int cardW = cols > 1 ? (inner - gap * (cols - 1)) / cols : inner;
-                int cardH = Ui.S(78);
+                /* Two lines of caption plus the title need more than 78 px: the second line used to
+                   sit on the bottom border. */
+                int cardH = Ui.S(86);
                 for (int i = 0; i < _cards.Count; i++)
                 {
                     int col = i % cols, row = i / cols;
@@ -279,7 +272,7 @@ namespace JoeBrowser
             var cr = new RectangleF(Ui.S(16), (Height - chip) / 2f, chip, chip);
             Ui.Fill(g, cr, Ui.S(7), Theme.AccentOnBg);
             float ic = Ui.S(18);
-            Icons.Draw(g, "apps", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
+            Icons.Draw(g, "extension", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
 
             float x = cr.Right + Ui.S(14);
             float mid = Height / 2f;

@@ -52,7 +52,7 @@ namespace JoeBrowser
             card: C(0x30, 0x30, 0x30), panel: C(0x2B, 0x2B, 0x2B), panelHover: C(0x33, 0x33, 0x33),
             panel2: C(0x26, 0x26, 0x26), input: C(0x11, 0x11, 0x11),
             line: C(0x28, 0x28, 0x28), lineSoft: C(0x1F, 0x1F, 0x1F),
-            text: C(0xFF, 0xFF, 0xFF), textDim: C(0xC6, 0xC6, 0xC6), textFaint: C(0x9E, 0x9E, 0x9E),
+            text: C(0xFF, 0xFF, 0xFF), textDim: C(0xD2, 0xD2, 0xD2), textFaint: C(0xAF, 0xAF, 0xAF),
             accent: C(0x60, 0xCD, 0xFF), accentHover: C(0x87, 0xDA, 0xFF), accentPressed: C(0x4C, 0xB8, 0xE6),
             onAccent: C(0x00, 0x00, 0x00),
             buttonBg: C(0x3E, 0x3E, 0x3E), buttonBorder: C(0x3A, 0x3A, 0x3A),
@@ -129,10 +129,12 @@ namespace JoeBrowser
 
         private static FontFamily _family;
         private static FontFamily _familySemiBold;
+        private static FontFamily _familyDisplay;
+        private static FontFamily _familyDisplaySemiBold;
         private static PrivateFontCollection _pfc;
-        private static PrivateFontCollection _iconPfc;
         private static FontFamily _iconFamily;
-        private static readonly Dictionary<int, Font> _iconFonts = new Dictionary<int, Font>();
+        private static FontFamily _iconFamilySolid;
+        private static readonly Dictionary<long, Font> _iconFonts = new Dictionary<long, Font>();
         private static readonly List<string> _installed = new List<string>();
         private static readonly List<string> _privateInstalled = new List<string>();
 
@@ -150,9 +152,38 @@ namespace JoeBrowser
         {
             LoadIconFont();
 
-            // Segoe UI is the windows-ui typeface. The bundled files are only a fallback for
-            // Windows installs that stripped the system font.
-            FontFamily system = TryFamily("Segoe UI");
+            /* DevToys (and every WinUI 3 app) sets its type in Segoe UI Variable, the optical
+               -size family that replaced plain Segoe UI in Windows 11: text sizes get a wider
+               spacing, display sizes a tighter one, so headings stop looking like scaled-up
+               body copy. It does not exist on Windows 10, where Segoe UI is the same face
+               DevToys itself falls back to, so the stack is identical to the reference app on
+               both systems. Inter/Open Sans ship as the last resort for stripped installs. */
+            FontFamily system = TryFamily("Segoe UI Variable Text");
+            if (system != null)
+            {
+                /* GDI+ cannot address the weight axis of a variable font: asking for Bold on
+                   "Segoe UI Variable Text" makes it embolden the Regular outlines
+                   algorithmically, which smears every stem and is exactly what "the type looks
+                   broken" looks like. Windows exposes the real instances as their own family
+                   names, so bind Semibold explicitly and refuse to synthesise. */
+                FontFamily semibold = TryFamily("Segoe UI Variable Text Semibold")
+                                   ?? TryFamily("Segoe UI Variable Semibold");
+                if (semibold != null)
+                {
+                    _family = system;
+                    _familySemiBold = semibold;
+                    /* WinUI switches to the Display optical size above 20 px: the letterforms
+                       tighten and the spacing closes up, so a heading stops looking like body
+                       copy scaled up. */
+                    _familyDisplay = TryFamily("Segoe UI Variable Display") ?? system;
+                    _familyDisplaySemiBold = TryFamily("Segoe UI Variable Display Semibold") ?? semibold;
+                    FamilyName = "Segoe UI Variable Text";
+                    return;
+                }
+                /* No named Semibold instance: use plain Segoe UI, which has one. */
+            }
+
+            system = TryFamily("Segoe UI");
             if (system != null)
             {
                 _family = system;
@@ -233,33 +264,52 @@ namespace JoeBrowser
 
         private static void LoadIconFont()
         {
-            // windows-ui uses light line icons; the outlined Material set matches that weight.
-            string path = FontFile("MaterialIconsOutlined-Regular.otf")
-                ?? FontFile("MaterialIconsOutlined-Regular.ttf")
-                ?? FontFile("MaterialIcons-Regular.ttf")
-                ?? FontFile("MaterialIcons-Regular.otf");
-            if (path == null) return;
+            /* Two faces from the same set. The outlined one matches the light line icons the
+               reference UI uses and is right for large surfaces; the solid one is used at
+               24 px and below, where an outline stroke resamples into grey mush. */
+            _iconFamily = LoadFace("MaterialIconsOutlined-Regular.otf", "MaterialIconsOutlined-Regular.ttf")
+                       ?? LoadFace("MaterialIcons-Regular.ttf", "MaterialIcons-Regular.otf");
+            _iconFamilySolid = LoadFace("MaterialIcons-Regular.ttf", "MaterialIcons-Regular.otf")
+                            ?? _iconFamily;
+        }
+
+        private static FontFamily LoadFace(string first, string second)
+        {
+            string path = FontFile(first) ?? FontFile(second);
+            if (path == null) return null;
             path = Cached(path);
             try
             {
                 AddFontResourceEx(path, FR_PRIVATE | FR_NOT_ENUM, IntPtr.Zero);
                 _privateInstalled.Add(path);
-                _iconPfc = new PrivateFontCollection();
-                _iconPfc.AddFontFile(path);
-                if (_iconPfc.Families.Length > 0) _iconFamily = _iconPfc.Families[0];
+                var pfc = new PrivateFontCollection();
+                pfc.AddFontFile(path);
+                return pfc.Families.Length > 0 ? pfc.Families[0] : null;
             }
-            catch { _iconFamily = null; }
+            catch { return null; }
         }
 
         public static Font IconFont(float px)
         {
-            if (_iconFamily == null) return null;
+            return IconFace(_iconFamily, px);
+        }
+
+        /// <summary>Solid icon face, for sizes where a line icon loses its weight.</summary>
+        public static Font IconFontSolid(float px)
+        {
+            return IconFace(_iconFamilySolid ?? _iconFamily, px);
+        }
+
+        private static Font IconFace(FontFamily family, float px)
+        {
+            if (family == null) return null;
             int key = Math.Max(4, (int)Math.Round(px));
+            long cacheKey = (long)(uint)key | ((long)family.GetHashCode() << 16);
             Font f;
-            if (_iconFonts.TryGetValue(key, out f)) return f;
-            try { f = new Font(_iconFamily, key, GraphicsUnit.Pixel); }
+            if (_iconFonts.TryGetValue(cacheKey, out f)) return f;
+            try { f = new Font(family, key, GraphicsUnit.Pixel); }
             catch { return null; }
-            _iconFonts[key] = f;
+            _iconFonts[cacheKey] = f;
             return f;
         }
 
@@ -290,8 +340,19 @@ namespace JoeBrowser
             return list;
         }
 
+        /// <summary>
+        /// Overrides the folder the bundled faces are read from. The app never sets this: it
+        /// exists because the audit harness runs out of tools\audit, which has no fonts folder,
+        /// and a harness that measures a fallback face is a harness that reports layout that
+        /// does not exist in the shipped product.
+        /// </summary>
+        internal static string FontsOverride = null;
+
         private static string FontsDir()
         {
+            if (!string.IsNullOrEmpty(FontsOverride) && Directory.Exists(FontsOverride))
+                return FontsOverride;
+
             string dir = null;
             try { dir = Path.GetDirectoryName(Application.ExecutablePath); } catch { }
             if (dir == null) return null;
@@ -383,11 +444,20 @@ namespace JoeBrowser
             {
                 if (fam == null) fam = TryFamily(FamilyName) ?? new FontFamily("Tahoma");
 
+                /* Above ~17 px the display optical size is the right face: same family, drawn
+                   for larger sizes, with tighter spacing. Only used when the variable stack is
+                   actually present. */
+                if (px >= 17 && _familyDisplay != null) fam = _familyDisplay;
+
                 if (style == Semi)
                 {
-                    // Segoe UI Semibold is its own family; fall back to a bold face when absent.
-                    f = _familySemiBold != null
-                        ? new Font(_familySemiBold, pt, FontStyle.Regular, GraphicsUnit.Point)
+                    FontFamily semi = px >= 17 && _familyDisplaySemiBold != null
+                        ? _familyDisplaySemiBold
+                        : _familySemiBold;
+                    // A real Semibold family, never a synthesised bold: emboldened outlines
+                    // smear the stems, which reads as broken type.
+                    f = semi != null
+                        ? new Font(semi, pt, FontStyle.Regular, GraphicsUnit.Point)
                         : new Font(fam, pt, FontStyle.Bold, GraphicsUnit.Point);
                 }
                 else
@@ -414,6 +484,30 @@ namespace JoeBrowser
         public static Font SmallBold { get { return F(13, Semi); } }
         public static Font Caption { get { return F(12); } }            // captions, labels
         public static Font Micro { get { return F(11, Semi); } }        // section eyebrow
+
+        /// <summary>
+        /// A tabular face for values that are read one character at a time: wallet addresses,
+        /// transaction ids, invite codes. In a proportional face "0" and "O" and "l" and "1"
+        /// look alike, which is exactly the mistake that sends funds to a stranger.
+        /// Consolas ships with Windows; the chain of fallbacks keeps this working on a
+        /// stripped install rather than silently substituting a proportional font.
+        /// </summary>
+        public static Font Mono(double px)
+        {
+            long key = ((long)Math.Round(px * 100) << 8) | 0x4D;
+            Font f;
+            if (FontCache.TryGetValue(key, out f)) return f;
+
+            float pt = (float)(px * 0.75);
+            FontFamily fam = TryFamily("Consolas") ?? TryFamily("Cascadia Mono") ?? TryFamily("Courier New");
+            try { f = fam != null ? new Font(fam, pt, FontStyle.Regular, GraphicsUnit.Point) : F(px); }
+            catch { f = F(px); }
+            FontCache[key] = f;
+            return f;
+        }
+
+        public static Font MonoBody { get { return Mono(13); } }
+        public static Font MonoSmall { get { return Mono(12); } }
 
         public static event EventHandler ModeChanged;
 
@@ -502,7 +596,6 @@ namespace JoeBrowser
             for (Control p = c.Parent; p != null; p = p.Parent)
             {
                 if (p is ProfileCard) return Theme.Card;
-                if (p is JBPanel) return Theme.Panel;
                 if (p is JBTextBox) return Theme.Input;
                 var f = p as JBForm;
                 if (f != null)
@@ -510,6 +603,10 @@ namespace JoeBrowser
                     try { return f.SurfaceAt(f.PointToClient(c.PointToScreen(Point.Empty))); }
                     catch { return p.BackColor; }
                 }
+                /* Everything else paints its own BackColor, whatever that is: a page column is a
+                   plain Panel on the page background, not a Theme.Panel card. Guessing from the
+                   control type put a grey strip behind every label on the plan page in dark mode. */
+                if (p.BackColor.A == 255) return p.BackColor;
             }
             return Theme.Bg;
         }
@@ -597,6 +694,21 @@ namespace JoeBrowser
             int len = text.Length;
             while (len > 1 && Measure(g, text.Substring(0, len) + "…", font).Width > maxWidth) len--;
             return text.Substring(0, Math.Max(1, len)) + "…";
+        }
+
+        /// <summary>
+        /// Height of a word-wrapped block, capped at <paramref name="maxLines"/>. Used to centre a
+        /// title-and-description block inside a tile instead of pinning the description to a fixed
+        /// offset, which left a different amount of dead space for every string length.
+        /// </summary>
+        public static float MeasureWrapped(Graphics g, string text, Font font, float width, int maxLines)
+        {
+            if (string.IsNullOrEmpty(text) || width <= 0 || maxLines <= 0) return 0f;
+            Size s = TextRenderer.MeasureText(g, text, font, new Size((int)Math.Round(width), 4000),
+                TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
+            float lineH = (float)Math.Ceiling(font.GetHeight(g));
+            int lines = Math.Max(1, (int)Math.Round(s.Height / lineH));
+            return Math.Min(lines, maxLines) * lineH;
         }
 
         public static Color Blend(Color a, Color b, float t)

@@ -1,4 +1,10 @@
 dist/
 build/tools/
+tools/*.exe
+tools/fpcheck/
+tools/audit/
+out/
+*.exe
+*.pdb
 *.tmp
 *.log

@@ -30,8 +30,12 @@ namespace JoeBrowser
 
         /// <summary>Targets already configured, by sessionId, so a target is stamped exactly once.</summary>
         private readonly HashSet<string> _stamped = new HashSet<string>();
+        /// <summary>Worker targets already stamped. Kept apart: a worker has no Page domain.</summary>
+        private readonly HashSet<string> _workerStamped = new HashSet<string>();
+        /// <summary>Installed browser build, e.g. "156.0.4314.58". The UA string cannot carry it.</summary>
+        private string _browserFullVersion;
         private string _primarySession;
-        private bool _navigated;
+        private int _navCount;
         private readonly object _scriptState = new object();
         /// <summary>Identifiers of injected documents, so a live re-apply replaces instead of stacking.</summary>
         private readonly Dictionary<string, string> _fpScripts = new Dictionary<string, string>();
@@ -41,6 +45,12 @@ namespace JoeBrowser
         private bool _extensionsLoaded;
 
         public event Action<BrowserSession> Closed;
+
+        /// <summary>Fires when the configured proxy stopped answering and the session moved
+        /// itself onto a direct connection. The argument is the proxy that failed.</summary>
+        public event Action<string> ProxyFallback;
+
+        public bool ProxyFellBack { get; private set; }
 
         public bool IsRunning
         {
@@ -84,10 +94,33 @@ namespace JoeBrowser
             if (pref == "custom") custom = profile.BrowserPath;
             else if (pref == "auto") custom = defaultBrowserPath;
 
-            var browser = BrowserLocator.Detect(pref, custom);
+            /* A profile can be pinned to an exact build, the way AdsPower hands out kernels.
+               The pinned executable wins over whatever happens to be installed; if the build
+               was removed the profile falls back to the normal lookup rather than refusing
+               to open. */
+            BrowserInfo browser = null;
+            string pinnedExe = null;
+            if (!string.IsNullOrEmpty(profile.KernelEngine) && !string.IsNullOrEmpty(profile.KernelVersion))
+            {
+                string kernelExe = KernelStore.ResolveExe(profile.KernelEngine, profile.KernelVersion);
+                if (kernelExe != null)
+                {
+                    browser = BrowserLocator.FromPath(kernelExe, profile.KernelEngine);
+                    pinnedExe = kernelExe;
+                    Log.Info("Using pinned kernel " + profile.KernelEngine + " " + profile.KernelVersion);
+                }
+                else
+                {
+                    Log.Info("Pinned kernel " + profile.KernelEngine + " " + profile.KernelVersion +
+                             " is not installed; using the installed browser");
+                }
+            }
+            if (browser == null || !browser.Found)
+                browser = BrowserLocator.Detect(pref, custom);
             if (!browser.Found)
                 throw new InvalidOperationException("No browser found.\r\n\r\nInstall Google Chrome, Microsoft Edge, Brave or Firefox, or set a browser path in Settings.");
             s.Browser = browser;
+            s._browserFullVersion = browser.Version;
 
             var fp = profile.Fp ?? new FingerprintConfig();
             FingerprintFactory.ResolveUserAgent(fp, browser);
@@ -115,9 +148,33 @@ namespace JoeBrowser
                 throw new InvalidOperationException("This profile is already open in another window.\r\n\r\nClose it first.");
             }
 
-            // The relay always runs, even with no proxy, so a proxy can be swapped later without
-            // restarting the browser: the flag stays pointed at 127.0.0.1 and only the upstream moves.
-            s._relay = new ProxyRelay(new Func<ProxyConfig>(delegate { return s.Profile != null ? s.Profile.Proxy : null; }));
+            /* The relay is only needed when a proxy is actually configured. Routing a direct
+               connection through it adds a local hop to every request - measurably slow on
+               busy pages - and buys nothing. When a proxy is set the relay always runs, so the
+               upstream can be swapped later without restarting the browser: the flag stays
+               pointed at 127.0.0.1 and only the upstream moves. */
+            bool proxyConfigured = profile.Proxy != null && profile.Proxy.Enabled;
+
+            /* A profile is edited long before it is launched, and the proxy's country can be
+               learned in between (or the proxy replaced entirely). Re-deriving the locale from
+               the proxy's last known geography here is what keeps the clock, the language and
+               the exit IP in the same place. Without it a New York proxy could open with a
+               London clock - a one-line giveaway for any detector. */
+            if (proxyConfigured)
+                FingerprintFactory.ApplyProxyLocale(profile.Fp, profile.Proxy);
+
+            if (proxyConfigured)
+                s._relay = new ProxyRelay(new Func<ProxyConfig>(delegate { return s.Profile != null ? s.Profile.Proxy : null; }));
+
+            if (s._relay != null)
+            {
+                s._relay.Fallback += delegate(string endpoint)
+                {
+                    s.ProxyFellBack = true;
+                    var h = s.ProxyFallback;
+                    if (h != null) { try { h(endpoint); } catch { } }
+                };
+            }
 
             Log.Info("Launching " + browser.Name + " " + browser.Version + " for profile " + profile.Name);
 
@@ -132,12 +189,24 @@ namespace JoeBrowser
 
             int winW, winH;
             int viewH = FingerprintFactory.MobileViewHeight(fp);
+            /* Where the window lands matters as much as its size: a 393 px phone window pinned at
+               x=80 reads as "pushed to the left of the screen", which is exactly what a phone
+               profile looked like. Mobile windows are centred in the work area; desktop windows
+               keep the old top-left offset, where a second window is expected to cascade. */
+            int posX = 80, posY = 60;
             if (viewH > 0)
             {
                 // A phone profile has to open like a phone. A desktop-sized window next to a
                 // 393x852 emulation leaves a dead gutter and contradicts screen.width.
+                var wa = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
                 winW = Math.Max(fp.ScreenW > 0 ? fp.ScreenW : 393, 360);
                 winH = viewH + 128;
+                /* A tall device (932 px + chrome) does not fit a 1080 px screen with a taskbar;
+                   the emulated viewport is scaled inside the window, so the frame is what gives. */
+                winW = Math.Min(winW, Math.Max(320, wa.Width - 80));
+                winH = Math.Min(winH, Math.Max(480, wa.Height - 40));
+                posX = wa.Left + Math.Max(0, (wa.Width - winW) / 2);
+                posY = wa.Top + Math.Max(0, (wa.Height - winH) / 2);
             }
             else
             {
@@ -163,9 +232,51 @@ namespace JoeBrowser
             args.Add("--use-mock-keychain");
             args.Add("--lang=" + (fp.Language ?? "en-US"));
             args.Add("--window-size=" + winW + "," + winH);
-            args.Add("--window-position=80,60");
-            args.Add("--proxy-server=http://127.0.0.1:" + s._relay.Port);
-            args.Add("--proxy-bypass-list=localhost;127.0.0.1");
+            args.Add("--window-position=" + posX + "," + posY);
+            /* Only point the browser at the local relay when an upstream proxy is actually
+               configured. Routing a direct connection through the relay adds a local hop to
+               every single request (measured: 14-25 s per resource on busy pages) and buys
+               nothing. When a proxy IS set the relay always runs, so the upstream can be
+               swapped later without restarting the browser: the flag stays pointed at
+               127.0.0.1 and only the upstream moves. */
+            bool proxyOn = profile.Proxy != null && profile.Proxy.Enabled;
+            if (proxyOn)
+            {
+                args.Add("--proxy-server=http://127.0.0.1:" + s._relay.Port);
+                args.Add("--proxy-bypass-list=localhost;127.0.0.1");
+            }
+            /* DNS is the classic proxy leak: Chrome must not resolve a hostname locally for a
+               speculative connection or prefetch when the request itself is proxied. Prefetch is
+               disabled below, and both supported upstreams receive the hostname unresolved
+               (SOCKS5 ATYP=domain / HTTP CONNECT), so the lookup happens at the proxy.
+               host-resolver-rules makes that a hard guarantee: with every name mapped to
+               ~NOTFOUND, no code path inside Chromium can fall back to the local resolver, and
+               the relay is reached by IP so it still resolves. */
+            if (proxyOn) args.Add("--host-resolver-rules=\"MAP * ~NOTFOUND , EXCLUDE 127.0.0.1\"");
+            args.Add("--dns-prefetch-disable");
+            /* QUIC is UDP and is never carried by an HTTP proxy; disabling it keeps the whole
+               session on the proxied TCP path instead of a parallel direct connection. */
+            if (proxyOn) args.Add("--disable-quic");
+            /* Chromium shows a yellow "unsupported command-line flag" infobar for some of the
+               switches above (host-resolver-rules among them). That bar is itself a detection
+               signal - and a screenshot-visible one - so it is suppressed here. --test-type only
+               removes infobars; it does not set any automation flag.
+               DoH is disabled so every name resolves at the proxy rather than at a public
+               resolver the browser picked on its own, which is what a DNS-leak page reports. */
+            args.Add("--test-type");
+            /* A portable build cannot start its sandbox in an elevated (administrator) session:
+               the sandboxed child processes need a restricted token that an elevated parent is
+               not allowed to create. Chromium then logs "Sandbox cannot access executable",
+               the network service crashes and restarts, and page loads become slow and flaky.
+               Measured on a pinned Chrome for Testing build as well, not just the bundled
+               Chromium: an installed Chrome lives under Program Files and gets away with it,
+               a copy in the user's AppData does not. */
+            if (SystemProbe.IsElevated() && (browser.EngineKey == "chromium" || pinnedExe != null))
+            {
+                args.Add("--no-sandbox");
+                Log.Info("Elevated session detected: sandbox disabled for the portable build.");
+            }
+            var disableFeatures = new List<string> { "DnsOverHttps" };
             // Chrome 137+ refuses a WebGL context entirely when there is no hardware GPU. Without
             // the software fallback a machine on a VM, RemoteApp or RDP session launches with
             // getContext('webgl') === null, which is a louder tell than any renderer string.
@@ -185,15 +296,19 @@ namespace JoeBrowser
                same first-party tools through CDP as a guaranteed fallback. */
             bool masterExtensions = settings == null || settings.EnableExtensions;
             bool customExtensions = settings == null || settings.EnableCustomExtensions;
-            var folders = ExtensionManager.EnabledFolders(profile.Tools, masterExtensions, customExtensions);
+            var folders = DiagnosticNoExtensions
+                ? new List<string>()
+                : ExtensionManager.EnabledFolders(profile.Tools, masterExtensions, customExtensions, proxyOn);
             if (folders.Count > 0)
             {
                 s._extensionsLoaded = true;
-                args.Add("--disable-features=DisableLoadExtensionCommandLineSwitch");
+                disableFeatures.Add("DisableLoadExtensionCommandLineSwitch");
                 var paths = string.Join(",", folders.Select(p => p.Replace("\\", "/")).ToArray());
                 args.Add("--disable-extensions-except=\"" + paths + "\"");
                 args.Add("--load-extension=\"" + paths + "\"");
             }
+            if (disableFeatures.Count > 0)
+                args.Add("--disable-features=" + string.Join(",", disableFeatures.ToArray()));
             args.Add("about:blank");
 
             var psi = new ProcessStartInfo
@@ -239,16 +354,61 @@ namespace JoeBrowser
             return s;
         }
 
+        /// <summary>
+        /// Optional sink for raw CDP events. The diagnostic harness uses it to see console
+        /// errors and failed requests; production code never sets it.
+        /// </summary>
+        /// <summary>
+        /// Turns on the Runtime domain for the live tab so console output and exceptions are
+        /// reported to the CDP event sink. Used by the diagnostic harness only.
+        /// </summary>
+        public async Task EnableDiagnosticsAsync()
+        {
+            if (_cdp == null) return;
+            await TrySend("Runtime.enable", null, _primarySession).ConfigureAwait(false);
+        }
+
+        public Action<string, Dictionary<string, object>> DebugEvents;
+
+        /// <summary>Diagnostic only: launch without any extension loaded.</summary>
+        public static bool DiagnosticNoExtensions;
+
+        /// <summary>Diagnostic only: launch without the injected fingerprint script.</summary>
+        public static bool DiagnosticNoInjection;
+
         private void OnCdpEvent(string method, Dictionary<string, object> args)
         {
+            var dbg = DebugEvents;
+            if (dbg != null)
+            {
+                try { dbg(method, args ?? new Dictionary<string, object>()); } catch { }
+            }
             if (method == "Target.attachedToTarget")
             {
                 string sessionId = Str(args, "sessionId");
                 if (string.IsNullOrEmpty(sessionId)) return;
                 var info = Get<Dictionary<string, object>>(args, "targetInfo");
                 string type = info != null ? Str(info, "type") : "";
+                if (type == "worker" || type == "service_worker" || type == "shared_worker")
+                {
+                    string wurl = info != null ? Str(info, "url") : "";
+                    /* Extension and devtools workers are not part of the page's fingerprint
+                       surface, and a background extension worker does not answer Runtime
+                       commands at all - attaching to them only burns the timeout. */
+                    if (wurl.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase) ||
+                        wurl.StartsWith("devtools://", StringComparison.OrdinalIgnoreCase))
+                        return;
+                    /* A worker has its own realm and never runs Page.addScriptToEvaluateOnNewDocument.
+                       Leaving it unstamped meant navigator/canvas/WebGL read back the real values
+                       there, which is a direct main-thread-vs-worker mismatch any fingerprint
+                       library can spot with one postMessage. */
+                    var worker = StampWorkerAsync(sessionId);
+                    Log.Info("Worker target attached: " + wurl + " [" + sessionId + "]");
+                    return;
+                }
                 if (type != "page") return;
-                var ignored = StampSessionAsync(sessionId, null);
+                Log.Info("Page target attached: " + (info != null ? Str(info, "url") : "") + " [" + sessionId + "]");
+                var ignored = StampSessionAsync(sessionId, null, info != null ? Str(info, "url") : "");
                 return;
             }
             if (method == "Target.detachedFromTarget" || method == "Target.targetDestroyed")
@@ -269,6 +429,43 @@ namespace JoeBrowser
                         _locales.Remove(sessionId);
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// Applies the profile to a worker realm. Workers expose no Page domain, so the same
+        /// script is evaluated once in the worker's execution context instead.
+        /// </summary>
+        private async Task StampWorkerAsync(string sessionId)
+        {
+            if (string.IsNullOrEmpty(sessionId) || _cdp == null) return;
+            lock (_workerStamped)
+            {
+                if (_workerStamped.Contains(sessionId)) return;
+                _workerStamped.Add(sessionId);
+            }
+            var fp = Profile != null ? Profile.Fp : null;
+            if (fp == null) return;
+            try
+            {
+                string lang = string.IsNullOrEmpty(fp.Language) ? "en-US" : fp.Language;
+                string baseLang = lang.Split('-')[0];
+                string[] languages = lang.IndexOf('-') > 0 ? new[] { lang, baseLang } : new[] { lang };
+                var meta = BuildUaMetadata(fp, null, _browserFullVersion);
+                string script = FingerprintScript.Build(fp, fp.UserAgent, fp.Platform, lang, languages, meta);
+                /* No Runtime.enable here: on a worker session it waits for a domain handshake
+                   that never completes on every build, while evaluate reaches the default
+                   execution context directly. */
+                await _cdp.SendAsync("Runtime.evaluate", new Dictionary<string, object>
+                {
+                    { "expression", script },
+                    { "returnByValue", true },
+                    { "awaitPromise", false }
+                }, sessionId, 2500).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Log.Info("Worker stamp skipped: " + ex.Message);
             }
         }
 
@@ -298,13 +495,13 @@ namespace JoeBrowser
                     var info = o as Dictionary<string, object>;
                     if (info == null) continue;
                     if (Str(info, "type") != "page") continue;
-                    await AttachAndStampAsync(Str(info, "targetId")).ConfigureAwait(false);
+                    await AttachAndStampAsync(Str(info, "targetId"), Str(info, "url")).ConfigureAwait(false);
                 }
             }
             catch (Exception ex) { Log.Error("Target enumeration failed", ex); }
         }
 
-        private async Task AttachAndStampAsync(string targetId)
+        private async Task AttachAndStampAsync(string targetId, string targetUrl)
         {
             if (string.IsNullOrEmpty(targetId)) return;
             try
@@ -315,7 +512,7 @@ namespace JoeBrowser
                     { "flatten", true }
                 }, 8000).ConfigureAwait(false);
                 string sessionId = Str(res, "sessionId");
-                if (!string.IsNullOrEmpty(sessionId)) await StampSessionAsync(sessionId, null).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(sessionId)) await StampSessionAsync(sessionId, null, targetUrl).ConfigureAwait(false);
             }
             catch (Exception ex) { Log.Error("Attaching to target failed", ex); }
         }
@@ -325,7 +522,7 @@ namespace JoeBrowser
         /// configured once, so a popup Chrome reports twice does not get two script copies.
         /// The first target that gets stamped also loads the start page.
         /// </summary>
-        private async Task StampSessionAsync(string sessionId, string navigateTo)
+        private async Task StampSessionAsync(string sessionId, string navigateTo, string targetUrl)
         {
             lock (_stamped)
             {
@@ -333,15 +530,14 @@ namespace JoeBrowser
                 _stamped.Add(sessionId);
             }
             if (_primarySession == null) _primarySession = sessionId;
-            if (!_navigated)
-            {
-                _navigated = true;
-                navigateTo = _startUrl;
-            }
-            else
-            {
-                navigateTo = null;
-            }
+            /* Edge reports more than one "page" target at launch - the visible tab plus an
+               internal blank page - and the internal one can attach first. Navigating only the
+               first target therefore left the real window sitting on about:blank with the
+               fingerprint applied to a page nobody could see. Every blank page is navigated
+               once, capped so later user tabs are untouched. */
+            bool blank = string.IsNullOrEmpty(targetUrl) || targetUrl == "about:blank" || targetUrl == "edge://newtab";
+            if (blank && Interlocked.Increment(ref _navCount) <= 3) navigateTo = _startUrl;
+            else navigateTo = null;
             var fp = Profile != null ? Profile.Fp : null;
             if (fp == null) return;
             try
@@ -359,13 +555,14 @@ namespace JoeBrowser
         private static void ApplyWebRtcFlags(List<string> args, FingerprintConfig fp)
         {
             string mode = fp.WebRtcMode ?? (fp.WebRtcProtect ? "proxy" : "off");
-            // "Disabled" is enforced in the page: the injected script replaces RTCPeerConnection
-            // outright, which a command-line policy cannot do.
-            if (mode.Equals("off", StringComparison.OrdinalIgnoreCase)) return;
+            /* Off is not just a page-level decision: without the policy Chrome still sends STUN
+               packets directly and a network-level leak test sees the real interface. The page
+               script additionally withholds every candidate, which a command-line policy alone
+               cannot do. */
             string policy = mode.Equals("public", StringComparison.OrdinalIgnoreCase)
                 ? "default_public_interface_only" : "disable_non_proxied_udp";
             args.Add("--force-webrtc-ip-handling-policy=" + policy);
-            args.Add("--webrtc-ip-handling-policy=" + policy);
+            args.Add("--enforce-webrtc-ip-permission-check");
         }
 
         /// <summary>
@@ -415,17 +612,44 @@ namespace JoeBrowser
                 // RFP would pin the clock to UTC and shrink the viewport, which fights the profile.
                 sb.AppendLine("user_pref(\"privacy.resistFingerprinting\", false);");
                 sb.AppendLine("user_pref(\"privacy.trackingprotection.enabled\", false);");
-                sb.AppendLine("user_pref(\"network.proxy.type\", 1);");
-                sb.AppendLine("user_pref(\"network.proxy.http\", \"127.0.0.1\");");
-                sb.AppendLine("user_pref(\"network.proxy.http_port\", " + _relay.Port + ");");
-                sb.AppendLine("user_pref(\"network.proxy.ssl\", \"127.0.0.1\");");
-                sb.AppendLine("user_pref(\"network.proxy.ssl_port\", " + _relay.Port + ");");
-                sb.AppendLine("user_pref(\"network.proxy.socks\", \"127.0.0.1\");");
-                sb.AppendLine("user_pref(\"network.proxy.socks_port\", " + _relay.Port + ");");
-                sb.AppendLine("user_pref(\"network.proxy.socks_version\", 5);");
-                sb.AppendLine("user_pref(\"network.proxy.no_proxies_on\", \"localhost, 127.0.0.1\");");
-                sb.AppendLine("user_pref(\"network.proxy.autoconfig_url\", \"\");");
-                sb.AppendLine("user_pref(\"media.peerconnection.enabled\", " + (fp.WebRtcProtect ? "false" : "true") + ");");
+                /* Firefox must not be pointed at the relay unless an upstream proxy is really
+                   configured - same reason as the Chromium --proxy-server flag. With no proxy
+                   the browser talks to the network directly, which is both faster and honest. */
+                bool fxProxy = Profile != null && Profile.Proxy != null && Profile.Proxy.Enabled && _relay != null;
+                if (fxProxy)
+                {
+                    sb.AppendLine("user_pref(\"network.proxy.type\", 1);");
+                    sb.AppendLine("user_pref(\"network.proxy.http\", \"127.0.0.1\");");
+                    sb.AppendLine("user_pref(\"network.proxy.http_port\", " + _relay.Port + ");");
+                    sb.AppendLine("user_pref(\"network.proxy.ssl\", \"127.0.0.1\");");
+                    sb.AppendLine("user_pref(\"network.proxy.ssl_port\", " + _relay.Port + ");");
+                    sb.AppendLine("user_pref(\"network.proxy.socks\", \"127.0.0.1\");");
+                    sb.AppendLine("user_pref(\"network.proxy.socks_port\", " + _relay.Port + ");");
+                    sb.AppendLine("user_pref(\"network.proxy.socks_version\", 5);");
+                    sb.AppendLine("user_pref(\"network.proxy.no_proxies_on\", \"localhost, 127.0.0.1\");");
+                    sb.AppendLine("user_pref(\"network.proxy.autoconfig_url\", \"\");");
+                    sb.AppendLine("user_pref(\"network.proxy.socks_remote_dns\", true);");
+                    /* Without failover_direct a dead proxy stops the page instead of silently
+                       falling back to the real IP, which is the worst possible leak. */
+                    sb.AppendLine("user_pref(\"network.proxy.failover_direct\", false);");
+                }
+                else
+                {
+                    sb.AppendLine("user_pref(\"network.proxy.type\", 0);");
+                    sb.AppendLine("user_pref(\"network.proxy.share_proxy_settings\", false);");
+                }
+                sb.AppendLine("user_pref(\"network.dns.disablePrefetch\", true);");
+                sb.AppendLine("user_pref(\"network.dns.disablePrefetchFromHTTPS\", true);");
+                sb.AppendLine("user_pref(\"network.prefetch-next\", false);");
+                sb.AppendLine("user_pref(\"network.http.speculative-parallel-limit\", 0);");
+                sb.AppendLine("user_pref(\"browser.region.network.url\", \"\");");
+                sb.AppendLine("user_pref(\"browser.region.update.enabled\", false);");
+                string rtcMode = fp.WebRtcMode ?? (fp.WebRtcProtect ? "proxy" : "off");
+                bool rtcOff = rtcMode.Equals("off", StringComparison.OrdinalIgnoreCase);
+                sb.AppendLine("user_pref(\"media.peerconnection.enabled\", " + (rtcOff ? "false" : "true") + ");");
+                sb.AppendLine("user_pref(\"media.peerconnection.ice.no_host\", true);");
+                if (!rtcMode.Equals("public", StringComparison.OrdinalIgnoreCase))
+                    sb.AppendLine("user_pref(\"media.peerconnection.ice.proxy_only\", true);");
 
                 string lang = string.IsNullOrEmpty(fp.Language) ? "en-US" : fp.Language;
                 sb.AppendLine("user_pref(\"intl.locale.requested\", \"" + Escape(lang) + "\");");
@@ -503,6 +727,11 @@ namespace JoeBrowser
 
             await TrySend("Page.enable", null, session);
             await TrySend("Network.enable", null, session);
+            /* Runtime.enable only when somebody is listening: it makes the renderer report every
+               console call and exception to us, which is what the diagnostic harness needs to
+               explain a page that never finishes loading. Left off in normal use to keep the
+               event traffic (and the memory behind it) at zero. */
+            if (DebugEvents != null) await TrySend("Runtime.enable", null, session);
 
             if (!string.IsNullOrEmpty(fp.Timezone))
             {
@@ -550,13 +779,18 @@ namespace JoeBrowser
 
             bool mobile = fp.DeviceType != null && fp.DeviceType != "desktop";
             int viewH = FingerprintFactory.MobileViewHeight(fp);
+            /* Read the running browser's GREASE brand once, then use the same object for the
+               request headers and the in-page navigator.userAgentData override. Two separate
+               reads could disagree and produce the "different browser version" flag. */
+            Dictionary<string, object> uaMeta = FingerprintFactory.IsIos(fp.Os)
+                ? null : await BuildUaMetadataAsync(fp, session).ConfigureAwait(false);
             if (!string.IsNullOrEmpty(fp.UserAgent))
             {
                 // The header has to move with the scripted navigator even when the profile claims
                 // this machine's own platform: a matching JS UA next to a real header UA is a
                 // contradiction any remote script can read in one request.
                 // Real iOS browsers expose no UA-Client-Hints at all, so the override carries none.
-                object meta = FingerprintFactory.IsIos(fp.Os) ? null : (object)await BuildUaMetadataAsync(fp, session).ConfigureAwait(false);
+                object meta = uaMeta;
                 var overrideParams = new Dictionary<string, object>
                 {
                     { "userAgent", fp.UserAgent },
@@ -569,12 +803,24 @@ namespace JoeBrowser
 
             if (mobile)
             {
+                /* screen.orientation has to agree with the shape of the viewport: a 393x852
+                   phone reporting "landscape-primary" is a contradiction that costs nothing
+                   to get right. Tablets open in the same orientation as their geometry. */
+                int sw = fp.ScreenW > 0 ? fp.ScreenW : 390;
+                int sh = viewH > 0 ? viewH : (fp.ScreenH > 0 ? fp.ScreenH : 844);
+                var orientation = new Dictionary<string, object>
+                {
+                    { "type", sh >= sw ? "portraitPrimary" : "landscapePrimary" },
+                    { "angle", sh >= sw ? 0 : 90 }
+                };
+
                 await TrySend("Emulation.setDeviceMetricsOverride", new Dictionary<string, object>
                 {
-                    { "width", fp.ScreenW > 0 ? fp.ScreenW : 390 },
-                    { "height", viewH > 0 ? viewH : (fp.ScreenH > 0 ? fp.ScreenH : 844) },
+                    { "width", sw },
+                    { "height", sh },
                     { "deviceScaleFactor", fp.PixelRatio > 0 ? fp.PixelRatio : 3 },
-                    { "mobile", true }
+                    { "mobile", true },
+                    { "screenOrientation", orientation }
                 }, session);
                 await TrySend("Emulation.setTouchEmulationEnabled", new Dictionary<string, object>
                 {
@@ -607,7 +853,13 @@ namespace JoeBrowser
             if (!string.IsNullOrEmpty(oldTool))
                 await TrySend("Page.removeScriptToEvaluateOnNewDocument", new Dictionary<string, object> { { "identifier", oldTool } }, session);
 
-            string script = FingerprintScript.Build(fp, fp.UserAgent, fp.Platform, lang, languages);
+            string script = FingerprintScript.Build(fp, fp.UserAgent, fp.Platform, lang, languages, uaMeta);
+            if (DiagnosticNoInjection)
+            {
+                if (!string.IsNullOrEmpty(navigateTo))
+                    await TrySend("Page.navigate", new Dictionary<string, object> { { "url", navigateTo } }, session);
+                return;
+            }
             var fpRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", new Dictionary<string, object>
             {
                 { "source", script },
@@ -674,10 +926,10 @@ namespace JoeBrowser
 
         private async Task<Dictionary<string, object>> BuildUaMetadataAsync(FingerprintConfig fp, string session)
         {
-            return BuildUaMetadata(fp, await ReadRealClientHintsAsync(session).ConfigureAwait(false));
+            return BuildUaMetadata(fp, await ReadRealClientHintsAsync(session).ConfigureAwait(false), _browserFullVersion);
         }
 
-        private static Dictionary<string, object> BuildUaMetadata(FingerprintConfig fp, Dictionary<string, object> real)
+        private static Dictionary<string, object> BuildUaMetadata(FingerprintConfig fp, Dictionary<string, object> real, string installedFull)
         {
             int major = 131;
             string full = null;
@@ -731,31 +983,47 @@ namespace JoeBrowser
                     }
             }
 
+            /* Both lists must describe the same products. The previous version copied only the
+               GREASE entry from the running browser and skipped the rest whenever it found one,
+               leaving fullVersionList with a single fake brand - the exact "different browser
+               version" mismatch a client-hints checker reports. */
             var reduced = new List<object>();
             var fullListOut = new List<object>();
+            string chromiumFull = full;
+            string brandFull = full;
+            string greaseFull = "8.0.0.0";
+            if (!string.IsNullOrEmpty(greaseVersion))
+                greaseFull = greaseVersion.IndexOf('.') >= 0 ? greaseVersion : greaseVersion + ".0.0.0";
+            foreach (var b in realFull)
+            {
+                string name = Str(b, "brand");
+                string ver = Str(b, "version");
+                if (string.IsNullOrEmpty(ver)) continue;
+                if (name == "Chromium") chromiumFull = ver;
+                else if (name == brandName) brandFull = ver;
+                else if (greaseBrand != null && name == greaseBrand) greaseFull = ver;
+            }
+            /* The UA string is reduced to major.0.0.0, so it cannot supply the build number the
+               hints are required to carry. Use the installed browser's real build, then the live
+               hint, and only fall back to a synthesised one if both are missing. */
+            string realFullVersion = IsRealBuild(installedFull) ? installedFull
+                : (IsRealBuild(brandFull) ? brandFull : (IsRealBuild(chromiumFull) ? chromiumFull : FingerprintFactory.FullChromiumVersion(null, major)));
+            if (!IsRealBuild(chromiumFull)) chromiumFull = realFullVersion;
+            if (!IsRealBuild(brandFull)) brandFull = realFullVersion;
             if (greaseBrand != null)
             {
                 reduced.Add(new Dictionary<string, object> { { "brand", greaseBrand }, { "version", greaseVersion ?? "8" } });
-                foreach (var b in realFull)
-                    if (Str(b, "brand") == greaseBrand) fullListOut.Add(b);
+                fullListOut.Add(new Dictionary<string, object> { { "brand", greaseBrand }, { "version", greaseFull } });
             }
             else
             {
                 reduced.Add(new Dictionary<string, object> { { "brand", "Not_A Brand" }, { "version", "8" } });
+                fullListOut.Add(new Dictionary<string, object> { { "brand", "Not_A Brand" }, { "version", "8.0.0.0" } });
             }
             reduced.Add(new Dictionary<string, object> { { "brand", "Chromium" }, { "version", major.ToString() } });
             reduced.Add(new Dictionary<string, object> { { "brand", brandName }, { "version", major.ToString() } });
-
-            if (fullListOut.Count == 0)
-            {
-                fullListOut.Add(new Dictionary<string, object>
-                {
-                    { "brand", greaseBrand ?? "Not_A Brand" },
-                    { "version", greaseBrand != null ? (greaseVersion ?? "8.0.0.0") : "8.0.0.0" }
-                });
-                fullListOut.Add(new Dictionary<string, object> { { "brand", "Chromium" }, { "version", full } });
-                fullListOut.Add(new Dictionary<string, object> { { "brand", brandName }, { "version", full } });
-            }
+            fullListOut.Add(new Dictionary<string, object> { { "brand", "Chromium" }, { "version", chromiumFull } });
+            fullListOut.Add(new Dictionary<string, object> { { "brand", brandName }, { "version", brandFull } });
 
             string platform = FingerprintFactory.IsMac(fp.Os) ? "macOS"
                 : (FingerprintFactory.IsLinux(fp.Os) ? "Linux" : (android ? "Android" : "Windows"));
@@ -796,7 +1064,7 @@ namespace JoeBrowser
             {
                 { "brands", reduced },
                 { "fullVersionList", fullListOut },
-                { "fullVersion", full },
+                { "fullVersion", realFullVersion },
                 { "platform", platform },
                 { "platformVersion", platformVersion },
                 { "architecture", architecture },
@@ -807,8 +1075,24 @@ namespace JoeBrowser
             };
         }
 
-        private static bool HasTrue(Dictionary<string, object> d, string key)
+        /// <summary>
+        /// True when the string looks like a build number a real Chromium ships: four numeric
+        /// parts with a non-zero build and patch. "156.0.0.0" is the reduced UA shape and must
+        /// never be handed to client hints, which always carry the full build.
+        /// </summary>
+        private static bool IsRealBuild(string version)
         {
+            if (string.IsNullOrEmpty(version)) return false;
+            string[] parts = version.Trim().Split('.');
+            if (parts.Length != 4) return false;
+            int head, build, patch;
+            if (!int.TryParse(parts[0], out head) || head <= 0) return false;
+            if (!int.TryParse(parts[2], out build) || build <= 0) return false;
+            if (!int.TryParse(parts[3], out patch) || patch <= 0) return false;
+            return true;
+        }
+
+        private static bool HasTrue(Dictionary<string, object> d, string key)        {
             object v;
             if (!d.TryGetValue(key, out v) || v == null) return false;
             if (v is bool) return (bool)v;
@@ -846,6 +1130,75 @@ namespace JoeBrowser
         {
             try { return await _cdp.SendAsync(method, parameters, session, 15000).ConfigureAwait(false); }
             catch (Exception ex) { Log.Error("CDP " + method + " failed", ex); return null; }
+        }
+
+        /// <summary>
+        /// Clears cache and/or cookies through the browser's own storage APIs, so a profile that
+        /// is already open can be cleaned without closing it. Site data additionally asks every
+        /// origin the profile has touched to drop its storage.
+        /// </summary>
+        public async Task<bool> ClearStorageAsync(ClearScope scope)
+        {
+            if (_cdp == null) return false;
+            bool any = false;
+            try
+            {
+                if (scope != ClearScope.Cookies)
+                {
+                    await _cdp.SendAsync("Network.clearBrowserCache", null, null, 15000).ConfigureAwait(false);
+                    any = true;
+                }
+                if (scope != ClearScope.Cache)
+                {
+                    await _cdp.SendAsync("Network.clearBrowserCookies", null, null, 15000).ConfigureAwait(false);
+                    any = true;
+                }
+                if (scope == ClearScope.SiteData)
+                {
+                    /* Storage.clearDataForOrigin needs an origin, and there is no "all" variant.
+                       The start page's origin plus the two most common login origins cover the
+                       case this button exists for: a site that stored something the user wants
+                       gone while the tab stays open. Everything else is handled on disk once the
+                       profile is closed. */
+                    foreach (string origin in SiteOrigins())
+                    {
+                        try
+                        {
+                            await _cdp.SendAsync("Storage.clearDataForOrigin", new Dictionary<string, object>
+                            {
+                                { "origin", origin },
+                                { "storageTypes", "all" }
+                            }, null, 15000).ConfigureAwait(false);
+                            any = true;
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Clearing browser storage failed", ex);
+            }
+            return any;
+        }
+
+        private IEnumerable<string> SiteOrigins()
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var list = new List<string>();
+            string[] urls = { _startUrl, Profile != null ? Profile.StartUrl : null };
+            foreach (string u in urls)
+            {
+                if (string.IsNullOrWhiteSpace(u)) continue;
+                try
+                {
+                    var uri = new Uri(u);
+                    string origin = uri.Scheme + "://" + uri.Host + (uri.IsDefaultPort ? "" : ":" + uri.Port);
+                    if (seen.Add(origin)) list.Add(origin);
+                }
+                catch { }
+            }
+            return list;
         }
 
         /// <summary>Exports every cookie of this browser context as a portable JSON array.</summary>
@@ -1008,13 +1361,23 @@ namespace JoeBrowser
 
         public async Task<string> EvaluateAsync(string expression)
         {
+            return await EvaluateAsync(expression, 15000).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// A long-timeout variant for fingerprint sites whose own JavaScript keeps the main
+        /// thread busy for tens of seconds on a software renderer. The page is not broken;
+        /// a 15 second cut would report a healthy load as a failure.
+        /// </summary>
+        public async Task<string> EvaluateAsync(string expression, int timeoutMs)
+        {
             if (_cdp == null) return null;
             var result = await _cdp.SendAsync("Runtime.evaluate", new Dictionary<string, object>
             {
                 { "expression", expression },
                 { "returnByValue", true },
                 { "awaitPromise", true }
-            }, _primarySession, 15000).ConfigureAwait(false);
+            }, _primarySession, timeoutMs).ConfigureAwait(false);
             object res;
             if (result != null && result.TryGetValue("result", out res))
             {
@@ -1023,6 +1386,67 @@ namespace JoeBrowser
                 if (d != null && d.TryGetValue("value", out v) && v != null) return Convert.ToString(v);
             }
             return null;
+        }
+
+        /// <summary>
+        /// Types real characters into the focused element with the DevTools input domain.
+        /// This is the only honest way to test that a login form accepts input: setting
+        /// element.value in JavaScript bypasses every framework binding and proves nothing
+        /// about whether a user can actually sign in.
+        /// </summary>
+        public async Task<string> TypeTextAsync(string text)
+        {
+            if (_cdp == null || string.IsNullOrEmpty(text)) return null;
+            try
+            {
+                await _cdp.SendAsync("Input.insertText", new Dictionary<string, object> { { "text", text } },
+                    _primarySession, 15000).ConfigureAwait(false);
+                return text;
+            }
+            catch (Exception ex)
+            {
+                Log.Info("Type failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>Navigates the live tab to a URL, keeping the fingerprint applied.</summary>
+        public async Task<bool> NavigateAsync(string url)
+        {
+            if (_cdp == null || string.IsNullOrEmpty(url)) return false;
+            try
+            {
+                var r = await _cdp.SendAsync("Page.navigate", new Dictionary<string, object> { { "url", url } },
+                    _primarySession, 20000).ConfigureAwait(false);
+                if (r == null) return false;
+                object err;
+                if (r.TryGetValue("errorText", out err) && err != null) return false;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Info("Navigate failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Captures the visible tab as PNG through the DevTools protocol. Works without an
+        /// interactive desktop, unlike a screen grab.
+        /// </summary>
+        public async Task<string> ScreenshotAsync(string path)
+        {
+            if (_cdp == null) return null;
+            var result = await _cdp.SendAsync("Page.captureScreenshot", new Dictionary<string, object>
+            {
+                { "format", "png" },
+                { "fromSurface", true }
+            }, _primarySession, 15000).ConfigureAwait(false);
+            object data;
+            if (result == null || !result.TryGetValue("data", out data) || data == null) return null;
+            byte[] bytes = Convert.FromBase64String(Convert.ToString(data));
+            File.WriteAllBytes(path, bytes);
+            return path;
         }
 
         public void Focus()

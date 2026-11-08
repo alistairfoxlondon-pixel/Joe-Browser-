@@ -23,7 +23,6 @@ namespace JoeBrowser
         private readonly JBScrollHost _host;
         private readonly List<ProxyRow> _rows = new List<ProxyRow>();
         private JBButton _addBtn, _importBtn, _checkBtn;
-        private JBLabel _title, _sub;
         private PromoCard _promo;
         private JBPanel _empty;
         private bool _layingOut;
@@ -41,11 +40,8 @@ namespace JoeBrowser
             _host = new JBScrollHost(_column);
             Controls.Add(_host);
 
-            _title = new JBLabel(LabelRole.Strong, "Proxy library");
-            _sub = new JBLabel(LabelRole.Faint, "Add once, check any time, then pick from this list when creating a profile.");
-            _sub.Wrap = true;
-            _column.Controls.Add(_title);
-            _column.Controls.Add(_sub);
+            /* The header band above already names the page and explains it; repeating a title
+               and a subtitle inside the scroll area was pure duplication. */
 
             _addBtn = MakeButton("Add proxy", "plus", BtnKind.Primary, "add");
             _importBtn = MakeButton("Import list", "download", BtnKind.Soft, "import");
@@ -135,7 +131,7 @@ namespace JoeBrowser
             float ic = Ui.S(22);
             Icons.Draw(g, "proxy", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
             Ui.Text(g, "No proxies saved yet", Theme.H3, Theme.Text, cr.Right + Ui.S(16), Ui.S(28), w - cr.Right - Ui.S(30));
-            Ui.Text(g, "Add a proxy here and it becomes available in the profile editor and in batch creation.",
+            Ui.Text(g, "Add one to use it in profiles.",
                 Theme.Small, Theme.TextDim, cr.Right + Ui.S(16), Ui.S(52), w - cr.Right - Ui.S(30), "left", 2);
         }
 
@@ -163,13 +159,10 @@ namespace JoeBrowser
                 int pad = Ui.S(28);
                 int inner = Math.Max(Ui.S(200), w - pad * 2);
 
-                _title.SetBounds(pad, Ui.S(6), inner, Ui.S(22));
-                _sub.SetBounds(pad, Ui.S(30), inner, Ui.S(20));
-
                 int bw1 = _addBtn.PreferredWidth(Ui.S(120));
                 int bw2 = _importBtn.PreferredWidth(Ui.S(110));
                 int bw3 = _checkBtn.PreferredWidth(Ui.S(110));
-                int by = Ui.S(60);
+                int by = Ui.S(6);
                 _addBtn.SetBounds(pad, by, bw1, Ui.S(33));
                 _importBtn.SetBounds(pad + bw1 + Ui.S(10), by, bw2, Ui.S(33));
                 _checkBtn.SetBounds(pad + bw1 + bw2 + Ui.S(20), by, bw3, Ui.S(33));

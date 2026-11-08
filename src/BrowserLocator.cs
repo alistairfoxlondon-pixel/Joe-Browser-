@@ -20,10 +20,15 @@ namespace JoeBrowser
         /// <summary>Chromium engines accept CDP and command line fingerprint flags.</summary>
         public bool IsChromium { get { return !IsFirefox; } }
 
+        /// <summary>Set when the executable came from a pinned kernel, so a Chromium build is
+        /// never mistaken for Google Chrome just because its binary is called chrome.exe.</summary>
+        public string ForcedEngine { get; set; }
+
         public string EngineKey
         {
             get
             {
+                if (!string.IsNullOrEmpty(ForcedEngine)) return ForcedEngine;
                 if (IsFirefox) return "firefox";
                 if (IsEdge) return "edge";
                 if (IsBrave) return "brave";
@@ -153,10 +158,27 @@ namespace JoeBrowser
             catch { }
         }
 
+        /// <summary>
+        /// Wraps an executable that is not in a standard install location - a pinned kernel, for
+        /// instance. The engine is supplied by the caller because a Chromium snapshot and Google
+        /// Chrome ship the same chrome.exe and cannot be told apart by file name.
+        /// </summary>
+        public static BrowserInfo FromPath(string path, string engineKey)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
+            var info = FromFile(path);
+            info.ForcedEngine = engineKey;
+            if (engineKey == "chromium") info.Name = "Chromium";
+            else if (engineKey == "brave") { info.Name = "Brave"; info.IsBrave = true; }
+            else if (engineKey == "firefox") { info.Name = "Firefox"; info.IsFirefox = true; }
+            else if (engineKey == "edge") { info.Name = "Edge"; info.IsEdge = true; }
+            else if (engineKey == "chrome") { info.Name = "Chrome"; info.IsEdge = false; info.IsBrave = false; }
+            return info;
+        }
+
         private static BrowserInfo FromFile(string path)
         {
-            var info = new BrowserInfo { Path = path, Name = System.IO.Path.GetFileNameWithoutExtension(path) };
-            try
+            var info = new BrowserInfo { Path = path, Name = System.IO.Path.GetFileNameWithoutExtension(path) };            try
             {
                 var fvi = FileVersionInfo.GetVersionInfo(path);
                 info.Version = fvi.ProductVersion ?? fvi.FileVersion ?? "";

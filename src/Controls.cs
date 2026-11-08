@@ -8,8 +8,8 @@ using System.Windows.Forms;
 namespace JoeBrowser
 {
     internal enum BtnKind { Primary, Ghost, Soft, Danger, Nav }
-    internal enum ToastKind { Success, Info, Error }
-    internal enum LabelRole { Title, Body, Dim, Faint, Accent, Strong }
+    internal enum ToastKind { Success, Info, Warn, Error }
+    internal enum LabelRole { Title, Body, Dim, Faint, Accent, Strong, Mono }
 
     /// <summary>Label that remembers its role so a theme flip restores the right contrast.</summary>
     internal sealed class JBLabel : Label, IReStyle
@@ -40,7 +40,8 @@ namespace JoeBrowser
                 case LabelRole.Body: Font = Theme.Small; ForeColor = Theme.TextDim; break;
                 case LabelRole.Dim: Font = Theme.Small; ForeColor = Theme.TextFaint; break;
                 case LabelRole.Faint: Font = Theme.Caption; ForeColor = Theme.TextFaint; break;
-                case LabelRole.Accent: Font = Theme.Micro; ForeColor = Theme.TextDim; break;
+                case LabelRole.Accent: Font = Theme.SmallBold; ForeColor = Theme.TextDim; break;
+                case LabelRole.Mono: Font = Theme.MonoBody; ForeColor = Theme.Text; break;
             }
             Invalidate();
         }
@@ -112,6 +113,23 @@ namespace JoeBrowser
             catch { }
         }
 
+        /// <summary>
+        /// Asks DWM to draw the non-client area dark. Without this a themed dialog keeps the
+        /// default white caption bar above a dark client area, which is the single most
+        /// "this app is broken" looking thing in the whole product.
+        /// </summary>
+        public static void ImmersiveDarkMode(IntPtr hwnd, bool dark)
+        {
+            try
+            {
+                int on = dark ? 1 : 0;
+                // 20 on Windows 10 2004 and later; 19 on the builds before the attribute moved.
+                if (DwmSetWindowAttribute(hwnd, 20, ref on, sizeof(int)) != 0)
+                    DwmSetWindowAttribute(hwnd, 19, ref on, sizeof(int));
+            }
+            catch { }
+        }
+
         public static void DarkScroll(Control c)
         {
             try { SetWindowTheme(c.Handle, "DarkMode_Explorer", null); } catch { }
@@ -139,6 +157,10 @@ namespace JoeBrowser
             DoubleBuffered = true;
             StartPosition = FormStartPosition.CenterParent;
             KeyPreview = true;
+            /* Without this every window inherits the generic Windows application icon, so the
+               taskbar button and Alt-Tab show a blank placeholder instead of the Joe mark. */
+            Icon = AppIcon.Window;
+            ShowIcon = true;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             _onModeChanged = delegate { ReStyle(); };
             Theme.ModeChanged += _onModeChanged;
@@ -162,6 +184,7 @@ namespace JoeBrowser
             base.OnHandleCreated(e);
             Native.RoundedCorners(Handle, Theme.Radius);
             Native.WindowBorderColor(Handle, Theme.Line);
+            Native.ImmersiveDarkMode(Handle, Theme.Dark);
         }
 
         public void ToggleMaximize()
@@ -729,6 +752,21 @@ namespace JoeBrowser
     /// <summary>Text field with optional leading icon, trailing action and its own thin scrollbar.</summary>
     internal class JBTextBox : Panel, IReStyle
     {
+        /* A native Edit sits inside this panel, so WinForms resolves Tab against the panel -
+           which only contains that one edit - and focus never leaves the field. Intercepting
+           the dialog key here hands Tab back to the form so it walks the real tab order. */
+        private sealed class FieldBox : TextBox
+        {
+            public Func<Keys, bool> DialogKey;
+
+            protected override bool ProcessDialogKey(Keys keyData)
+            {
+                if ((keyData & Keys.KeyCode) == Keys.Tab && DialogKey != null && DialogKey(keyData))
+                    return true;
+                return base.ProcessDialogKey(keyData);
+            }
+        }
+
         public readonly TextBox Box;
         private bool _focused;
         private string _placeholder = "";
@@ -742,8 +780,15 @@ namespace JoeBrowser
         {
             _multiline = multiline;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+            /* Panel disables the Selectable style, so WinForms treats a field wrapper as an
+               unreachable container: SelectNextControl skips it and Tab jumps straight past
+               every text box. Re-enabling it makes the wrapper a real tab stop; focus is then
+               forwarded to the inner edit by OnGotFocus. */
+            SetStyle(ControlStyles.Selectable, true);
             BackColor = Theme.Bg;
-            Box = new TextBox();
+            Box = new FieldBox();
+            ((FieldBox)Box).DialogKey = FieldTab;
+            TabStop = true;   // makes the field a real stop in the form's tab order
             Box.BorderStyle = BorderStyle.None;
             Box.BackColor = Theme.Input;
             Box.ForeColor = Theme.Text;
@@ -837,16 +882,17 @@ namespace JoeBrowser
             {
                 _placeholder = value ?? "";
                 if (Box.IsHandleCreated)
-                    Native.SendMessage(Box.Handle, Native.EM_SETCUEBANNER, IntPtr.Zero, _placeholder);
+                    // wParam TRUE keeps the cue visible while the field has focus, so a form
+                    // that opens with the first field focused never shows a blank box.
+                    Native.SendMessage(Box.Handle, Native.EM_SETCUEBANNER, new IntPtr(1), _placeholder);
                 SyncCue();
             }
         }
 
-        public event KeyEventHandler EnterPressed
-        {
-            add { Box.KeyDown += value; }
-            remove { Box.KeyDown -= value; }
-        }
+        /* Raised only for the Enter key. It must NOT be wired straight to Box.KeyDown:
+           doing that fires the handler on every keystroke, which made the sign-in form
+           submit as the user typed and the PIN prompt accept a one-character code. */
+        public event KeyEventHandler EnterPressed;
 
         private void BoxKeyDown(object sender, KeyEventArgs e)
         {
@@ -859,7 +905,27 @@ namespace JoeBrowser
             else if (e.KeyCode == Keys.Escape && _focused) Invalidate();
         }
 
-        protected virtual void OnEnterKey() { }
+        protected virtual void OnEnterKey()
+        {
+            var handler = EnterPressed;
+            if (handler != null) handler(this, new KeyEventArgs(Keys.Enter));
+        }
+
+        /// <summary>Moves focus to the next/previous field in the form's tab order.</summary>
+        private bool FieldTab(Keys keyData)
+        {
+            var form = FindForm();
+            if (form == null) return false;
+            bool back = (keyData & Keys.Shift) == Keys.Shift;
+            /* nested must be false: with nested on, the search descends back into this panel
+               and simply re-selects the edit inside it, so focus never appears to move.
+               tabStopOnly is false because the wrapper is a Panel and panels are not tab stops
+               by default; labels and hidden controls are still skipped because they report
+               CanSelect == false. */
+            bool moved = form.SelectNextControl(this, !back, false, false, true);
+            if (!moved) moved = form.SelectNextControl(form, !back, false, false, true);
+            return moved;
+        }
 
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Box.Focus(); }
 
@@ -867,7 +933,7 @@ namespace JoeBrowser
         {
             base.OnHandleCreated(e);
             if (!string.IsNullOrEmpty(_placeholder))
-                Native.SendMessage(Box.Handle, Native.EM_SETCUEBANNER, IntPtr.Zero, _placeholder);
+                Native.SendMessage(Box.Handle, Native.EM_SETCUEBANNER, new IntPtr(1), _placeholder);
             LayoutBox();
             SyncCue();
         }
@@ -1423,6 +1489,8 @@ namespace JoeBrowser
         private bool _dragging, _thumbHover;
         private Point _dragStart;
         private int _dragOffsetStart;
+        private DateTime _barShownAt = DateTime.MinValue;
+        private readonly Timer _fade;
 
         public JBScrollHost(Control content)
         {
@@ -1433,6 +1501,33 @@ namespace JoeBrowser
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             content.Parent = this;
             Controls.Add(content);
+
+            /* The bar is an overlay that appears while scrolling and then leaves. A permanent
+               vertical strip on every page is visual noise, and this content is read top-down
+               rather than scrolled constantly. */
+            _fade = new Timer { Interval = 350 };
+            _fade.Tick += delegate
+            {
+                if (_thumbHover || _dragging) return;
+                if ((DateTime.UtcNow - _barShownAt).TotalMilliseconds < 900) return;
+                _fade.Stop();
+                Invalidate();
+            };
+        }
+
+        private bool ShowBar
+        {
+            get
+            {
+                return MaxOffset > 0 &&
+                       (_thumbHover || _dragging || (DateTime.UtcNow - _barShownAt).TotalMilliseconds < 900);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _fade != null) _fade.Dispose();
+            base.Dispose(disposing);
         }
 
         public int Offset { get { return _offset; } }
@@ -1443,15 +1538,31 @@ namespace JoeBrowser
         public void SyncExtent()
         {
             LayoutContent();
-            ScrollTo(_offset);
+            ScrollToQuiet(_offset);
             Invalidate();
         }
 
         public void ScrollTo(int value)
         {
+            Apply(value, true);
+        }
+
+        /// <summary>Layout changes must not flash the bar; only a real scroll reveals it.</summary>
+        private void ScrollToQuiet(int value)
+        {
+            Apply(value, false);
+        }
+
+        private void Apply(int value, bool reveal)
+        {
             int max = MaxOffset;
             _offset = Math.Max(0, Math.Min(max, value));
             _content.Top = -_offset;
+            if (reveal)
+            {
+                _barShownAt = DateTime.UtcNow;
+                if (!_fade.Enabled) _fade.Start();
+            }
             Invalidate();
         }
 
@@ -1459,7 +1570,7 @@ namespace JoeBrowser
         {
             base.OnResize(e);
             LayoutContent();
-            ScrollTo(_offset);
+            ScrollToQuiet(_offset);
         }
 
         private void LayoutContent()
@@ -1472,9 +1583,8 @@ namespace JoeBrowser
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.Clear(Theme.Bg);
-            if (MaxOffset <= 0) return;
-            Ui.Quality(e.Graphics);
-            var hit = ThumbRect();
+            if (!ShowBar) return;
+            Ui.Quality(e.Graphics);            var hit = ThumbRect();
             if (hit.IsEmpty) return;
             // The visible bar is inset inside the grab zone so the two never disagree.
             var bar = new RectangleF(Width - Ui.S(9), hit.Y, Ui.S(5), hit.Height);
@@ -1636,6 +1746,8 @@ namespace JoeBrowser
         private string _text = "";
         private ToastKind _kind = ToastKind.Success;
         private bool _hover;
+        private int _lines = 1;
+        private int _bottom;      // anchored bottom edge, set by Place()
 
         public JBToast()
         {
@@ -1647,22 +1759,62 @@ namespace JoeBrowser
             _timer.Tick += delegate { Hide(); };
         }
 
+        /// <summary>
+        /// Anchors the toast to a bottom edge and lets it grow upward for long messages.
+        /// A one-line message keeps the standard 44px bar; longer ones wrap to at most three
+        /// lines so nothing is silently clipped with an ellipsis.
+        /// </summary>
+        public void Place(int x, int bottom, int width)
+        {
+            _bottom = bottom;
+            Width = Math.Max(Ui.S(200), width);
+            Left = x;
+            FitHeight();
+        }
+
         public void Show(string text, ToastKind kind)
         {
             _text = text ?? "";
             _kind = kind;
             Visible = true;
             BringToFront();
+            FitHeight();
             Invalidate();
             _timer.Stop();
+            // Warnings and errors carry instructions the user has to read; keep them up longer.
+            _timer.Interval = (kind == ToastKind.Warn || kind == ToastKind.Error) ? 6500 : 3400;
             _timer.Start();
+        }
+
+        private void FitHeight()
+        {
+            int lineH = Math.Max(1, (int)Math.Ceiling(Font.GetHeight()));
+            int lines = 1;
+            if (!string.IsNullOrEmpty(_text) && Width > Ui.S(60))
+            {
+                try
+                {
+                    using (var g = CreateGraphics())
+                    {
+                        int avail = Math.Max(Ui.S(60), Width - Ui.S(56));
+                        Size sz = TextRenderer.MeasureText(g, _text, Font, new Size(avail, 4000),
+                            TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
+                        lines = (int)Math.Round(sz.Height / (double)lineH);
+                    }
+                }
+                catch { lines = 1; }
+            }
+            _lines = Math.Max(1, Math.Min(3, lines));
+            int target = Ui.S(44) + (_lines - 1) * lineH;
+            if (Height != target) Height = target;
+            if (_bottom > 0) Top = _bottom - Height;
         }
 
         protected override void OnClick(EventArgs e) { _timer.Stop(); Hide(); base.OnClick(e); }
         protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
         protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
 
-        public void ReStyle() { Font = Theme.Body; Invalidate(); }
+        public void ReStyle() { Font = Theme.Body; FitHeight(); Invalidate(); }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -1673,16 +1825,26 @@ namespace JoeBrowser
 
             // windows-ui alert bar: a 1px tinted surface with a leading status icon.
             Color wash = _kind == ToastKind.Error ? Color.FromArgb(0xE8, 0x47, 0x56)
+                : _kind == ToastKind.Warn ? Color.FromArgb(0xF2, 0xA8, 0x1B)
                 : _kind == ToastKind.Info ? Color.FromArgb(0x60, 0xCD, 0xFF) : Color.FromArgb(0x57, 0xE8, 0x4A);
             Ui.Fill(g, r, rad, Ui.Blend(Theme.Dark ? Theme.Panel : Theme.Bg, wash, Theme.Dark ? 0.18f : 0.14f));
             Ui.Stroke(g, r, rad, Color.FromArgb(Theme.Dark ? 38 : 26, Theme.Text), 1f);
 
-            string icon = _kind == ToastKind.Error ? "error" : _kind == ToastKind.Info ? "info" : "check-circle";
-            Color tint = _kind == ToastKind.Error ? Theme.Danger : _kind == ToastKind.Info ? Theme.Accent : Theme.Success;
+            string icon = _kind == ToastKind.Error ? "error"
+                : _kind == ToastKind.Warn ? "alert"
+                : _kind == ToastKind.Info ? "info" : "check-circle";
+            Color tint = _kind == ToastKind.Error ? Theme.Danger
+                : _kind == ToastKind.Warn ? Color.FromArgb(0xF2, 0xA8, 0x1B)
+                : _kind == ToastKind.Info ? Theme.Accent : Theme.Success;
             float ic = Ui.S(16);
             Icons.Draw(g, icon, new RectangleF(Ui.S(14), (Height - ic) / 2f, ic, ic), tint);
 
-            Ui.Text(g, _text, Font, Theme.Text, Ui.S(40), (Height - Font.GetHeight(g)) / 2f, Width - Ui.S(56));
+            float lineH = Font.GetHeight(g);
+            if (_lines <= 1)
+                Ui.Text(g, _text, Font, Theme.Text, Ui.S(40), (Height - lineH) / 2f, Width - Ui.S(56));
+            else
+                Ui.Text(g, _text, Font, Theme.Text, Ui.S(40), (Height - lineH * _lines) / 2f,
+                    Width - Ui.S(56), "left", _lines);
 
             float close = Ui.S(16);
             Icons.Draw(g, "close", new RectangleF(Width - Ui.S(14) - close, (Height - close) / 2f, close, close),
@@ -1704,6 +1866,16 @@ namespace JoeBrowser
             ForeColor = Theme.AccentText;
             TabStop = true;
             AutoSize = false;
+            /* A link with no explicit size would be a zero-width control - invisible and
+               unclickable. Measuring from Text keeps every call site correct without
+               remembering to call Fit(). */
+            Height = Ui.S(22);
+        }
+
+        public override string Text
+        {
+            get { return base.Text; }
+            set { base.Text = value; Fit(); }
         }
 
         protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
@@ -1721,11 +1893,16 @@ namespace JoeBrowser
 
         public void Fit()
         {
-            using (var m = CreateGraphics())
-                Size = new Size((int)Math.Ceiling(Ui.Measure(m, Text, Font).Width) + Ui.S(6), Ui.S(22));
+            // Measure without CreateGraphics(): this runs from the Text setter, which can fire
+            // before the control has a window handle. TextRenderer's static overload uses the
+            // screen DC and is safe at any point in the lifetime.
+            if (string.IsNullOrEmpty(Text)) return;
+            Size sz = TextRenderer.MeasureText(Text, Font, new Size(4000, 4000),
+                TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+            Size = new Size(sz.Width + Ui.S(6), Ui.S(22));
         }
 
-        public void ReStyle() { ForeColor = Theme.AccentText; Invalidate(); }
+        public void ReStyle() { ForeColor = Theme.AccentText; Fit(); Invalidate(); }
 
         protected override void OnPaint(PaintEventArgs e)
         {
