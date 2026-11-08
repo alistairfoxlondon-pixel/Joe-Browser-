@@ -13,7 +13,7 @@ name: Release
 
 on:
   push:
-    branches: [master, 'arena/**']
+    branches: [master]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -132,8 +132,14 @@ jobs:
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item 'dist\JoeBrowser.exe'      'out\JoeBrowser.exe'      -Force
           Copy-Item 'dist\JoeBrowserSetup.exe' 'out\JoeBrowserSetup.exe' -Force
-          $hash = Get-FileHash 'out\JoeBrowserSetup.exe' -Algorithm SHA256
-          "$($hash.Hash)  JoeBrowserSetup.exe" | Set-Content 'out\SHA256.txt' -Encoding ASCII
+          # Both files are listed: someone who downloads the portable JoeBrowser.exe has the
+          # same reason to verify it as someone who runs the installer.
+          $lines = foreach ($n in @('JoeBrowser.exe', 'JoeBrowserSetup.exe')) {
+            $h = Get-FileHash (Join-Path 'out' $n) -Algorithm SHA256
+            "$($h.Hash.ToLower())  $n"
+          }
+          $lines | Set-Content 'out\SHA256.txt' -Encoding ASCII
+          Get-Content 'out\SHA256.txt'
           Get-ChildItem out | Format-Table Name, Length
 
       - name: Check the tag matches the build
