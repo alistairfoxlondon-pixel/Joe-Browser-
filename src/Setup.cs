@@ -26,12 +26,36 @@ namespace JoeBrowser.Setup
         [STAThread]
         private static int Main(string[] args)
         {
-            bool silent = false, uninstall = false, desktop = true;
+            bool silent = false, uninstall = false, desktop = true, selfTest = false;
             foreach (string a in args)
             {
                 if (a.Equals("/silent", StringComparison.OrdinalIgnoreCase) || a.Equals("/S", StringComparison.OrdinalIgnoreCase)) silent = true;
                 if (a.Equals("/uninstall", StringComparison.OrdinalIgnoreCase)) uninstall = true;
                 if (a.Equals("/nodesktop", StringComparison.OrdinalIgnoreCase)) desktop = false;
+                if (a.Equals("--selftest", StringComparison.OrdinalIgnoreCase) || a.Equals("/selftest", StringComparison.OrdinalIgnoreCase)) selfTest = true;
+            }
+
+            /* The release build runs the installer with --selftest: it opens no window, but it
+               does read the embedded application payload, so a build that lost its resource -
+               the one defect that produces an installer which fails on the user's machine and
+               nowhere else - fails the build instead of shipping. */
+            if (selfTest)
+            {
+                try
+                {
+                    using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream("JoeBrowser.payload.exe"))
+                    {
+                        if (s == null) { Console.Error.WriteLine("selftest: the embedded payload is missing"); return 2; }
+                        if (s.Length < 1024 * 100) { Console.Error.WriteLine("selftest: the embedded payload is only " + s.Length + " bytes"); return 3; }
+                        Console.WriteLine("selftest ok, payload " + s.Length + " bytes");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("selftest failed: " + ex.GetType().Name + ": " + ex.Message);
+                    return 4;
+                }
+                return 0;
             }
 
             Application.EnableVisualStyles();

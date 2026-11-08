@@ -76,7 +76,7 @@ jobs:
           # that type forwarding from 4.8 reference assemblies still lines up.
           $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
           $refs = @('mscorlib.dll', 'System.dll', 'System.Core.dll', 'System.Drawing.dll',
-                    'System.Windows.Forms.dll', 'System.Web.Extensions.dll',
+                    'System.Windows.Forms.dll', 'System.Configuration.dll', 'System.Web.Extensions.dll',
                     'System.Security.dll', 'System.IO.Compression.dll',
                     'System.IO.Compression.FileSystem.dll') |
               ForEach-Object { Join-Path $fw $_ } |
@@ -130,14 +130,18 @@ jobs:
             Write-Host ("{0}  {1:N0} bytes  {2}" -f $f, $size, $version)
           }
 
-          # A WinForms binary that cannot resolve its own types is the one failure a size check
-          # cannot see. --help walks every type the app needs on the way to its first window and
-          # exits without touching the user's data, so it is the cheapest real smoke test.
-          Copy-Item 'src\JoeBrowser.exe.config' 'dist\JoeBrowser.exe.config' -Force
-          $p = Start-Process -FilePath 'dist\JoeBrowser.exe' -ArgumentList '--help' -PassThru
-          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw 'JoeBrowser.exe --help hung' }
-          if ($p.ExitCode -ne 0) { throw "JoeBrowser.exe --help exited with $($p.ExitCode)" }
-          Write-Host 'Smoke test passed: the binary starts and resolves its own types.'
+          # A binary that links is not a binary that runs. --selftest starts the freshly built EXE,
+          # has it parse its own JoeBrowser.exe.config and exit with a code - no window, so it
+          # works on a runner with no interactive desktop. --help would open a MessageBox there
+          # and block until the timeout.
+          foreach ($f in @('dist\JoeBrowser.exe', 'dist\JoeBrowserSetup.exe')) {
+            $p = Start-Process -FilePath $f -ArgumentList '--selftest' -PassThru `
+                 -RedirectStandardOutput 'selftest.out' -RedirectStandardError 'selftest.err'
+            if (-not $p.WaitForExit(60000)) { $p.Kill(); throw "$f --selftest hung" }
+            Get-Content 'selftest.out', 'selftest.err' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
+            if ($p.ExitCode -ne 0) { throw "$f --selftest exited with $($p.ExitCode)" }
+          }
+          Write-Host 'Smoke test passed: both binaries start and can read their configuration.'
 
       - name: Stage the release assets
         shell: pwsh
