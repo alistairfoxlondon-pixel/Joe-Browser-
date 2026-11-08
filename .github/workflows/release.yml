@@ -137,9 +137,17 @@ jobs:
           foreach ($f in @('dist\JoeBrowser.exe', 'dist\JoeBrowserSetup.exe')) {
             $p = Start-Process -FilePath $f -ArgumentList '--selftest' -PassThru `
                  -RedirectStandardOutput 'selftest.out' -RedirectStandardError 'selftest.err'
-            if (-not $p.WaitForExit(60000)) { $p.Kill(); throw "$f --selftest hung" }
-            Get-Content 'selftest.out', 'selftest.err' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
-            if ($p.ExitCode -ne 0) { throw "$f --selftest exited with $($p.ExitCode)" }
+            if (-not $p.WaitForExit(60000)) {
+              $p.Kill()
+              throw "::error::" + "$f --selftest hung for 60 seconds"
+            }
+            $said = @(Get-Content 'selftest.out', 'selftest.err' -ErrorAction SilentlyContinue) -join ' / '
+            Write-Host "$f --selftest exit=$($p.ExitCode) said=$said"
+            if ($p.ExitCode -ne 0) {
+              # The reason has to reach the annotation: the raw step log is not readable from
+              # the environment that maintains this repo, and "exit code 1" explains nothing.
+              throw "::error title=Self-test failed::$f exited with $($p.ExitCode). $said"
+            }
           }
           Write-Host 'Smoke test passed: both binaries start and can read their configuration.'
 
