@@ -182,8 +182,13 @@ namespace JoeBrowser
             Add(map, FpSurface.UserAgent, FpSurface.UserAgent,
                 string.IsNullOrEmpty(fp.UserAgentOverride) ? "automatic" : fp.UserAgentOverride);
 
+            /* The OS is compared case-insensitively: these values arrive from a JSON file, a
+               picker and a hand edit, and "windows 11" is the same machine as "Windows 11". A
+               signature that changed with the capitalisation of a string would report two
+               identical profiles as independent - the one failure mode this whole feature exists
+               to prevent. */
             Add(map, FpSurface.Platform, FpSurface.Platform,
-                fp.Os ?? "", fp.DeviceType ?? "", fp.FontSet ?? "auto");
+                Lower(fp.Os), Lower(fp.DeviceType), Lower(fp.FontSet));
 
             /* Deliberately no fp.Platform or fp.Brand here. Those two are resolved at launch from
                the installed browser and written into the profile, so including them made a
@@ -210,7 +215,7 @@ namespace JoeBrowser
                 "seed=" + fp.Seed);
 
             Add(map, FpSurface.WebGl, FpSurface.WebGl,
-                fp.WebGlVendor ?? "", fp.WebGlRenderer ?? "");
+                Lower(fp.WebGlVendor), Lower(fp.WebGlRenderer));
 
             /* Canvas, audio and fonts are noise-based: every profile draws the same scene, and the
                seed is what makes the pixels differ. Advertising them as identical because the
@@ -222,15 +227,24 @@ namespace JoeBrowser
             Add(map, FpSurface.Fonts, FpSurface.Fonts,
                 fp.FontsNoise ? "noise:" + fp.Seed : "off:" + (fp.FontSet ?? "auto"));
 
-            Add(map, FpSurface.Timezone, FpSurface.Timezone, fp.Timezone ?? "");
+            /* IANA zone names are case-sensitive in the browser but not in the picker, and the
+               script accepts either; comparing them exactly would let "europe/berlin" and
+               "Europe/Berlin" look like two different machines. */
+            Add(map, FpSurface.Timezone, FpSurface.Timezone, Lower(fp.Timezone));
             Add(map, FpSurface.Language, FpSurface.Language,
-                fp.Language ?? "", fp.AcceptLanguage ?? "");
+                Lower(fp.Language), Lower(fp.AcceptLanguage));
 
             Add(map, FpSurface.WebRtc, FpSurface.WebRtc,
                 fp.WebRtcProtect ? "protect:" + (fp.WebRtcMode ?? "proxy") : "off",
                 "geo=" + (fp.GeoMode ?? "proxy"));
 
             return map;
+        }
+
+        /// <summary>Lower-case for comparison, without the Turkish-I surprise.</summary>
+        private static string Lower(string v)
+        {
+            return string.IsNullOrEmpty(v) ? "" : v.Trim().ToLowerInvariant();
         }
 
         private static void Add(Dictionary<string, FpSurfaceValue> map, string surface, string kind, params string[] parts)
