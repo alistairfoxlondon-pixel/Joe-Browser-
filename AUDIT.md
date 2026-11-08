@@ -635,3 +635,40 @@ A guarantee nobody can check is not a guarantee:
   confirm the pinned profile still opens on the installed browser; run Tools › Account audit on a
   workspace with two hand-edited JSON copies and confirm they are clustered as Linked and that Fix
   separates them.
+
+## Release 1.3.0: what the first real build found
+
+No C# compiler exists in the environment this repository is written in, so until now every
+verification was static - brace balance, arity of the APIs called, simulations of the
+uniqueness logic in Python. The 1.3.0 release moved the build to a Windows runner, and the
+first compile of the tree found defects that no static check had:
+
+* **Seven compile errors.** `ConfirmForm` defined `ProcessCmdKey` and `OnPaint` twice, the second
+  pair sitting past the end of the class. `ToolDialog` was `sealed` while `GoogleSetupDialog`
+  derives from it. `JBTextBox`'s mouse handlers were written for `JBToast` and referenced its
+  timer and wheel accumulator, and its wheel handler scrolled the inner edit control twice.
+  `Theme.FocusCues` read `Control.ShowFocusCues`, which is protected. `FingerprintIdentity` put
+  a `ulong` literal in a `uint` constant declaration. `InstallGate`'s install lambda shadowed
+  locals declared after the `await`. `Program.Main` kept six bare `return;` after it became
+  `int`.
+* **`JoeBrowser.exe.config` did not parse**, so the process could not start at all: Windows
+  reported *"side-by-side configuration is incorrect"*, which points at the manifest. A comment
+  written during this round contained a double hyphen, which XML forbids inside a comment. The
+  DPI section then turned out to be a *built-in* section - declaring it in `configSections` is
+  itself an error - so the file is back to its 1.2.0 shape, plus a selftest key.
+* **The installer never installed `JoeBrowser.exe.config`.** Every installed copy had been
+  running without the DPI awareness and WinForms rescaling that file configures, so the
+  installed build looked blurry on a scaled display while the portable one did not. The
+  installer now embeds the file and writes it beside the executable.
+* **`JoeBrowserSetup.exe` carried no version resource** and exported as `0.0.0.0`.
+
+The lesson is in the workflow: `JoeBrowser.exe --selftest` reads its own configuration, the
+installer's reads its payload, both shipped XML files are parsed, and on a tag the installer is
+silently installed, the installed copy is run, and uninstalling is required to remove the
+executable, the shortcut and the registry entry. Each of the four defects above fails one of
+those checks, and each was invisible to every check that existed before.
+
+Still to confirm on a real desktop (CI runs windowless): the visual side of 1.3.0 - twelve
+distinct card signatures for twelve profiles, an unchanged signature after a relaunch, the
+audit's Fix reporting how many open profiles it retargeted, and the coherence repair on a
+hand-edited `Os=macOS` profile.
