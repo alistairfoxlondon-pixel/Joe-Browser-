@@ -1023,6 +1023,19 @@ namespace JoeBrowser
             return "en-US";
         }
 
+        /// <summary>
+        /// Width in CSS pixels of the scrollbar the profile's operating system draws: 0 where the
+        /// platform uses overlay scrollbars that take no layout space (iOS and Android), 15 on
+        /// macOS, and the Windows value of 17 everywhere else.
+        /// </summary>
+        public static int ScrollbarWidthFor(FingerprintConfig fp)
+        {
+            if (fp == null) return 17;
+            if (IsMobileOs(fp.Os)) return 0;
+            if (IsMac(fp.Os)) return 15;
+            return 17;
+        }
+
         /// <summary>Builds a coherent UA + platform for the profile against the real installed browser.</summary>
         public static void ResolveUserAgent(FingerprintConfig fp, BrowserInfo browser)
         {

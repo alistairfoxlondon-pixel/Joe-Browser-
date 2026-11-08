@@ -189,8 +189,33 @@ namespace JoeBrowser
             if (f == null) f = Theme.Body;
             if (f == null) return;
 
-            float x = (float)Math.Floor(box.X + (box.Width - px) / 2f);
-            float y = (float)Math.Floor(box.Y + (box.Height - px) / 2f);
+            /* The glyph is centred on its INK, not on its em box. DrawString lays the em box at
+               the requested point, and Material's 24 dp box is far from tight around the shapes:
+               measuring the string first and centring what it actually reports is the difference
+               between a glyph that sits in the middle of its chip and one that looks shoved left
+               and slightly high. GenericTypographic is the format that reports the tight box;
+               the default format pads it, which is what an earlier version measured. */
+            float x = box.X;
+            float y = box.Y;
+            var ink = SizeF.Empty;
+            var format = (StringFormat)StringFormat.GenericTypographic.Clone();
+            try
+            {
+                ink = g.MeasureString(glyph, f, int.MaxValue, format);
+                if (ink.Width > 0 && ink.Height > 0)
+                {
+                    x = box.X + (box.Width - Math.Min(px, ink.Width)) / 2f;
+                    y = box.Y + (box.Height - Math.Min(px, ink.Height)) / 2f;
+                }
+                else
+                {
+                    x = box.X + (box.Width - px) / 2f;
+                    y = box.Y + (box.Height - px) / 2f;
+                }
+            }
+            finally { format.Dispose(); }
+            x = (float)Math.Floor(x);
+            y = (float)Math.Floor(y);
 
             var oldHint = g.TextRenderingHint;
             var oldOffset = g.PixelOffsetMode;
@@ -204,7 +229,11 @@ namespace JoeBrowser
             try
             {
                 using (var b = new SolidBrush(color))
-                    g.DrawString(glyph, f, b, x, y);
+                using (var fmt = (StringFormat)StringFormat.GenericTypographic.Clone())
+                {
+                    /* Measured with the same format as above, so the two agree exactly. */
+                    g.DrawString(glyph, f, b, x, y, fmt);
+                }
             }
             finally
             {

@@ -22,13 +22,15 @@ namespace JoeBrowser
 
         private readonly JBLabel _title;
         private readonly JBIconButton _close;
-        private readonly Panel _body;
+        private readonly Panel _content;
+        private readonly JBScrollHost _body;
         private readonly List<Row> _rows = new List<Row>();
         private readonly string _primaryText;
 
         public JBButton Primary { get; private set; }
         public JBButton Secondary { get; private set; }
-        public Panel Body { get { return _body; } }
+        /// <summary>The panel whose children are laid out in rows: add controls to this.</summary>
+        public Panel Body { get { return _content; } }
         public bool Confirmed { get; private set; }
 
         public ToolDialog(string title, string primaryText, string secondaryText, int width, int height)
@@ -52,7 +54,12 @@ namespace JoeBrowser
             _close.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(_close);
 
-            _body = new Panel { BackColor = Theme.Bg, AutoScroll = true };
+            /* The body scrolls through JBScrollHost, the app's own overlay scroller, rather than
+               through a Panel with AutoScroll: that drew the system scrollbar - a grey native
+               strip with arrow buttons - inside a window that is otherwise drawn end to end.
+               Nothing in this application may show a native scrollbar. */
+            _content = new Panel { BackColor = Theme.Bg, AutoSize = false };
+            _body = new JBScrollHost(_content) { BackColor = Theme.Bg };
             Controls.Add(_body);
 
             Primary = new JBButton { Kind = BtnKind.Primary, Text = _primaryText, Radius = 4, Height = Ui.S(33) };
@@ -129,13 +136,27 @@ namespace JoeBrowser
             return t;
         }
 
+        /// <summary>
+        /// A themed single-column chooser: the selection control the app uses where a WinForms
+        /// ListBox would have been dropped in. A ListBox paints every row with the system theme
+        /// and scrolls with the system scrollbar, both of which this application does not allow.
+        /// </summary>
+        public JBList AddList(int height)
+        {
+            var list = new JBList { BackColor = Theme.Input, Font = Theme.Body };
+            AddRow(null, list, Ui.S(height));
+            return list;
+        }
+
         public TextBox AddReadOnlyText(string text, int height)
         {
             var t = new TextBox
             {
                 Multiline = true,
                 ReadOnly = true,
-                ScrollBars = ScrollBars.Both,
+                /* No native scrollbars anywhere in the application, including here: the field
+                   shows JBTextBox's own thin indicator instead. */
+                ScrollBars = ScrollBars.None,
                 WordWrap = false,
                 Text = text ?? "",
                 BackColor = Theme.Input,
@@ -214,10 +235,10 @@ namespace JoeBrowser
             int footerH = Ui.S(56);
             _body.SetBounds(pad, Ui.S(56), Math.Max(Ui.S(100), w - pad * 2), Math.Max(Ui.S(60), h - Ui.S(56) - footerH));
 
-            /* _body is AutoScroll: when the rows are taller than the dialog a scrollbar appears
-               and takes 17 px from the client area. Laying the rows out against the full width
-               pushed their right edge - and the right edge of every field - underneath it. */
-            int innerW = Math.Max(Ui.S(100), _body.Width - Ui.S(24) - (_body.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0));
+            /* The overlay bar is inset into the host's right edge, so the rows keep a little
+               room from it; nothing is subtracted for a native scrollbar any more, because the
+               host hides its bar over the content instead of beside it. */
+            int innerW = Math.Max(Ui.S(100), _body.Width - Ui.S(24));
             int y = Ui.S(6);
             foreach (var r in _rows)
             {
@@ -227,7 +248,8 @@ namespace JoeBrowser
                     r.Field.SetBounds(0, y, innerW, r.Height);
                 y += r.Height + Ui.S(9);
             }
-            _body.AutoScrollMinSize = new Size(0, y + Ui.S(6));
+            _content.SetBounds(0, 0, Math.Max(Ui.S(100), _body.Width), y + Ui.S(6));
+            _body.SyncExtent();
 
             int pw = Primary.PreferredWidth(Ui.S(120));
             int sw = Secondary.Visible ? Secondary.PreferredWidth(Ui.S(90)) : 0;

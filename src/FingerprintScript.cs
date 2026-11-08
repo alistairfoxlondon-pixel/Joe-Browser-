@@ -38,6 +38,13 @@ namespace JoeBrowser
             cfg["battery"] = fp.SpoofBattery;
             cfg["seed"] = fp.Seed;
             cfg["touch"] = fp.TouchPoints;
+            /* Layout width is one of the few surfaces a page can measure without asking for
+               anything: innerWidth minus documentElement.clientWidth is exactly the width of the
+               scrollbar the HOST operating system draws. A Windows host therefore reports 17 px
+               to a page being told the profile is a Mac or a phone, contradicting the platform
+               string in the same breath - the cheapest anti-detect tell there is. This is the
+               scrollbar of the device the profile claims to be. */
+            cfg["sbw"] = FingerprintFactory.ScrollbarWidthFor(fp);
             cfg["mobile"] = fp.DeviceType != null && fp.DeviceType != "desktop";
             cfg["safari"] = FingerprintFactory.IsIos(fp.Os);
             cfg["webrtc"] = (fp.WebRtcMode ?? (fp.WebRtcProtect ? "proxy" : "off")).ToLowerInvariant();
@@ -529,6 +536,89 @@ namespace JoeBrowser
       var v = (ih > 0 ? ih : 800) + chromeGapH;
       return Math.min(v, F.ah > 0 ? F.ah : v);
     });
+  } catch (e) {}
+
+  /* ---- Layout width, or the scrollbar leak ---- */
+  /* These three facts have to agree with each other and with the claimed platform:
+       innerWidth - documentElement.clientWidth  == width of the OS scrollbar
+       window.scrollbars.visible                 == whether that scrollbar is showing
+       (scrollbar-gutter / scrollbar-width)      == whether the OS uses overlay bars
+     On a Windows host a macOS profile reported 17 px of gutter and a visible classic
+     scrollbar; a phone profile reported both, which no phone can do. The gutter is now
+     emulated per device: 0 where the platform overlays (iOS, Android), 15 on macOS, 17 on
+     Windows. Only the gutter is written - the content box keeps its real size, so pages are
+     never asked to lay out inside an imaginary strip. */
+  try {
+    var SBW = (typeof F.sbw === 'number') ? F.sbw : 17;
+    var overlayBars = (F.mobile || F.touch > 0) || SBW === 0;
+
+    function layoutOverride(proto, prop, extra) {
+      if (!proto) return;
+      var desc = Object.getOwnPropertyDescriptor(proto, prop);
+      if (!desc || !desc.get) return;
+      var real = desc.get;
+      Object.defineProperty(proto, prop, {
+        configurable: true,
+        enumerable: desc.enumerable,
+        get: mark(function () {
+          var v = 0;
+          try { v = real.call(this); } catch (e) { return 0; }
+          if (typeof v !== 'number' || v <= 0) return v;
+          // Elements only report a gutter when they actually scroll; subtracting it from every
+          // element would make every non-scrolling box too narrow by one scrollbar.
+          var scrolls = false;
+          try { scrolls = this.scrollHeight > (this.clientHeight || 0); } catch (e) { scrolls = false; }
+          return Math.max(0, v - (scrolls ? SBW : 0));
+        }, 'get ' + prop, 0)
+      });
+    }
+    if (typeof Element !== 'undefined' && Element.prototype) {
+      layoutOverride(Element.prototype, 'clientWidth');
+    }
+
+    /* window.innerWidth is authoritative for the page's layout width, so it keeps its value.
+       What must change is the difference between it and the document's client width, which is
+       how a script measures the scrollbar without asking for anything. */
+    if (typeof Document !== 'undefined' && Document.prototype) {
+      var cwDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
+      if (cwDesc && cwDesc.get) {
+        var realCw = cwDesc.get;
+        Object.defineProperty(Document.prototype, 'clientWidth', {
+          configurable: true,
+          get: mark(function () {
+            var v = 0;
+            try { v = realCw.call(this.documentElement); } catch (e) { return 0; }
+            if (typeof v !== 'number' || v <= 0) return v;
+            var scrolls = false;
+            try { scrolls = this.documentElement.scrollHeight > (this.documentElement.clientHeight || 0); } catch (e) { scrolls = false; }
+            return Math.max(0, v - (scrolls ? SBW : 0));
+          }, 'get clientWidth', 0)
+        });
+      }
+    }
+
+    /* CSS media queries answer the same question independently:
+         (scrollbar-width: none)  - true when the platform overlays its scrollbars
+         (scrollbar-width: thin)  - Windows 11 and anything themed thin */
+    if (window.matchMedia) {
+      var origScrollbarMM = window.matchMedia;
+      method(window, 'matchMedia', function matchMediaScroll(query) {
+        var q = String(query).toLowerCase();
+        var wanted = null;
+        if (q.indexOf('scrollbar-width') >= 0) {
+          if (q.indexOf('none') >= 0) wanted = overlayBars;
+          else if (q.indexOf('thin') >= 0) wanted = !overlayBars && SBW !== 17;
+          else if (q.indexOf('auto') >= 0) wanted = !overlayBars && SBW === 17;
+        }
+        if (wanted === null) return origScrollbarMM.call(window, query);
+        var real = origScrollbarMM.call(window, query);
+        try {
+          Object.defineProperty(real, 'matches', { configurable: true, get: function () { return wanted; } });
+          Object.defineProperty(real, 'media', { configurable: true, get: function () { return String(query); } });
+        } catch (e) { }
+        return real;
+      }, 1);
+    }
   } catch (e) {}
 
   /* ---- WebGL ---- */

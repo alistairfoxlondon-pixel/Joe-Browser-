@@ -1683,6 +1683,15 @@ namespace JoeBrowser
             /* The bar is an overlay that appears while scrolling and then leaves. A permanent
                vertical strip on every page is visual noise, and this content is read top-down
                rather than scrolled constantly. */
+            /* Content is often laid out after the host has already been resized (a page built
+               row by row, a list that grows when the user acts on it). Without this the host
+               looked at a content height of zero, reported no overflow, and the page simply
+               could not be scrolled until something else happened to trigger a layout - the
+               "the list is cut off and there is no scrollbar" bug. Watching the content's own
+               layout is the only signal that arrives in every one of those cases. */
+            content.SizeChanged += delegate { SyncExtent(); };
+            content.Layout += delegate { SyncExtent(); };
+
             _fade = new Timer { Interval = 350 };
             _fade.Tick += delegate
             {
@@ -1713,11 +1722,22 @@ namespace JoeBrowser
         public int ContentWidth { get { return _content.Width; } }
 
         /// <summary>Re-clamps the offset after the content changed size.</summary>
+        private bool _syncing;
+
         public void SyncExtent()
         {
-            LayoutContent();
-            ScrollToQuiet(_offset);
-            Invalidate();
+            /* LayoutContent resizes the content, and the content's own Layout event calls back
+               in here: without the guard that is unbounded recursion the first time a page adds
+               a row from inside its layout pass. */
+            if (_syncing) return;
+            _syncing = true;
+            try
+            {
+                LayoutContent();
+                ScrollToQuiet(_offset);
+                Invalidate();
+            }
+            finally { _syncing = false; }
         }
 
         public void ScrollTo(int value)
@@ -1756,6 +1776,10 @@ namespace JoeBrowser
             _content.Width = Math.Max(1, Width - Ui.S(10));
             _content.Left = 0;
             _content.Top = -_offset;
+            /* A content panel shorter than the host would leave the page under-filled, which
+               reads as a rendering glitch on a tall window. It only ever grows to the host
+               height; a page that really is taller keeps its own height. */
+            if (_content.Height < Height) _content.Height = Height;
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -2272,4 +2296,243 @@ namespace JoeBrowser
 
         public void ReStyle() { BackColor = Theme.Panel; Invalidate(); }
     }
+    /// <summary>
+    /// Themed single-column chooser. Replaces System.Windows.Forms.ListBox wherever one would
+    /// have been used: a ListBox paints every row in the system theme and scrolls with the
+    /// system scrollbar, and this application allows neither. Selection, keyboard handling and
+    /// the overlay scroll indicator are all drawn here.
+    /// </summary>
+    internal sealed class JBList : Control, IReStyle
+    {
+        public sealed class Item
+        {
+            public string Text;
+            public string Detail;
+            public object Tag;
+            public Item(string text, string detail, object tag) { Text = text; Detail = detail; Tag = tag; }
+        }
+
+        private readonly List<Item> _items = new List<Item>();
+        private int _selected = -1;
+        private int _hoverIndex = -1;
+        private int _scroll;
+        private bool _thumbHover, _dragging;
+        private Point _dragStart;
+        private int _dragScrollStart;
+        private DateTime _barShownAt = DateTime.MinValue;
+
+        public event EventHandler SelectedIndexChanged;
+
+        public JBList()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.UserPaint | ControlStyles.Selectable | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.Input;
+            TabStop = true;
+            Cursor = Cursors.Hand;
+        }
+
+        public int SelectedIndex
+        {
+            get { return _selected; }
+            set
+            {
+                int v = (value >= 0 && value < _items.Count) ? value : -1;
+                if (_selected == v) return;
+                _selected = v;
+                EnsureVisible(v);
+                Invalidate();
+                var h = SelectedIndexChanged;
+                if (h != null) h(this, EventArgs.Empty);
+            }
+        }
+
+        public Item SelectedItem { get { return _selected >= 0 && _selected < _items.Count ? _items[_selected] : null; } }
+
+        public void SetItems(IEnumerable<Item> items)
+        {
+            _items.Clear();
+            if (items != null) _items.AddRange(items);
+            _selected = -1;
+            _scroll = 0;
+            Invalidate();
+        }
+
+        private int RowH { get { return Ui.S(46); } }
+        private int MaxScroll { get { return Math.Max(0, _items.Count * RowH - Height); } }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (_scroll > MaxScroll) _scroll = MaxScroll;
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            Ui.Quality(g);
+            g.Clear(Theme.Input);
+
+            if (_items.Count == 0)
+            {
+                Ui.Text(g, L10n.T("list.empty"), Theme.Body, Theme.TextFaint,
+                    0, (Height - Theme.Body.GetHeight(g)) / 2f, Width, "center");
+                return;
+            }
+
+            int rowH = RowH;
+            int innerW = Math.Max(Ui.S(40), Width - Ui.S(10));
+            for (int i = 0; i < _items.Count; i++)
+            {
+                float y = i * rowH - _scroll;
+                if (y + rowH < 0 || y > Height) continue;
+                var r = new RectangleF(Ui.S(4), y + 1f, Width - Ui.S(8), rowH - 2f);
+                bool sel = i == _selected;
+                bool hov = i == _hoverIndex;
+                if (sel) Ui.Fill(g, r, Ui.S(4), Theme.AccentOnBg);
+                else if (hov) Ui.Fill(g, r, Ui.S(4), Theme.HoverOverlay);
+
+                var it = _items[i];
+                float textLeft = r.X + Ui.S(10);
+                float textW = innerW - Ui.S(16);
+                float titleY = y + (it.Detail == null ? (rowH - Theme.Body.GetHeight(g)) / 2f : Ui.S(6));
+                Ui.Text(g, it.Text ?? "", Theme.Body, sel ? Theme.AccentText : Theme.Text, textLeft, titleY, textW);
+                if (it.Detail != null)
+                    Ui.Text(g, it.Detail, Theme.Caption, Theme.TextFaint,
+                        textLeft, y + rowH - Theme.Caption.GetHeight(g) - Ui.S(6), textW);
+            }
+
+            // The scroll indicator is drawn over the rows, never beside them, and only while the
+            // list is being scrolled or the pointer is on the thumb.
+            bool showBar = MaxScroll > 0 &&
+                           (_thumbHover || _dragging || (DateTime.UtcNow - _barShownAt).TotalMilliseconds < 900);
+            if (showBar)
+            {
+                var hit = ThumbRect();
+                if (!hit.IsEmpty)
+                {
+                    var bar = new RectangleF(Width - Ui.S(9), hit.Y, Ui.S(5), hit.Height);
+                    Ui.Fill(g, bar, Ui.S(2.5f), _dragging || _thumbHover ? Theme.Accent : Theme.Line);
+                }
+            }
+
+            if (Focused && Ui.FocusCues(this))
+                Ui.FocusRing(g, new RectangleF(0.5f, 0.5f, Math.Max(1f, Width - 1f), Math.Max(1f, Height - 1f)), Ui.S(4));
+        }
+
+        private RectangleF ThumbRect()
+        {
+            if (MaxScroll <= 0) return RectangleF.Empty;
+            float track = Height - Ui.S(8);
+            float frac = Math.Min(1f, Height / (float)(_items.Count * RowH));
+            float thumbH = Math.Max(Ui.S(28), track * frac);
+            float pos = Ui.S(4) + (track - thumbH) * (_scroll / (float)MaxScroll);
+            return new RectangleF(Width - Ui.S(13), pos, Ui.S(12), thumbH);
+        }
+
+        private void EnsureVisible(int index)
+        {
+            if (index < 0) return;
+            int top = index * RowH;
+            int bottom = top + RowH;
+            if (top < _scroll) _scroll = top;
+            else if (bottom > _scroll + Height) _scroll = bottom - Height;
+            _scroll = Math.Max(0, Math.Min(MaxScroll, _scroll));
+            _barShownAt = DateTime.UtcNow;
+        }
+
+        private void ScrollTo(int value, bool reveal)
+        {
+            int v = Math.Max(0, Math.Min(MaxScroll, value));
+            if (v == _scroll) return;
+            _scroll = v;
+            if (reveal) _barShownAt = DateTime.UtcNow;
+            Invalidate();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            Focus();
+            Ui.KeyboardCuesForced = false;
+            if (ThumbRect().Contains(e.Location))
+            {
+                _dragging = true;
+                _dragStart = e.Location;
+                _dragScrollStart = _scroll;
+                Invalidate();
+                return;
+            }
+            int index = (_scroll + e.Y) / RowH;
+            if (index >= 0 && index < _items.Count) SelectedIndex = index;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (_dragging)
+            {
+                var hit = ThumbRect();
+                float track = Height - Ui.S(8);
+                float perPx = MaxScroll / Math.Max(1f, track - hit.Height);
+                ScrollTo(_dragScrollStart + (int)Math.Round((e.Y - _dragStart.Y) * perPx), true);
+                return;
+            }
+            bool thumb = ThumbRect().Contains(e.Location);
+            if (thumb != _thumbHover) { _thumbHover = thumb; Invalidate(); }
+            int index = (_scroll + e.Y) / RowH;
+            if (index >= _items.Count) index = -1;
+            if (index != _hoverIndex) { _hoverIndex = index; Invalidate(); }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            if (_dragging) { _dragging = false; Invalidate(); }
+            base.OnMouseUp(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _thumbHover = false;
+            _hoverIndex = -1;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            ScrollTo(_scroll - (e.Delta / 120) * (RowH / 2), true);
+        }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            return keyData == Keys.Up || keyData == Keys.Down || keyData == Keys.Home ||
+                   keyData == Keys.End || keyData == Keys.PageUp || keyData == Keys.PageDown ||
+                   base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            int page = Math.Max(1, Height / RowH);
+            switch (e.KeyCode)
+            {
+                case Keys.Up: SelectedIndex = Math.Max(0, _selected - 1); e.Handled = true; break;
+                case Keys.Down: SelectedIndex = Math.Min(_items.Count - 1, _selected + 1); e.Handled = true; break;
+                case Keys.Home: SelectedIndex = 0; e.Handled = true; break;
+                case Keys.End: SelectedIndex = _items.Count - 1; e.Handled = true; break;
+                case Keys.PageUp: SelectedIndex = Math.Max(0, _selected - page); e.Handled = true; break;
+                case Keys.PageDown: SelectedIndex = Math.Min(_items.Count - 1, _selected + page); e.Handled = true; break;
+            }
+            if (!e.Handled) base.OnKeyDown(e);
+        }
+
+        protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
+        protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
+
+        public void ReStyle() { BackColor = Theme.Input; Invalidate(); }
+    }
+
 }

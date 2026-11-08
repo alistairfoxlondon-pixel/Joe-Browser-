@@ -908,22 +908,18 @@ namespace JoeBrowser
             using (var dlg = new ToolDialog("Recycle bin", "Restore", "Close", 560, 540))
             {
                 var items = _store.ListTrash();
-                var list = new ListBox
+                var list = dlg.AddList(240);
+                list.SetItems(items.ConvertAll(delegate(ProfileStore.TrashItem t)
                 {
-                    BackColor = Theme.Input,
-                    ForeColor = Theme.Text,
-                    Font = Theme.Body,
-                    BorderStyle = BorderStyle.FixedSingle,
-                    IntegralHeight = false
-                };
-                foreach (var item in items) list.Items.Add(item);
-                dlg.AddRow(null, list, Ui.S(200));
+                    return new JBList.Item(string.IsNullOrWhiteSpace(t.Name) ? t.Id : t.Name,
+                        t.Deleted.ToString("yyyy MMM d, HH:mm"), t);
+                }));
                 dlg.AddNote(items.Count == 0
                     ? "The recycle bin is empty."
                     : "Select a profile, then Restore.");
                 dlg.Validator = delegate
                 {
-                    chosen = list.SelectedItem as ProfileStore.TrashItem;
+                    chosen = list.SelectedItem == null ? null : (ProfileStore.TrashItem)list.SelectedItem.Tag;
                     if (chosen != null) return true;
                     Toast("Select a profile first", ToastKind.Info);
                     return false;
@@ -934,7 +930,7 @@ namespace JoeBrowser
                         "Erase every deleted profile from the recycle bin?",
                         "This cannot be undone. Browser data folders stay on disk.", "Empty", BtnKind.Danger)) return;
                     _store.EmptyTrash();
-                    list.Items.Clear();
+                    list.SetItems(null);
                     dlg.Primary.Enabled = false;
                 });
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
