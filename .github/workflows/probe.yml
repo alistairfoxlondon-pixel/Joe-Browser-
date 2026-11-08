@@ -18,6 +18,22 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
-      - name: Probe
+      - name: Probe the toolchain
         shell: pwsh
         run: ./.github/workflows/probe-toolchain.ps1
+      - name: Build the binaries under test
+        shell: pwsh
+        run: |
+          $info = (dotnet --info | Out-String)
+          if ($info -notmatch 'Base Path:\s*(.+)') { throw 'no dotnet base path' }
+          $csc = Join-Path $Matches[1].Trim() 'Roslyn\bincore\csc.dll'
+          $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
+          $refs = @('mscorlib.dll','System.dll','System.Core.dll','System.Drawing.dll','System.Windows.Forms.dll','System.Configuration.dll','System.Web.Extensions.dll','System.Security.dll','System.IO.Compression.dll','System.IO.Compression.FileSystem.dll') |
+            ForEach-Object { Join-Path $fw $_ } | Where-Object { Test-Path $_ } | ForEach-Object { "/r:`"$_`"" }
+          $wrapper = Join-Path $env:RUNNER_TEMP 'csc.cmd'
+          "@echo off`r`ndotnet `"$csc`" $($refs -join ' ') %*" | Set-Content -Path $wrapper -Encoding ASCII
+          ./build/build.ps1 -Csc $wrapper
+          ./build/setup.ps1 -Csc $wrapper
+      - name: Probe the manifest
+        shell: pwsh
+        run: ./.github/workflows/probe-manifest.ps1
