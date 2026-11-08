@@ -1900,36 +1900,5 @@ namespace JoeBrowser
             }
             return (int)Math.Ceiling(lineH * lines.Count) + Ui.S(2);
         }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            base.OnPaint(e);
-            var g = e.Graphics;
-            Ui.Quality(g);
-            int pad = Ui.S(26);
-            float badge = Ui.S(40);
-            var r = new RectangleF(pad, pad, badge, badge);
-            Ui.Fill(g, r, Theme.RLarge, Theme.AccentOnBg);
-            float ic = Ui.S(20);
-            Icons.Draw(g, "alert", new RectangleF(r.X + (badge - ic) / 2f, r.Y + (badge - ic) / 2f, ic, ic),
-                Theme.Accent, 1.7f);
-        }
-
-        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
-        {
-            if (keyData == Keys.Escape)
-            {
-                DialogResult = DialogResult.Cancel;
-                Close();
-                return true;
-            }
-            if (keyData == Keys.Enter)
-            {
-                DialogResult = DialogResult.OK;
-                Close();
-                return true;
-            }
-            return base.ProcessCmdKey(ref msg, keyData);
-        }
     }
 }

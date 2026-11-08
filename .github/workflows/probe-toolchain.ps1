@@ -6,6 +6,8 @@
 # packed into a few long ones instead of one per fact.
 $ErrorActionPreference = "Continue"
 $report = New-Object System.Collections.Generic.List[string]
+$repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$src = Join-Path $repoRoot "src"
 
 function Add-Report([string]$line) { $report.Add($line) }
 
@@ -73,6 +75,47 @@ try {
     }
 } catch {
     Add-Report ("PROBE CRASHED: " + $_)
+}
+
+# --- does the application source compile, and does the whole build work? ---------------------
+# The same wrapper and switches build.ps1 uses, pointed at the real sources, then the real
+# script. Annotations carry the first diagnostics, which is what the unreachable log would have.
+$fw = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319"
+$wrapper = Join-Path $env:RUNNER_TEMP "csc-probe.cmd"
+if ($cscDll -and (Test-Path $cscDll)) {
+    $refs = @("mscorlib.dll", "System.dll", "System.Core.dll", "System.Drawing.dll",
+              "System.Windows.Forms.dll", "System.Web.Extensions.dll", "System.Security.dll",
+              "System.IO.Compression.dll", "System.IO.Compression.FileSystem.dll") |
+        ForEach-Object { Join-Path $fw $_ } | Where-Object { Test-Path $_ } |
+        ForEach-Object { "/r:`"$_`"" }
+    "@echo off`r`ndotnet `"$cscDll`" $($refs -join ' ') %*" | Set-Content -Path $wrapper -Encoding ASCII
+}
+
+try {
+    if ($wrapper -and (Test-Path $wrapper)) {
+        $out = Join-Path $env:RUNNER_TEMP "probe-app.exe"
+        $srcs = Get-ChildItem -Path $src -Filter *.cs -Recurse | Where-Object { $_.Name -ne "Setup.cs" } | ForEach-Object { '"' + $_.FullName + '"' }
+        $a = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $wrapper, "/nologo", "/target:winexe",
+               "/platform:anycpu", "/langversion:7.3", "/out:`"$out`"") + $srcs
+        $text = (& powershell @a 2>&1 | Out-String)
+        $errs = @($text -split "`r?`n" | Where-Object { $_ -match ": error " })
+        Add-Report ("app compile: errors=" + $errs.Count + " produced=" + (Test-Path $out))
+        foreach ($e in ($errs | Select-Object -First 6)) { Add-Report ("  " + ($e -replace "\s+", " ")) }
+    }
+
+    # The build script itself. This writes into dist\, which is what the workflow does anyway.
+    Add-Report "running build.ps1 with the wrapper"
+    $btext = (& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot "build\build.ps1") -Csc $wrapper 2>&1 | Out-String)
+    $berrs = @($btext -split "`r?`n" | Where-Object { $_.Trim() })
+    $main = Join-Path $repoRoot "dist\JoeBrowser.exe"
+    $size = 0
+    if (Test-Path $main) { $size = (Get-Item $main).Length }
+    Add-Report ("build.ps1 exit=" + $LASTEXITCODE + " produced=" + (Test-Path $main) + " size=" + $size)
+    if ($LASTEXITCODE -ne 0) {
+        foreach ($l in ($berrs | Select-Object -First 6)) { Add-Report ("  " + ($l -replace "\s+", " ")) }
+    }
+} catch {
+    Add-Report ("COMPILE PROBE CRASHED: " + $_)
 }
 
 # Emit the report as a few annotations; each holds at most about 1024 characters.
