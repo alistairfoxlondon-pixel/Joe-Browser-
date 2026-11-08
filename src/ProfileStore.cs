@@ -35,15 +35,30 @@ namespace JoeBrowser
                         p.Proxy.Password = Decrypt(p.Proxy.PasswordEnc);
                         if (p.OpenCount < 0) p.OpenCount = 0;
 
+                        bool dirty = false;
                         if (p.Fp.Seed == 0 || seeds.Contains(p.Fp.Seed))
                         {
                             int fresh;
                             do { fresh = FingerprintFactory.NewSeed(); }
                             while (fresh == 0 || seeds.Contains(fresh));
                             p.Fp.Seed = fresh;
-                            try { Save(p); } catch (Exception ex) { Log.Error("Cannot repair fingerprint seed", ex); }
+                            dirty = true;
                         }
                         seeds.Add(p.Fp.Seed);
+
+                        /* A config that describes a machine that cannot exist - a macOS profile
+                           with a Direct3D renderer, 16 GB of deviceMemory, an Android profile with
+                           no touch points - is repaired on load, because every one of those is a
+                           single probe away from being flagged and none of them can be fixed by a
+                           user who does not know to look. Coerce never touches the seed or the
+                           canvas payload, so it cannot undo a unique identity. */
+                        if (FingerprintFactory.Coerce(p.Fp) > 0) dirty = true;
+
+                        if (dirty)
+                        {
+                            try { Save(p); }
+                            catch (Exception ex) { Log.Error("Cannot repair profile " + p.Id, ex); }
+                        }
                         list.Add(p);
                     }
                     catch (Exception ex)

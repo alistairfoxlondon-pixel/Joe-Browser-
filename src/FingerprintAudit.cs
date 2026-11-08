@@ -18,7 +18,7 @@ namespace JoeBrowser
         public List<string> Ids = new List<string>();
         public List<string> Names = new List<string>();
 
-        public bool Fixable { get { return Kind == "environment"; } }
+        public bool Fixable { get { return Kind == "environment" || Kind == "coherence"; } }
 
         public Color Tint
         {
@@ -28,6 +28,7 @@ namespace JoeBrowser
                 {
                     case "ip": return Color.FromArgb(0xF5, 0x9E, 0x0B);
                     case "kernel": return Color.FromArgb(0x06, 0xB6, 0xD4);
+                    case "coherence": return Color.FromArgb(0x8B, 0x5C, 0xF6);
                     default:
                         return Relation == FingerprintIdentity.Relation.Identical ||
                                Relation == FingerprintIdentity.Relation.Linked
@@ -44,6 +45,7 @@ namespace JoeBrowser
                 {
                     case "ip": return "globe";
                     case "kernel": return "window";
+                    case "coherence": return "alert";
                     default:
                         return Relation == FingerprintIdentity.Relation.Identical ? "copy" : "layers";
                 }
@@ -82,6 +84,9 @@ namespace JoeBrowser
             var kernel = KernelFinding(list);
             if (kernel != null) findings.Add(kernel);
 
+            var incoherent = CoherenceFinding(list);
+            if (incoherent != null) findings.Add(incoherent);
+
             // Worst first: identical before linked, IP collisions interleaved by severity.
             findings.Sort(delegate (AuditFinding a, AuditFinding b)
             {
@@ -94,6 +99,7 @@ namespace JoeBrowser
         private static int Severity(AuditFinding f)
         {
             if (f.Kind == "ip") return 8;
+            if (f.Kind == "coherence") return 5;
             switch (f.Relation)
             {
                 case FingerprintIdentity.Relation.Identical: return 7;
@@ -306,6 +312,35 @@ namespace JoeBrowser
             return f;
         }
 
+        // ------------------------------------------------------------------ coherence
+
+        /// <summary>
+        /// Profiles whose stored fields describe a machine that cannot exist. Read on a copy, so
+        /// merely opening the audit never rewrites anything - the repair happens on load or on
+        /// Fix, and this only reports that it was needed.
+        /// </summary>
+        private static AuditFinding CoherenceFinding(List<Profile> list)
+        {
+            var bad = new List<Profile>();
+            foreach (var p in list)
+            {
+                if (p == null || p.Fp == null) continue;
+                if (FingerprintFactory.Coerce(p.Fp.Copy()) > 0) bad.Add(p);
+            }
+            if (bad.Count == 0) return null;
+
+            var f = new AuditFinding
+            {
+                Kind = "coherence",
+                Relation = FingerprintIdentity.Relation.Related,
+                Title = bad.Count + (bad.Count == 1 ? " profile describes an impossible machine"
+                                                    : " profiles describe an impossible machine"),
+                Detail = "Mismatched renderer, memory or device fields. These are repaired when the profile opens."
+            };
+            foreach (var p in bad) { f.Ids.Add(p.Id); f.Names.Add(p.Name); }
+            return f;
+        }
+
         // ------------------------------------------------------------------ repair
 
         /// <summary>
@@ -324,14 +359,28 @@ namespace JoeBrowser
             {
                 if (p == null) continue;
                 if (p.Fp == null) p.Fp = new FingerprintConfig();
+
+                /* Coherence first: repairing a screen or a renderer changes the fingerprint, so
+                   de-duplicating before it would compare a configuration about to change. */
+                bool coerced = FingerprintFactory.Coerce(p.Fp) > 0;
+
                 var worst = FingerprintIdentity.WorstMatch(p, accepted);
                 if (worst != null && worst.Relation != FingerprintIdentity.Relation.Distinct &&
                     worst.Relation != FingerprintIdentity.Relation.Remote)
                 {
                     FingerprintIdentity.Comparison clash;
                     FingerprintIdentity.MakeUnique(p.Fp, p.Fp.Os, p.Proxy, accepted, out clash);
+                    /* A re-roll can land on a screen from the right table with the wrong density,
+                       or on a renderer whose vendor field was hand-edited; coerce after rolling,
+                       not before, so what gets saved is coherent as well as unique. */
+                    FingerprintFactory.Coerce(p.Fp);
                     try { store.Save(p); changed++; }
                     catch (Exception ex) { Log.Error("Cannot save re-rolled fingerprint", ex); failed++; }
+                }
+                else if (coerced)
+                {
+                    try { store.Save(p); changed++; }
+                    catch (Exception ex) { Log.Error("Cannot save repaired fingerprint", ex); failed++; }
                 }
                 accepted.Add(p);
             }
@@ -384,7 +433,7 @@ namespace JoeBrowser
                 _column.Controls.Add(row);
             }
 
-            _fix = new JBButton { Kind = BtnKind.Primary, Icon = "refresh", Text = "Fix fingerprints", Radius = 4, Height = Ui.S(33) };
+            _fix = new JBButton { Kind = BtnKind.Primary, Icon = "refresh", Text = "Fix what can be fixed", Radius = 4, Height = Ui.S(33) };
             _fix.Click += delegate { DoFix(); };
             _fix.Visible = _findings.Count(f => f.Fixable) > 0;
             Controls.Add(_fix);
@@ -466,7 +515,7 @@ namespace JoeBrowser
             _close.SetBounds(w - pad - cw2, by, cw2, bh);
             if (_fix.Visible)
             {
-                int fw = _fix.PreferredWidth(Ui.S(170));
+                int fw = _fix.PreferredWidth(Ui.S(190));
                 _fix.SetBounds(w - pad - cw2 - Ui.S(8) - fw, by, fw, bh);
             }
         }

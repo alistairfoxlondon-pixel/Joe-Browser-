@@ -123,6 +123,17 @@ namespace JoeBrowser
             s._browserFullVersion = browser.Version;
 
             var fp = profile.Fp ?? new FingerprintConfig();
+            /* Last line of defence before the script is injected. A profile edited by hand, or
+               restored from a file written by an older build, can still describe an impossible
+               machine; coercing here means the browser never launches with one, whatever state the
+               store was in. Coherence only: the seed and the canvas payload are untouched. */
+            try
+            {
+                int repaired = FingerprintFactory.Coerce(fp);
+                if (repaired > 0)
+                    Log.Info("Repaired " + repaired + " incoherent fingerprint field(s) for " + profile.Name);
+            }
+            catch (Exception ex) { Log.Error("Fingerprint coherence check failed", ex); }
             FingerprintFactory.ResolveUserAgent(fp, browser);
 
             string startUrl = profile.StartUrl;
