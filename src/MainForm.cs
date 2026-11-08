@@ -431,8 +431,13 @@ namespace JoeBrowser
                 /* Only languages with a real translation table are offered: the rest would save
                    a preference and change nothing on screen. */
                 if (!L10n.IsTranslated(l.Key)) continue;
-                string subtitle = l.Native.Equals(l.English, StringComparison.OrdinalIgnoreCase)
-                    ? "" : l.Native;
+                string subtitle = (l.Native.Equals(l.English, StringComparison.OrdinalIgnoreCase)
+                    ? "" : l.Native);
+                /* Say how complete the translation is: a half-translated interface without a
+                   word of warning reads as a broken app rather than a work in progress. */
+                int coverage = L10n.Coverage(l.Key);
+                if (l.Key != "en" && coverage < 100)
+                    subtitle = (subtitle.Length == 0 ? "" : subtitle + "  ·  ") + coverage + "% translated";
                 list.Add(new LangItem(l.Key, l.Flag, l.English, subtitle));
             }
             return list;
@@ -1415,6 +1420,12 @@ namespace JoeBrowser
                 L10n.Set(_setLang.Value);
                 try { _store.SaveSettings(_settings); }
                 catch (Exception ex) { Log.Error("Language preference not saved", ex); }
+                /* Say what the change means when the table is not finished, so the English
+                   words that remain do not look like a bug. */
+                int coverage = L10n.Coverage(_setLang.Value);
+                if (_setLang.Value != "en" && coverage < 100)
+                    Toast("Interface language set to " + L10n.NameOf(_setLang.Value) + " · "
+                        + coverage + "% translated, the rest stays in English", ToastKind.Info);
             };
 
             // Switches carry no caption of their own; the row title to the left is the label.

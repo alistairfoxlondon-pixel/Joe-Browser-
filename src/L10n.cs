@@ -70,6 +70,21 @@ namespace JoeBrowser
             return !string.IsNullOrEmpty(key) && _tables.ContainsKey(key);
         }
 
+        /// <summary>
+        /// Share of the interface this language actually covers, 0-100. Every table is a work in
+        /// progress and untranslated keys fall back to English, so a language that covers a
+        /// third of the app looks broken rather than translated unless the picker says so.
+        /// </summary>
+        public static int Coverage(string key)
+        {
+            if (_english.Count == 0) return 0;
+            Dictionary<string, string> table;
+            if (!_tables.TryGetValue(key ?? "", out table) || table == null) return 0;
+            int have = 0;
+            foreach (string k in _english.Keys) if (table.ContainsKey(k)) have++;
+            return (int)Math.Round(100.0 * have / _english.Count);
+        }
+
         public static bool IsKnown(string key)
         {
             foreach (var l in Languages) if (l.Key == key) return true;
