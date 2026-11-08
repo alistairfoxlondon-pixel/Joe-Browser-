@@ -1209,6 +1209,9 @@ namespace JoeBrowser
             Ui.Opaque(this);
             Height = Ui.S(33);
             TabStop = true;
+            /* The popup outlives a close (see CloseMenu), so the control has to be the last
+               owner: replacing it while an old strip is still alive leaked a top-level window. */
+            Disposed += delegate { if (_menu != null) { try { _menu.Dispose(); } catch { } _menu = null; } };
         }
 
         public string Icon { get { return _icon; } set { _icon = value; Invalidate(); } }
@@ -1315,12 +1318,24 @@ namespace JoeBrowser
             base.OnKeyPress(e);
         }
 
+        /// <summary>
+        /// Closes the popup and releases it. Closing alone is not enough: a strip built for a
+        /// paged list holds flag bitmaps that are disposed on Dispose, so a menu that was only
+        /// Closed leaked its images until the control itself went away.
+        /// </summary>
         private void CloseMenu()
         {
             _open = false;
             var m = _menu;
             _menu = null;
-            if (m != null) { try { m.Close(); } catch { } }
+            if (m != null)
+            {
+                /* Close first so the window is off screen, then dispose once the click that
+                   asked for this has unwound. */
+                try { m.Close(); } catch { }
+                try { m.BeginInvoke(new Action(delegate { try { m.Dispose(); } catch { } })); }
+                catch { try { m.Dispose(); } catch { } }
+            }
             Invalidate();
         }
 
