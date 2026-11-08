@@ -165,6 +165,25 @@ namespace JoeBrowser
                 BorderStyle = BorderStyle.FixedSingle,
                 TabStop = true
             };
+            /* With no native scrollbars the field could only show its first screenful, and the
+               wheel over it did nothing because the host never sees the event. Both are fixed
+               here: the wheel scrolls the text itself when it has more of it than fits, and the
+               host scrolls when it does not, which is what the rest of the window expects. */
+            t.MouseWheel += delegate(object sender, MouseEventArgs e)
+            {
+                try
+                {
+                    if (t.Lines.Length > 0 && t.GetLineFromCharIndex(t.TextLength) >=
+                        Math.Max(1, t.ClientSize.Height / Math.Max(1, t.Font.Height)))
+                    {
+                        Native.SendMessage(t.Handle, 0x0115 /* WM_VSCROLL */,
+                            (IntPtr)(e.Delta > 0 ? 0 : 1), IntPtr.Zero);
+                        return;
+                    }
+                }
+                catch { }
+                _body.Wheel(e.Delta);
+            };
             AddRow(null, t, Ui.S(height));
             return t;
         }
