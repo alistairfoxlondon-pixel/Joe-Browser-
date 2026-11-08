@@ -2896,7 +2896,21 @@ namespace JoeBrowser
                last profile hit the disk twice in a row for no reason. From-disk is the explicit
                signal for "the store may have changed". */
             if (fromDisk || _profiles == null)
+            {
                 _profiles = _store.LoadAll();
+                /* A profile file that cannot be read is not silently dropped any more: it is
+                   reported once per reload, so the user learns why a profile is not on the grid
+                   and where the file is, instead of concluding the app lost it. */
+                var broken = _store.UnreadableFiles;
+                if (broken.Count > 0 && !IsDisposed)
+                {
+                    string first = System.IO.Path.GetFileName(broken[0]);
+                    Toast(broken.Count == 1
+                        ? "One profile file could not be read: " + first + ". It is still in the profiles folder."
+                        : broken.Count + " profile files could not be read. They are still in the profiles folder.",
+                        ToastKind.Warn);
+                }
+            }
             ApplySort();
 
             foreach (var c in _cards.Values) c.Dispose();

@@ -334,7 +334,20 @@ namespace JoeBrowser
             {
                 Directory.CreateDirectory(AppPaths.Root);
                 if (!File.Exists(FilePath)) return list;
-                var items = Json.Deserialize<List<ExtensionItem>>(File.ReadAllText(FilePath, Encoding.UTF8));
+                List<ExtensionItem> items;
+                try
+                {
+                    items = Json.Deserialize<List<ExtensionItem>>(File.ReadAllText(FilePath, Encoding.UTF8));
+                }
+                catch (Exception ex)
+                {
+                    /* A truncated or hand-edited library file threw here and the page showed an
+                       empty list, as if every extension had been removed. Keep the file under a
+                       name the user can send, and start the list again. */
+                    Log.Error("Extension library is unreadable; setting it aside", ex);
+                    try { File.Move(FilePath, FilePath + ".broken"); } catch { }
+                    return list;
+                }
                 if (items == null) return list;
                 foreach (var e in items)
                 {

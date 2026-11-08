@@ -71,6 +71,13 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>Files in the profile folder that could not be parsed by the last
+        /// <see cref="LoadAll"/>. They are never deleted; the grid offers to try again or to
+        /// move them aside, because a profile that silently vanishes reads as data loss.</summary>
+        private List<string> _unreadable = new List<string>();
+
+        public List<string> UnreadableFiles { get { return new List<string>(_unreadable); } }
+
         public List<Profile> LoadAll()
         {
             var list = new List<Profile>();
@@ -78,6 +85,7 @@ namespace JoeBrowser
                millisecond share one seed - which means identical canvas, audio and font
                noise. Repair those on load so every stored profile stays unique. */
             var seeds = new HashSet<int>();
+            _unreadable = new List<string>();
             try
             {
                 Directory.CreateDirectory(ProfilesDir);
@@ -121,7 +129,12 @@ namespace JoeBrowser
                     }
                     catch (Exception ex)
                     {
+                        /* A profile whose file cannot be parsed used to disappear from the grid
+                           with nothing but a log line, which reads as "the app deleted my
+                           profile". The file is recorded here instead, and the grid offers to
+                           open the folder or move it aside. It is never deleted. */
                         Log.Error("Cannot read profile " + file, ex);
+                        _unreadable.Add(file);
                     }
                 }
             }
