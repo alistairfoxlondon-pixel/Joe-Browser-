@@ -2481,6 +2481,14 @@ namespace JoeBrowser
                 Math.Max(0, pageH - Ui.S(16)));
             LayoutSettings();
 
+            /* History and Account were missing from this list. Both were created with the
+               default dock of a control that has never been sized, so they kept whatever
+               rectangle they happened to have: the page after a resize was drawn at the old
+               size, with its rows running past the bottom of the window - the overflow and
+               overlap the user sees when switching to either of them from another page. */
+            _historyPage.SetBounds(contentX, headerH, contentW, pageH);
+            _accountPage.SetBounds(contentX, headerH, contentW, pageH);
+
             _toolsPage.SetBounds(contentX, headerH, contentW, pageH);
             _proxyPage.SetBounds(contentX, headerH, contentW, pageH);
             _extensionPage.SetBounds(contentX, headerH, contentW, pageH);
