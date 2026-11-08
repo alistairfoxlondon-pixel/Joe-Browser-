@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Runtime.InteropServices;
@@ -68,6 +69,77 @@ namespace JoeBrowser
                     Console.Error.WriteLine(sb.ToString());
                     return 2;
                 }
+                /* The configuration check proves the binary can start. It says nothing about the
+                   parts whose failure is silent, so the ones that can be exercised headlessly are
+                   exercised here and the build fails on any of them. The folder is thrown away
+                   afterwards, so a build machine keeps nothing from this. */
+                string sandbox = null;
+                try
+                {
+                    var sb = new System.Text.StringBuilder();
+                    string history = HistoryStore.SelfTest();
+                    if (!string.IsNullOrEmpty(history)) sb.Append(" [history" + history + "]");
+
+                    sandbox = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                        "joebrowser-selftest-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                    System.IO.Directory.CreateDirectory(sandbox);
+                    var store = new ProfileStore(sandbox);
+
+                    /* The brief's hardest rule: two new profiles must not describe the same
+                       machine. Profiles are made through the same path the grid uses, so this
+                       tests the real generator rather than a copy of it. */
+                    var profiles = new List<Profile>();
+                    for (int i = 0; i < 8; i++)
+                    {
+                        var p = new Profile();
+                        p.Name = "self test " + (i + 1);
+                        FingerprintIdentity.Comparison clash;
+                        FingerprintIdentity.MakeUnique(p.Fp, "System default", p.Proxy, profiles, out clash);
+                        if (clash != null && clash.Relation == FingerprintIdentity.Relation.Linked)
+                            sb.Append(" [profile " + (i + 1) + " is linked to profile " +
+                                      (profiles.IndexOf(clash.B) + 1) + "]");
+                        string note;
+                        KernelDiversity.Assign(p, profiles, out note);
+                        profiles.Add(p);
+                    }
+
+                    var bySignature = new Dictionary<string, int>(StringComparer.Ordinal);
+                    foreach (var p in profiles)
+                    {
+                        if (p.Fp == null) { sb.Append(" [a profile has no fingerprint]"); continue; }
+                        if (string.IsNullOrEmpty(p.UserAgent)) sb.Append(" [a profile has no user agent]");
+                        string sig = FingerprintIdentity.OverallHash(p);
+                        int n;
+                        bySignature.TryGetValue(sig, out n);
+                        bySignature[sig] = n + 1;
+                    }
+                    foreach (var kv in bySignature)
+                        if (kv.Value > 1) sb.Append(" [" + kv.Value + " of 8 profiles share one signature]");
+
+                    var saved = new Profile { Name = "self test save" };
+                    store.Save(saved);
+                    var back = store.LoadAll();
+                    if (back.Count != 1) sb.Append(" [saved profile did not reload]");
+                    else if (back[0].Fp == null) sb.Append(" [reloaded profile lost its fingerprint]");
+                    store.Delete(saved, false);
+
+                    if (sb.Length > 0)
+                    {
+                        Console.Error.WriteLine("selftest failed:" + sb);
+                        return 4;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("selftest threw " + ex.GetType().Name + ": " + ex.Message);
+                    return 5;
+                }
+                finally
+                {
+                    try { if (sandbox != null && System.IO.Directory.Exists(sandbox)) System.IO.Directory.Delete(sandbox, true); }
+                    catch { }
+                }
+
                 Console.WriteLine("selftest ok " + Application.ProductVersion);
                 return 0;
             }

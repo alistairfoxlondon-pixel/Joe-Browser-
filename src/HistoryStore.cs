@@ -88,6 +88,7 @@ namespace JoeBrowser
         {
             get
             {
+                if (ForceEnabled) return true;
                 var p = EnabledProvider;
                 try { return p == null || p(); } catch { return true; }
             }
@@ -147,6 +148,28 @@ namespace JoeBrowser
             catch (Exception ex) { Log.Error("History title failed", ex); }
         }
 
+        /// <summary>Appends a visit, then trims the file when it has outgrown the cap.</summary>
+        private static void Append(Entry entry, bool trim)
+        {
+            string file = FileFor(entry.ProfileId);
+            var ser = new JavaScriptSerializer();
+            using (var fs = new FileStream(file, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+            using (var w = new StreamWriter(fs, new UTF8Encoding(false)))
+                w.WriteLine(ser.Serialize(entry));
+
+            if (!trim) return;
+            /* The cap used to be applied only when reading, so the file itself grew without
+               limit and every read parsed a year of rows to show the newest page of them. The
+               file is rewritten only once it is 25% over, so the cost is amortised, and only
+               the newest cap rows survive. */
+            string[] lines = File.ReadAllLines(file);
+            if (lines.Length <= MaxEntriesPerProfile + MaxEntriesPerProfile / 4) return;
+            int keep = MaxEntriesPerProfile;
+            var tail = new string[keep];
+            Array.Copy(lines, lines.Length - keep, tail, 0, keep);
+            File.WriteAllLines(file, tail);
+        }
+
         public static void Add(string profileId, string profileName, string url, string title, bool hop)
         {
             if (!Enabled || !Interesting(url)) return;
@@ -154,7 +177,6 @@ namespace JoeBrowser
             {
                 lock (Gate)
                 {
-                    string file = FileFor(profileId);
                     var entry = new Entry
                     {
                         Url = url.Trim(),
@@ -164,10 +186,7 @@ namespace JoeBrowser
                         ProfileId = profileId,
                         ProfileName = profileName
                     };
-                    var ser = new JavaScriptSerializer();
-                    using (var fs = new FileStream(file, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
-                    using (var w = new StreamWriter(fs, new UTF8Encoding(false)))
-                        w.WriteLine(ser.Serialize(entry));
+                    Append(entry, true);
                 }
             }
             catch (Exception ex) { Log.Error("History append failed", ex); }

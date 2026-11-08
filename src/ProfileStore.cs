@@ -14,6 +14,20 @@ namespace JoeBrowser
         private readonly JavaScriptSerializer _json = new JavaScriptSerializer();
 
         /// <summary>
+        /// Root override for anything that needs an isolated folder: the release self test
+        /// writes eight real profiles and throws them away, and nothing else should ever set it.
+        /// </summary>
+        private readonly string _root;
+
+        public ProfileStore() { }
+        public ProfileStore(string root) { _root = string.IsNullOrWhiteSpace(root) ? null : root; }
+
+        private string ProfilesDir
+        {
+            get { return string.IsNullOrEmpty(_root) ? ActiveProfiles : Path.Combine(_root, "profiles"); }
+        }
+
+        /// <summary>
         /// Folder holding the profiles of one account. History and profiles both hang off this,
         /// so two accounts signed in on the same Windows user never see each other's data - which
         /// is what "each user's history must remain separate" has to mean in an app whose data
@@ -66,8 +80,8 @@ namespace JoeBrowser
             var seeds = new HashSet<int>();
             try
             {
-                Directory.CreateDirectory(ActiveProfiles);
-                foreach (string file in Directory.GetFiles(ActiveProfiles, "*.json"))
+                Directory.CreateDirectory(ProfilesDir);
+                foreach (string file in Directory.GetFiles(ProfilesDir, "*.json"))
                 {
                     try
                     {
@@ -120,7 +134,7 @@ namespace JoeBrowser
 
         public void Save(Profile p)
         {
-            Directory.CreateDirectory(ActiveProfiles);
+            Directory.CreateDirectory(ProfilesDir);
             /* A profile written before Proxy was initialised - an older file, a hand-edited
                one, a duplicate that lost a field - made every save throw a NullReferenceException
                from here, so the profile could never be edited again. */
@@ -141,7 +155,7 @@ namespace JoeBrowser
                 if (!string.IsNullOrEmpty(enc)) p.Proxy.PasswordEnc = enc;
             }
 
-            string target = Path.Combine(ActiveProfiles, p.Id + ".json");
+            string target = Path.Combine(ProfilesDir, p.Id + ".json");
             string tmp = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
             string json = _json.Serialize(p);
             File.WriteAllText(tmp, json, new UTF8Encoding(true));
@@ -173,7 +187,7 @@ namespace JoeBrowser
         /// </summary>
         public void Delete(Profile p, bool useTrash)
         {
-            string file = Path.Combine(ActiveProfiles, p.Id + ".json");
+            string file = Path.Combine(ProfilesDir, p.Id + ".json");
             if (useTrash)
             {
                 try
