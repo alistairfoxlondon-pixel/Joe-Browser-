@@ -80,6 +80,7 @@ namespace JoeBrowser
             public string PendingCoin { get; set; }
             public string PendingCreated { get; set; }
             public string PendingAmount { get; set; }
+            public string PendingAddress { get; set; }
 
             public PlanData()
             {
@@ -163,7 +164,7 @@ namespace JoeBrowser
         /// before the confirmations land must not lose the payment, so the session - not just
         /// the coins - survives a restart. It expires on its own after two hours.
         /// </summary>
-        public static void SavePending(string coinKey, DateTime createdUtc, decimal amount)
+        public static void SavePending(string coinKey, DateTime createdUtc, decimal amount, string address = "")
         {
             lock (Gate)
             {
@@ -172,6 +173,7 @@ namespace JoeBrowser
                 d.PendingCoin = coinKey;
                 d.PendingCreated = createdUtc.ToString("o", CultureInfo.InvariantCulture);
                 d.PendingAmount = amount.ToString(CultureInfo.InvariantCulture);
+                if (!string.IsNullOrEmpty(address)) d.PendingAddress = address;
                 Save(d);
             }
         }
@@ -201,6 +203,26 @@ namespace JoeBrowser
                 if (d == null || !TryDate(d.PendingCreated, out v)) return null;
                 return v;
             }
+        }
+
+        /// <summary>
+        /// Saves what the payer was asked to send, so a check run later knows the amount and the
+        /// address the invoice was drawn against rather than only the coin.
+        /// </summary>
+        public static void SavePendingAddress(string address)
+        {
+            lock (Gate)
+            {
+                var d = Load();
+                if (d == null) return;
+                d.PendingAddress = address ?? "";
+                Save(d);
+            }
+        }
+
+        public static string PendingAddress
+        {
+            get { var d = Load(); return d == null ? null : d.PendingAddress; }
         }
 
         public static decimal? PendingAmount

@@ -441,6 +441,74 @@ namespace JoeBrowser
             _built = true;
             ApplyLanguage();
             RefreshPlanState();
+            CheckUnfinishedPayment();
+        }
+
+        /// <summary>
+        /// A payment that was sent before the app closed was only ever confirmed while the window
+        /// was open, so a buyer who paid and quit stayed on the free plan until they thought to
+        /// press the check button again. The pending invoice is remembered; this finishes the job
+        /// on the next start. It is still the chain that decides - nothing here grants anything
+        /// without a matching, unseen transaction.
+        /// </summary>
+        private void CheckUnfinishedPayment()
+        {
+            try
+            {
+                if (Plan.IsPro) return;
+                string coinKey = Plan.PendingCoin;
+                DateTime? created = Plan.PendingCreated;
+                decimal? amount = Plan.PendingAmount;
+                if (string.IsNullOrEmpty(coinKey) || created == null || amount == null) return;
+                /* Give the transfer time to be mined before the first attempt; a check run the
+                   second the app opens would find nothing and burn the pending record's meaning. */
+                if ((DateTime.UtcNow - created.Value).TotalMinutes < 2) return;
+                if ((DateTime.UtcNow - created.Value).TotalDays > 7) { Plan.ClearPending(); return; }
+
+                var coin = CoinOption.ByKey(coinKey);
+                if (coin == null) { Plan.ClearPending(); return; }
+                string address = Plan.PendingAddress;
+                if (string.IsNullOrEmpty(address)) address = coin.Address;
+
+                var inv = new Invoice
+                {
+                    Id = "RESUME",
+                    Coin = coin,
+                    Amount = amount.Value,
+                    Usd = 1.0,
+                    CreatedUtc = created.Value,
+                    ExpiresUtc = created.Value.AddSeconds(1)
+                };
+                if (!string.IsNullOrEmpty(address) && !string.Equals(address, coin.Address, StringComparison.OrdinalIgnoreCase))
+                {
+                    /* A different receiving address is a different invoice; the invoice object
+                       carries the coin, so the address the user was shown is restored onto it. */
+                    var copy = CoinOption.ByKey(coinKey);
+                    if (copy != null) { copy.Address = address; inv.Coin = copy; }
+                }
+
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                {
+                    PaymentCheck result;
+                    try { result = Payments.Check(inv); }
+                    catch { return; }
+                    if (result == null || !result.Found || Plan.HasSpent(result.TxId)) return;
+                    try
+                    {
+                        BeginInvoke(new Action(delegate
+                        {
+                            Plan.Activate(result.TxId, inv.Coin.Key + " " + Invoice.Fmt(result.Amount) + " " +
+                                inv.Coin.Symbol + "  tx " + result.TxId);
+                            Plan.ClearPending();
+                            RefreshPlanState();
+                            Invalidate();
+                            Toast("Payment confirmed. Pro unlocked", ToastKind.Success);
+                        }));
+                    }
+                    catch { }
+                });
+            }
+            catch (Exception ex) { Log.Error("Resume payment check failed", ex); }
         }
 
         private void OpenUrl(string url)

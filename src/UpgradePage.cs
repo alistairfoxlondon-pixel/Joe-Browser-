@@ -481,7 +481,7 @@ namespace JoeBrowser
 
             /* Persisted so a payment made just before closing the app is still honoured. The
                intermediate session built while restoring must not overwrite the saved one. */
-            if (!createdUtc.HasValue && !_restoring) Plan.SavePending(coin.Key, created, amount);
+            if (!createdUtc.HasValue && !_restoring) Plan.SavePending(coin.Key, created, amount, coin.Address);
         }
 
         /// <summary>
