@@ -149,9 +149,19 @@ namespace JoeBrowser
         /// </summary>
         public static Dictionary<string, FpSurfaceValue> Surfaces(Profile p)
         {
+            if (p == null) return new Dictionary<string, FpSurfaceValue>(StringComparer.Ordinal);
+            return Surfaces(p.Fp);
+        }
+
+        /// <summary>
+        /// The surface map for a bare configuration. Needed by every path that compares a
+        /// fingerprint that does not belong to a stored profile yet - a duplicate being rolled,
+        /// a batch being planned - and it keeps the surface list in exactly one place.
+        /// </summary>
+        public static Dictionary<string, FpSurfaceValue> Surfaces(FingerprintConfig fp)
+        {
             var map = new Dictionary<string, FpSurfaceValue>(StringComparer.Ordinal);
-            if (p == null) return map;
-            var fp = p.Fp ?? new FingerprintConfig();
+            if (fp == null) return map;
 
             Add(map, FpSurface.UserAgent, FpSurface.UserAgent,
                 string.IsNullOrEmpty(fp.UserAgentOverride) ? "automatic" : fp.UserAgentOverride);
@@ -296,11 +306,26 @@ namespace JoeBrowser
         /// </summary>
         public static Comparison Compare(Profile a, Profile b)
         {
-            var result = new Comparison { A = a, B = b };
-            if (a == null || b == null) { result.Relation = Relation.Distinct; return result; }
+            if (a == null || b == null)
+                return new Comparison { A = a, B = b, Relation = Relation.Distinct };
+            return Compare(a, Surfaces(a), b, Surfaces(b));
+        }
 
-            var ma = Surfaces(a);
-            var mb = Surfaces(b);
+        /// <summary>
+        /// The real comparison, over two surface maps the caller already has. The workspace audit
+        /// compares every pair, which is O(n²) maps if each call rebuilds them; that is 900 map
+        /// builds for a 30-profile workspace, and it is the difference between a page that opens
+        /// instantly and one that pauses.
+        /// </summary>
+        public static Comparison Compare(Profile a, Dictionary<string, FpSurfaceValue> ma,
+            Profile b, Dictionary<string, FpSurfaceValue> mb)
+        {
+            var result = new Comparison { A = a, B = b };
+            if (a == null || b == null || ma == null || mb == null)
+            {
+                result.Relation = Relation.Distinct;
+                return result;
+            }
 
             int totalWeight = 0, sharedWeight = 0;
             bool sharesStrong = false, sharesAnything = false;
@@ -342,6 +367,29 @@ namespace JoeBrowser
         {
             var c = Compare(a, b);
             return c.Relation == Relation.Identical || c.Relation == Relation.Linked;
+        }
+
+        /// <summary>
+        /// Same answer as <see cref="WorstMatch(Profile, IEnumerable{Profile})"/>, over surface maps
+        /// the caller has already built. The uniqueness loop calls this up to twelve times per new
+        /// profile, so rebuilding the workspace maps inside it would be the most expensive thing
+        /// the creation path does.
+        /// </summary>
+        public static Comparison WorstMatch(Profile p, Dictionary<string, FpSurfaceValue> map,
+            IEnumerable<KeyValuePair<Profile, Dictionary<string, FpSurfaceValue>>> all)
+        {
+            Comparison worst = null;
+            if (p == null || map == null || all == null) return null;
+            foreach (var entry in all)
+            {
+                var other = entry.Key;
+                if (other == null) continue;
+                if (!string.IsNullOrEmpty(p.Id) && string.Equals(other.Id, p.Id, StringComparison.Ordinal)) continue;
+                var c = Compare(p, map, other, entry.Value);
+                if (worst == null || Rank(c.Relation) > Rank(worst.Relation) ||
+                    (Rank(c.Relation) == Rank(worst.Relation) && c.Score > worst.Score)) worst = c;
+            }
+            return worst;
         }
 
         /// <summary>The worst relation between <paramref name="p"/> and any other profile.</summary>
@@ -404,6 +452,16 @@ namespace JoeBrowser
             // One probe reused across rolls: Compare only reads the configuration, so allocating a
             // Profile per attempt would only produce twelve short-lived objects per new profile.
             var probe = new Profile { Fp = fp };
+            /* The candidate map is reused too. It is rebuilt from fp after each roll, because
+               Regenerate writes straight into fp and a cached map would describe the previous
+               attempt - the bug that would let a roll look clean while colliding. */
+            var probeMap = new Dictionary<string, FpSurfaceValue>(StringComparer.Ordinal);
+
+            // Maps for the workspace are built once, not once per attempt per profile.
+            var poolMaps = new List<KeyValuePair<Profile, Dictionary<string, FpSurfaceValue>>>(pool.Count);
+            foreach (var o in pool)
+                poolMaps.Add(new KeyValuePair<Profile, Dictionary<string, FpSurfaceValue>>(o, Surfaces(o)));
+
             FingerprintConfig best = null;
             Comparison bestClash = null;
 
@@ -413,7 +471,8 @@ namespace JoeBrowser
             for (int attempt = 0; attempt < 12; attempt++)
             {
                 FingerprintFactory.Regenerate(fp, os, proxy, attempt >= 8);
-                var worst = WorstMatch(probe, pool);
+                probeMap = Surfaces(fp);
+                var worst = WorstMatch(probe, probeMap, poolMaps);
 
                 if (worst == null || worst.Relation == Relation.Distinct || worst.Relation == Relation.Remote)
                 {

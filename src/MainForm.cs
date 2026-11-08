@@ -592,7 +592,11 @@ namespace JoeBrowser
             string[] lines = proxyText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(x => x.Trim()).Where(x => x.Length > 0).ToArray();
 
-            int made = 0, sharedFingerprints = 0;
+            int made = 0, sharedFingerprints = 0, failedSaves = 0;
+            /* `taken` is the workspace as it exists, plus each profile this loop has just built.
+               Deduplicating only against _profiles would let batch profile 3 collide with batch
+               profile 2 - neither is in _profiles until the reload at the end. */
+            var taken = new List<Profile>(_profiles);
             for (int i = 0; i < count; i++)
             {
                 var p = new Profile();
@@ -604,21 +608,36 @@ namespace JoeBrowser
                     if (proxy.Enabled) p.Proxy = proxy;
                 }
                 p.Tools.ProxyWatch = p.Proxy.Enabled;
-                /* Every batch profile is made unique against the ones already in the workspace
-                   plus the ones this loop has just made: a batch of twenty used to be twenty
-                   independent random rolls, which reliably produced duplicate renderers. */
+                /* Every batch profile is made unique against everything already made: a batch of
+                   twenty used to be twenty independent random rolls, which reliably produced
+                   duplicate renderers. */
                 FingerprintIdentity.Comparison clash;
-                FingerprintIdentity.MakeUnique(p.Fp, "System default", p.Proxy, _profiles, out clash);
+                FingerprintIdentity.MakeUnique(p.Fp, "System default", p.Proxy, taken, out clash);
                 string kernelNote;
-                KernelDiversity.Assign(p, _profiles, out kernelNote);
-                _store.Save(p);
+                KernelDiversity.Assign(p, taken, out kernelNote);
+                try
+                {
+                    _store.Save(p);
+                    taken.Add(p);
+                    made++;
+                }
+                catch (Exception ex)
+                {
+                    /* Keep going: one profile that cannot be written (a full disk, a locked file)
+                       must not discard the nineteen that already succeeded. */
+                    Log.Error("Batch create could not save a profile", ex);
+                    failedSaves++;
+                    continue;
+                }
                 if (clash != null && clash.Relation == FingerprintIdentity.Relation.Linked)
                     sharedFingerprints++;
-                made++;
             }
 
             ReloadCards(true);
-            if (sharedFingerprints > 0)
+            if (failedSaves > 0)
+                Toast(made + " of " + count + " profiles created \u00b7 " + failedSaves +
+                      " could not be saved", ToastKind.Warn);
+            else if (sharedFingerprints > 0)
                 Toast(made + " profiles created \u00b7 " + sharedFingerprints +
                       " share a strong signal with another profile", ToastKind.Warn);
             else

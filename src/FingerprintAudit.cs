@@ -116,13 +116,18 @@ namespace JoeBrowser
             int n = list.Count;
             var parent = new int[n];
             for (int i = 0; i < n; i++) parent[i] = i;
-            var worstAmong = new Dictionary<string, FingerprintIdentity.Comparison>(StringComparer.Ordinal);
             var pairs = new List<FingerprintIdentity.Comparison>();
+
+            /* Build each surface map once. Every pair needs two of them, so rebuilding per pair
+               is n² allocations for a workspace of n profiles - the kind of cost that is invisible
+               at five profiles and a visible pause at sixty. */
+            var maps = new Dictionary<string, FpSurfaceValue>[n];
+            for (int i = 0; i < n; i++) maps[i] = FingerprintIdentity.Surfaces(list[i]);
 
             for (int i = 0; i < n; i++)
                 for (int j = i + 1; j < n; j++)
                 {
-                    var c = FingerprintIdentity.Compare(list[i], list[j]);
+                    var c = FingerprintIdentity.Compare(list[i], maps[i], list[j], maps[j]);
                     if (c.Relation == FingerprintIdentity.Relation.Distinct ||
                         c.Relation == FingerprintIdentity.Relation.Remote) continue;
                     pairs.Add(c);
