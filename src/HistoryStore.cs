@@ -242,19 +242,29 @@ namespace JoeBrowser
             return n;
         }
 
-        /// <summary>Drops every profile's history, for the settings page.</summary>
-        public static void ClearAll()
+        /// <summary>Drops every profile's history, for the settings page. Returns rows removed.</summary>
+        public static int ClearAll()
         {
+            int n = 0;
             try
             {
                 lock (Gate)
                 {
                     string d = Dir;
-                    if (!Directory.Exists(d)) return;
-                    foreach (string f in Directory.GetFiles(d, "*.jsonl")) { try { File.Delete(f); } catch { } }
+                    if (!Directory.Exists(d)) return 0;
+                    foreach (string f in Directory.GetFiles(d, "*.jsonl"))
+                    {
+                        try
+                        {
+                            n += File.ReadAllLines(f).Length;
+                            File.Delete(f);
+                        }
+                        catch { }
+                    }
                 }
             }
             catch (Exception ex) { Log.Error("History clear-all failed", ex); }
+            return n;
         }
 
         /// <summary>Removes a profile's history when the profile itself is deleted for good.</summary>
