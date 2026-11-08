@@ -747,6 +747,10 @@ namespace JoeBrowser
                         FingerprintIdentity.MakeUnique(p.Fp, p.Fp.Os, p.Proxy, _profiles, out clash);
                         rerolled++;
                     }
+                    /* Imported profiles carry whatever fingerprint the exporting machine had,
+                       which is frequently an impossible machine - see Coerce. Repair it here so the
+                       file the user just imported is coherent from the first launch. */
+                    FingerprintFactory.Coerce(p.Fp);
                     string kernelNote;
                     if (!KernelDiversity.IsPinned(p)) KernelDiversity.Assign(p, _profiles, out kernelNote);
                     _store.Save(p);

@@ -336,6 +336,10 @@ namespace JoeBrowser
             _kernelManage.Click += delegate
             {
                 using (var dlg = new KernelForm()) dlg.ShowDialog(this);
+                /* Installing a build inside that window changes the choice this dropdown offers,
+                   so the inventory is re-read and the list rebuilt - otherwise the build the user
+                   just downloaded is only visible after restarting the app. */
+                KernelDiversity.Invalidate();
                 _suppress = true;
                 BuildKernelOptions();
                 _suppress = false;
