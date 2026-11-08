@@ -53,10 +53,22 @@ namespace JoeBrowser
         public static bool IsComplimentaryEmail(string email)
         {
             if (string.IsNullOrWhiteSpace(email)) return false;
-            string key = email.Trim().ToLowerInvariant();
+            /* Normalised on both sides, because the address reaches us from a sign in form, a
+               Google profile and a session file, and " Name@Example.com " is the same account as
+               "name@example.com" to every mail system but not to a string compare. */
+            string key = NormalizeEmail(email);
             foreach (string s in ComplimentaryAccounts)
-                if (string.Equals(s, key, StringComparison.OrdinalIgnoreCase)) return true;
+                if (NormalizeEmail(s) == key) return true;
             return false;
+        }
+
+        private static string NormalizeEmail(string email)
+        {
+            if (string.IsNullOrEmpty(email)) return "";
+            var sb = new System.Text.StringBuilder(email.Length);
+            foreach (char c in email.Trim().ToLowerInvariant())
+                if (!char.IsWhiteSpace(c)) sb.Append(c);
+            return sb.ToString();
         }
 
         private static readonly object Gate = new object();
@@ -119,9 +131,25 @@ namespace JoeBrowser
         }
 
         /// <summary>"Pro until 7 December" or "Free plan".</summary>
+        /// <summary>
+        /// True when the account is paid up for good: a complimentary account, or a licence with a
+        /// 30 day period that has been extended far enough out to be a lifetime purchase. The
+        /// pages read this to say "no renewal needed" instead of printing a countdown that has no
+        /// meaning.
+        /// </summary>
+        public static bool IsLifetime
+        {
+            get
+            {
+                if (IsComplimentary) return true;
+                var u = Until;
+                return u.HasValue && (u.Value - DateTime.UtcNow).TotalDays > 3650;
+            }
+        }
+
         public static string Summary()
         {
-            if (IsComplimentary) return "Pro, unlimited";
+            if (IsLifetime) return "Pro, unlimited";
             if (!IsPro) return "Free plan";
             var u = Until;
             return u == null ? "Pro" : "Pro until " + u.Value.ToLocalTime().ToString("d MMMM", CultureInfo.InvariantCulture);

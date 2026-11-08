@@ -1641,7 +1641,7 @@ namespace JoeBrowser
             _setBrowserPath.Value = _settings.BrowserPath ?? "";
             _setBrowse = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.browse"), Radius = 4, Height = Ui.S(33) };
             _setDetect = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = L10n.T("btn.detect"), Radius = 4, Height = Ui.S(33) };
-            _setStartUrl = Field("https://www.google.com");
+            _setStartUrl = Field(Profile.FingerprintTestUrl);
             _setDefaultGroup = Field(L10n.T("set.group.hint"));
             _setDefaultGroup.Value = _settings.DefaultGroup ?? "";
             _setOpenData = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.opendata"), Radius = 4, Height = Ui.S(33) };
@@ -2218,7 +2218,7 @@ namespace JoeBrowser
             /* The field shows what was stored, not what was typed: without this a save that
                normalised "google.com" left the box looking unsaved. */
             if (_setStartUrl.Value != url) _setStartUrl.Value = url;
-            _settings.DefaultStartUrl = string.IsNullOrEmpty(url) ? "https://www.google.com" : url;
+            _settings.DefaultStartUrl = string.IsNullOrEmpty(url) ? Profile.FingerprintTestUrl : url;
             _settings.ThemeMode = Theme.Dark ? 1 : 2;
             _settings.DefaultGroup = (_setDefaultGroup.Value ?? "").Trim();
             /* Normalised rather than trimmed: a paste from the console usually carries quotes,
@@ -3572,9 +3572,16 @@ namespace JoeBrowser
                     if (!await DownloadBrowserAsync(p.BrowserKind)) return;
                 }
 
-                var session = await BrowserSession.LaunchAsync(p,
-                    string.IsNullOrEmpty(startUrl) ? _settings.DefaultStartUrl : startUrl,
-                    _settings.BrowserPath, _settings);
+                /* Three fallbacks, in order of how specific they are: a URL the caller asked
+                   for (a history row being reopened), the profile's own start page, then the
+                   app default. A blank profile used to fall straight through to the settings
+                   default, which on a fresh install was Google and on an older one could be
+                   empty, so a new profile opened on a blank tab. */
+                string target = !string.IsNullOrEmpty(startUrl) ? startUrl
+                    : !string.IsNullOrEmpty(p.StartUrl) ? p.StartUrl
+                    : (_settings != null && !string.IsNullOrEmpty(_settings.DefaultStartUrl) ? _settings.DefaultStartUrl
+                        : Profile.FingerprintTestUrl);
+                var session = await BrowserSession.LaunchAsync(p, target, _settings.BrowserPath, _settings);
                 _sessions[id] = session;
                 session.Closed += delegate { SessionClosed(id); };
                 /* A proxy that dies mid-session no longer freezes the tabs: the relay moves to a

@@ -126,6 +126,28 @@ namespace JoeBrowser
                     foreach (var kv in bySignature)
                         if (kv.Value > 1) sb.Append(" [" + kv.Value + " of 8 profiles share one signature]");
 
+                    /* The start page every new profile gets: the fingerprint test page, not a
+                       search engine. Checked here because it is a one line default that three
+                       separate fallbacks read, and a wrong one is invisible until a user opens
+                       a blank tab. */
+                    var fresh = new Profile();
+                    if (fresh.StartUrl != Profile.FingerprintTestUrl)
+                        sb.Append(" [a new profile starts on " + (fresh.StartUrl ?? "nothing") + "]");
+                    var settings = new AppSettings();
+                    if (settings.DefaultStartUrl != Profile.FingerprintTestUrl)
+                        sb.Append(" [the app default start page is " + (settings.DefaultStartUrl ?? "nothing") + "]");
+
+                    /* The complimentary grant: it must recognise the account whatever shape the
+                       address arrives in, and it must not recognise anybody else. */
+                    if (!Plan.IsComplimentaryEmail("alistairfox.london@gmail.com"))
+                        sb.Append(" [the complimentary account is not recognised]");
+                    if (!Plan.IsComplimentaryEmail("  AlistairFox.London@Gmail.com "))
+                        sb.Append(" [a spaced or capitalised address is not recognised]");
+                    if (Plan.IsComplimentaryEmail("someone@example.com"))
+                        sb.Append(" [an unrelated address was granted Pro]");
+                    if (Plan.IsComplimentaryEmail(""))
+                        sb.Append(" [an empty address was granted Pro]");
+
                     var saved = new Profile { Name = "self test save" };
                     store.Save(saved);
                     var back = store.LoadAll();

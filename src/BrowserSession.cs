@@ -142,9 +142,13 @@ namespace JoeBrowser
 
             string startUrl = profile.StartUrl;
             if (string.IsNullOrWhiteSpace(startUrl)) startUrl = defaultStartUrl;
+            if (string.IsNullOrWhiteSpace(startUrl)) startUrl = Profile.FingerprintTestUrl;
+            /* A stored address that is no longer a URL must not become a Google tab: the profile
+               asks for one thing and gets another, which is worse than falling back to the
+               default everybody else gets. */
             Uri parsed;
-            if (string.IsNullOrWhiteSpace(startUrl) || !Uri.TryCreate(startUrl, UriKind.Absolute, out parsed))
-                startUrl = "https://www.google.com";
+            if (!Uri.TryCreate(startUrl, UriKind.Absolute, out parsed))
+                startUrl = Profile.FingerprintTestUrl;
             s._startUrl = startUrl;
 
             string dataDir = Path.Combine(AppPaths.Data, profile.Id);

@@ -266,7 +266,9 @@ namespace JoeBrowser
             _name = Txt(_tabGeneral, _profile.Name, "Name this profile", "user", false, 40);
 
             _lblStart = Lbl(_tabGeneral, "START PAGE");
-            _startUrl = Txt(_tabGeneral, _profile.StartUrl, "https://www.google.com", "globe", false, 40);
+            /* The hint is the value that will be used when the field is left empty, so it has to
+               be the fingerprint test page and not a search engine. */
+            _startUrl = Txt(_tabGeneral, _profile.StartUrl, Profile.FingerprintTestUrl, "globe", false, 40);
 
             _lblKind = Lbl(_tabGeneral, "BROWSER");
             _browserKind = Pick(_tabGeneral, "window");

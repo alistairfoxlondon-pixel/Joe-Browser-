@@ -251,7 +251,18 @@ namespace JoeBrowser
         public string Id { get; set; }
         public string Name { get; set; }
         public string Notes { get; set; }
+        /// <summary>
+        /// The page a profile opens on. Blank means the built in default, which is the
+        /// fingerprint test page: the first thing a new profile should do is show whether its
+        /// identity holds, and a blank start page teaches the user nothing.
+        /// </summary>
         public string StartUrl { get; set; }
+
+        /// <summary>
+        /// What a profile with no start page opens on. Kept in one place because three things
+        /// read it: the launch path, the editor's empty state and the settings default.
+        /// </summary>
+        public const string FingerprintTestUrl = "https://ipfighter.com/browser-fingerprint";
         public string BrowserKind { get; set; }   // auto | chrome | edge | brave | chromium | firefox | custom
         public string BrowserPath { get; set; }
         /// <summary>Pinned engine build ("kernel"). Empty means the installed browser of
@@ -276,7 +287,7 @@ namespace JoeBrowser
             Id = Guid.NewGuid().ToString("N");
             Name = "";
             Notes = "";
-            StartUrl = "";
+            StartUrl = FingerprintTestUrl;
             BrowserKind = "auto";
             BrowserPath = "";
             KernelEngine = "";
@@ -392,7 +403,7 @@ namespace JoeBrowser
         public AppSettings()
         {
             BrowserPath = "";
-            DefaultStartUrl = "https://www.google.com";
+            DefaultStartUrl = Profile.FingerprintTestUrl;
             ThemeMode = 0;
             SortBy = 0;
             UiLanguage = "en";

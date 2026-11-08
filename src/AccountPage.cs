@@ -100,7 +100,7 @@ namespace JoeBrowser
 
             _plan.Text = Plan.Summary();
             var until = Plan.Until;
-            if (Plan.IsComplimentary)
+            if (Plan.IsLifetime)
                 _planNote.Text = L10n.T("acct.plan.unlimited");
             else if (Plan.IsPro && until != null)
                 _planNote.Text = L10n.T("acct.plan.renews") + " " + until.Value.ToLocalTime().ToString("d MMMM yyyy");
