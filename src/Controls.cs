@@ -1574,7 +1574,11 @@ namespace JoeBrowser
 
             string text = LabelAt(_selected);
             Color fg = string.IsNullOrEmpty(text) ? Theme.TextFaint : Theme.Text;
-            Ui.Text(g, text, Font, fg, left, (Height - Font.GetHeight(g)) / 2f, Width - left - Ui.S(36));
+            /* A dropdown narrower than its own chevron and padding would ask for a negative
+               width here, and GDI draws nothing for that - the selected value vanished instead of
+               being trimmed. The last 24 px are kept for the chevron and no more. */
+            Ui.Text(g, text, Font, fg, left, (Height - Font.GetHeight(g)) / 2f,
+                Math.Max(Ui.S(16), Width - left - Ui.S(36)));
 
             float c = Ui.S(16);
             Icons.Draw(g, _open ? "chevron-up" : "chevron-down",
@@ -2201,7 +2205,11 @@ namespace JoeBrowser
                 }
                 catch { lines = 1; }
             }
-            _lines = Math.Max(1, Math.Min(3, lines));
+            /* Three lines was the cap, and a message longer than that was simply cut off: the
+               paint asks for WordBreak without EndEllipsis, so the tail vanished mid sentence
+               with nothing to say there was more. Five lines is enough for every message the app
+               shows, and the timer still dismisses it. */
+            _lines = Math.Max(1, Math.Min(5, lines));
             int target = Ui.S(44) + (_lines - 1) * lineH;
             if (Height != target) Height = target;
             if (_bottom > 0) Top = _bottom - Height;
@@ -2240,8 +2248,12 @@ namespace JoeBrowser
             if (_lines <= 1)
                 Ui.Text(g, _text, Font, Theme.Text, Ui.S(40), (Height - lineH) / 2f, Width - Ui.S(56));
             else
+                /* WordBreak without EndEllipsis draws nothing for the part that does not fit, so
+                   a message one line longer than the box silently loses its tail. EndEllipsis
+                   cannot be combined with WordBreak, so the width is what is trusted here and the
+                   line count above is measured from the same font and width. */
                 Ui.Text(g, _text, Font, Theme.Text, Ui.S(40), (Height - lineH * _lines) / 2f,
-                    Width - Ui.S(56), "left", _lines);
+                    Math.Max(Ui.S(80), Width - Ui.S(56)), "left", _lines);
 
             float close = Ui.S(16);
             Icons.Draw(g, "close", new RectangleF(Width - Ui.S(14) - close, (Height - close) / 2f, close, close),

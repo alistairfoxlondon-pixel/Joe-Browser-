@@ -2497,7 +2497,9 @@ namespace JoeBrowser
             _aboutPage.SetBounds(contentX, headerH, contentW, pageH);
             LayoutAbout();
 
-            int tw = Math.Min(Ui.S(560), Math.Max(Ui.S(240), contentW - Ui.S(64)));
+            /* A wide toast wraps into fewer lines, which is why the cap moved from 560 to 760
+               now that a message is allowed to be five lines tall. */
+            int tw = Math.Min(Ui.S(760), Math.Max(Ui.S(240), contentW - Ui.S(64)));
             _toast.Place(contentX + (contentW - tw) / 2, h - Ui.S(16), tw);
 
             ResumeLayout(false);
