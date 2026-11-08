@@ -7,14 +7,20 @@ param(
     [string]$Out = "",
     [string]$PfxPath = "",
     [string]$PfxPassword = "",
-    [string]$CertThumbprint = ""
+    [string]$CertThumbprint = "",
+    # Same contract as build.ps1: point the script at any C# compiler, so the installer can be
+    # built with the Roslyn that ships in the .NET SDK on a machine with no Developer Pack.
+    [string]$Csc = ""
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $fw = Join-Path $env:WINDIR "Microsoft\NET\Framework64\v4.0.30319"
 if (-not (Test-Path $fw)) { $fw = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319" }
-$csc = Join-Path $PSScriptRoot "tools\csc.exe"
-if (-not (Test-Path $csc)) { throw "No compiler at $csc" }
+$csc = $Csc
+if (-not $csc) { $csc = Join-Path $PSScriptRoot "tools\csc.exe" }
+if (-not (Test-Path $csc)) {
+    throw "No compiler at $csc. Pass -Csc <path to a C# compiler>, or place one at build\tools\csc.exe."
+}
 if (-not $Out) { $Out = Join-Path $root "dist\JoeBrowserSetup.exe" }
 
 $app = Join-Path $root "dist\JoeBrowser.exe"

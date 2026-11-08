@@ -1,4 +1,4 @@
-# Joe Browser 1.2.1
+# Joe Browser 1.3.0
 
 > **Joe Browser** — a free, local-first **anti-detect browser** for Windows.
 > Unlimited multi-profile browser management with per-profile proxies,
