@@ -1117,10 +1117,15 @@ namespace JoeBrowser
         {
             var e = ProxyAt(index);
             if (e == null) return;
+            // Creating a profile from a proxy row obeys the same plan limit as the New button.
+            if (!AllowAnotherProfile()) return;
             var p = new Profile();
             p.Name = "Profile " + (_profiles.Count + 1).ToString("00");
             p.Proxy = ProxyVault.Copy(e.Config);
             p.Tools.ProxyWatch = true;
+            /* Opened with the proxy already set, so a proxy that has been checked once also
+               carries its country into the new fingerprint instead of generating a mismatch the
+               user has to notice and fix by hand. */
             FingerprintFactory.Regenerate(p.Fp, "System default", p.Proxy);
             using (var dlg = new EditorForm(p, true, _settings))
             {
@@ -3068,23 +3073,33 @@ namespace JoeBrowser
             {
                 string exe = await BrowserFetcher.InstallAsync(engine,
                     (pct, msg) => dlg.UpdateProgress(pct, msg), dlg.Token).ConfigureAwait(true);
-                dlg.Close();
+                /* Every close below is guarded: the user can close the progress window while the
+                   fetch is still running, and disposing it twice threw out of an awaited
+                   continuation - a hard crash for pressing the window's own X. */
+                CloseQuietly(dlg);
                 UpdateBrowserInfo();
                 Toast(label + " is ready", ToastKind.Success);
                 return true;
             }
             catch (OperationCanceledException)
             {
-                dlg.Close();
+                CloseQuietly(dlg);
                 Toast("Download cancelled", ToastKind.Info);
             }
             catch (Exception ex)
             {
-                dlg.Close();
+                CloseQuietly(dlg);
                 Log.Error(label + " download failed", ex);
                 Toast(ShortError(ex), ToastKind.Error);
             }
             return false;
+        }
+
+        /// <summary>Closes a window the user may already have closed themselves.</summary>
+        private static void CloseQuietly(Form form)
+        {
+            if (form == null) return;
+            try { if (!form.IsDisposed) form.Close(); } catch { }
         }
 
         private static string ShortError(Exception ex)
