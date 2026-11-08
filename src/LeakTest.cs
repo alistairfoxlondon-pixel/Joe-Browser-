@@ -260,6 +260,29 @@ new Promise(function (resolve) {
                     ? gotRenderer + (glOk ? "" : "  (expected " + fp.WebGlRenderer + ")")
                     : (gl == "none" ? "No WebGL context at all" : "Could not read the renderer (" + gl + ")")));
 
+            /* The vendor is the other half of the pair, and a checker reports them separately:
+               a renderer from a pool of real GPUs sitting next to the host machine's vendor is
+               a mismatch a single getParameter call reveals. It is checked against the GPU the
+               fingerprint claims, and against the renderer it just answered with, because those
+               two have to name the same manufacturer. */
+            string gotVendor = Str(d, "glVendor");
+            bool vendorOk = gotVendor.Length > 0 && (
+                (string.IsNullOrEmpty(fp.WebGlVendor) && RendererVendor(gotRenderer) == null) ||
+                string.Equals(gotVendor, fp.WebGlVendor, StringComparison.Ordinal) ||
+                RendererVendor(gotRenderer) == StripVendorPrefix(gotVendor));
+            result.Items.Add(new LeakItem("WebGL vendor", vendorOk,
+                gotVendor.Length > 0
+                    ? gotVendor + (vendorOk ? "" : "  (expected " + fp.WebGlVendor + ")")
+                    : "Could not read the vendor"));
+
+            /* The pair must also agree with itself: "Google Inc. (NVIDIA)" beside an AMD
+               renderer is a contradiction no real browser produces. */
+            string fromRenderer = RendererVendor(gotRenderer);
+            bool pairOk = fromRenderer == null || string.IsNullOrEmpty(gotVendor) ||
+                          gotVendor.IndexOf(fromRenderer, StringComparison.OrdinalIgnoreCase) >= 0;
+            result.Items.Add(new LeakItem("GPU vendor matches renderer", pairOk,
+                pairOk ? fromRenderer ?? "Not applicable" : gotVendor + " beside " + gotRenderer));
+
             long canvas = Long(d, "canvas");
             result.Items.Add(new LeakItem("Canvas readable", canvas > 0,
                 canvas > 0 ? "Hash length " + canvas : "Canvas export failed"));
@@ -300,6 +323,28 @@ new Promise(function (resolve) {
             }
 
             return result;
+        }
+
+        /// <summary>The manufacturer named inside an ANGLE renderer string, or null.</summary>
+        private static string RendererVendor(string renderer)
+        {
+            if (string.IsNullOrEmpty(renderer)) return null;
+            int open = renderer.IndexOf('(');
+            if (open < 0) return null;
+            int comma = renderer.IndexOf(',', open + 1);
+            if (comma < 0) return null;
+            string name = renderer.Substring(open + 1, comma - open - 1).Trim();
+            return name.Length == 0 ? null : name;
+        }
+
+        /// <summary>"Google Inc. (NVIDIA)" compared as "NVIDIA".</summary>
+        private static string StripVendorPrefix(string vendor)
+        {
+            if (string.IsNullOrEmpty(vendor)) return vendor;
+            int open = vendor.IndexOf('(');
+            int close = vendor.LastIndexOf(')');
+            if (open >= 0 && close > open) return vendor.Substring(open + 1, close - open - 1).Trim();
+            return vendor;
         }
 
         private static string Str(Dictionary<string, object> d, string key)
