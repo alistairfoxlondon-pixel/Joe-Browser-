@@ -25,6 +25,7 @@ namespace JoeBrowser
         private readonly InfoCard _plan;
         private readonly InfoCard _security;
         private readonly InfoCard _workspace;
+        private readonly UsageCard _usage;
         private readonly JBLabel _accountsHeading;
         private readonly JBPanel _accountsBox;
         private readonly List<AccountRow> _rows = new List<AccountRow>();
@@ -82,6 +83,9 @@ namespace JoeBrowser
             _workspace = new InfoCard("WORKSPACE", "layers");
             _workspace.Secondary.Visible = false;
             _column.Controls.Add(_workspace);
+
+            _usage = new UsageCard();
+            _column.Controls.Add(_usage);
 
             _accountsHeading = new JBLabel(LabelRole.Strong, L10n.T("acct.others"));
             _column.Controls.Add(_accountsHeading);
@@ -171,6 +175,9 @@ namespace JoeBrowser
                 });
             }
 
+            _usage.Visible = signedIn;
+            if (signedIn) _usage.Reload();
+
             _identity.Switch.Visible = me != null;
             _identity.SignOut.Visible = me != null;
 
@@ -216,6 +223,7 @@ namespace JoeBrowser
             _plan.Invalidate();
             _security.Invalidate();
             _workspace.Invalidate();
+            _usage.Invalidate();
             foreach (var r in _rows) r.Invalidate();
             Invalidate();
         }
@@ -272,6 +280,13 @@ namespace JoeBrowser
                 {
                     int h = _workspace.NeededHeight(inner);
                     _workspace.SetBounds(left, y, inner, h);
+                    y += h + gap;
+                }
+
+                if (_usage.Visible)
+                {
+                    int h = _usage.NeededHeight(inner);
+                    _usage.SetBounds(left, y, inner, h);
                     y += h + gap;
                 }
 
@@ -624,6 +639,110 @@ namespace JoeBrowser
                 string name = string.IsNullOrEmpty(_account.DisplayName) ? _account.Email : _account.DisplayName;
                 Ui.Text(g, name, Theme.H3, Theme.Text, left, Ui.S(10), w);
                 Ui.Text(g, _account.Email, Theme.Caption, Theme.TextFaint, left, Ui.S(10) + Theme.LineHeight(Theme.H3) + Ui.S(2), w);
+            }
+        }
+
+        /// <summary>
+        /// Where the account stands inside its plan, drawn rather than written: a bar for the
+        /// profile slots in use, the days the subscription still runs, and the invite code with
+        /// the days it has earned. The plan card says what the plan is; this card says where the
+        /// account stands inside it.
+        /// </summary>
+        private sealed class UsageCard : Control
+        {
+            private int _used, _limit;          // _limit <= 0 means unlimited
+            private int _daysLeft = -1;         // -1: not applicable
+            private string _invite = "";
+            private int _earned;
+            private readonly JBButton _copy;
+
+            public UsageCard()
+            {
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                         ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+                Ui.Opaque(this);
+                BackColor = Theme.Bg;
+                _copy = MakeButton(L10n.T("acct.referral.copy"), "copy", BtnKind.Soft);
+                _copy.Click += delegate
+                {
+                    try { if (!string.IsNullOrEmpty(_invite)) Clipboard.SetText(_invite); } catch { }
+                };
+                Controls.Add(_copy);
+            }
+
+            public void Reload()
+            {
+                _used = UsedProfiles();
+                _limit = Plan.IsPro ? 0 : Entitlements.FreeProfiles; // 0 = unlimited
+                var until = Plan.Until;
+                _daysLeft = (!Plan.IsLifetime && Plan.IsPro && until != null)
+                    ? Math.Max(0, (int)Math.Ceiling((until.Value.ToLocalTime() - DateTime.Now).TotalDays)) : -1;
+                try { _invite = Referral.MyCode ?? ""; _earned = Referral.EarnedDays(); }
+                catch { _invite = ""; _earned = 0; }
+                _copy.Visible = !string.IsNullOrEmpty(_invite);
+                Invalidate();
+            }
+
+            public int NeededHeight(int width)
+            {
+                int lines = Theme.LineHeight(Theme.H3) + Ui.S(8);
+                int bar = Ui.S(8) + Ui.S(10);
+                return Ui.S(40) + lines + bar + Ui.S(14);
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                var g = e.Graphics;
+                Ui.Quality(g);
+                g.Clear(Theme.Bg);
+                var box = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+                Ui.Fill(g, box, Ui.S(Theme.CardRadius), Theme.Card);
+                Ui.Stroke(g, box, Ui.S(Theme.CardRadius), Theme.Line);
+
+                float pad = Ui.S(18);
+                float y = Ui.S(14);
+                Ui.Text(g, L10n.T("acct.usage.head"), Theme.Micro, Theme.TextFaint, pad, y, Width - pad * 2 - Ui.S(130));
+                y += Theme.LineHeight(Theme.Micro) + Ui.S(4);
+
+                string slots = _limit <= 0
+                    ? _used + L10n.T("acct.usage.unlimited")
+                    : _used + " / " + _limit + L10n.T("acct.usage.profiles");
+                Color slotColor = _limit > 0 && _used >= _limit ? Theme.Warn : Theme.Text;
+                Ui.Text(g, slots, Theme.H3, slotColor, pad, y, Width - pad * 2 - Ui.S(130));
+                y += Theme.LineHeight(Theme.H3) + Ui.S(8);
+
+                /* The bar. Square ends, like every corner in this app. */
+                float barW = Math.Max(Ui.S(40), Width - pad * 2);
+                var track = new RectangleF(pad, y, barW, Ui.S(8));
+                Ui.Fill(g, track, Ui.S(Theme.ButtonRadius), Theme.Input);
+                float frac = _limit > 0 ? Math.Min(1f, _used / (float)_limit) : 1f;
+                var fillR = new RectangleF(pad, y, Math.Max(0f, barW * frac), Ui.S(8));
+                if (fillR.Width > 0.5f)
+                    Ui.Fill(g, fillR, Ui.S(Theme.ButtonRadius),
+                        _limit > 0 && _used >= _limit ? Theme.Warn : Theme.Accent);
+
+                float rightX = Width - pad - Ui.S(120);
+                float rightW = Ui.S(120);
+                float ry = Ui.S(12);
+                if (_daysLeft >= 0)
+                {
+                    string days = _daysLeft == 1 ? "1 day left" : _daysLeft + L10n.T("acct.usage.daysleft");
+                    Ui.Text(g, days, Theme.Body, _daysLeft <= 3 ? Theme.Warn : Theme.TextDim, rightX, ry, rightW);
+                    ry += Theme.LineHeight(Theme.Body) + Ui.S(6);
+                }
+                if (!string.IsNullOrEmpty(_invite))
+                {
+                    if (_earned > 0)
+                        Ui.Text(g, "+" + _earned + L10n.T("acct.referral.earned"), Theme.Body, Theme.Success, rightX, ry, rightW);
+                    Ui.Text(g, _invite, Theme.Body, Theme.Text, rightX, ry + (_earned > 0 ? Theme.LineHeight(Theme.Body) + Ui.S(4) : 0), rightW);
+                }
+            }
+
+            protected override void OnResize(EventArgs e)
+            {
+                base.OnResize(e);
+                int bw = _copy.PreferredWidth(Ui.S(96));
+                _copy.SetBounds(Width - Ui.S(18) - bw, Ui.S(12), bw, Ui.S(32));
             }
         }
     }

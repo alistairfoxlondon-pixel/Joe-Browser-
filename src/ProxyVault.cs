@@ -160,7 +160,9 @@ namespace JoeBrowser
         public static ProxyConfig ParseLine(string line)
         {
             var p = new ProxyConfig();
-            string s = (line ?? "").Trim();
+            /* A full-width colon is what an IME in a CJK layout types, and "host ： 8080" is
+               the same address as "host:8080" once the separator is normalised. */
+            string s = (line ?? "").Trim().Replace('\uFF1A', ':');
             if (s.Length == 0) return p;
 
             string type = "http";

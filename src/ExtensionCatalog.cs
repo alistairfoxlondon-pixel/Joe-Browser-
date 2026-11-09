@@ -695,6 +695,11 @@ namespace JoeBrowser
             foreach (var e in Load())
             {
                 if (!e.Enabled || string.IsNullOrEmpty(e.Folder)) continue;
+                /* The removal mark outranks the library entry. A stale extensions.json written
+                   by an older build (or a save that raced the background fetch) would otherwise
+                   hand a removed shipped extension straight back to --load-extension. */
+                string markId = string.IsNullOrEmpty(e.StoreId) ? IdFromFolder(e.Folder) : e.StoreId;
+                if (IsRemovedByUser(markId)) continue;
                 if (e.Folder.IndexOf(',') >= 0) continue; // Chrome splits --load-extension on commas
                 try
                 {
@@ -766,6 +771,26 @@ namespace JoeBrowser
                 req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) JoeBrowser/1.2";
                 req.Timeout = 15000;
                 req.ReadWriteTimeout = 15000;
+                /* Leave through the first usable proxy in the library, the same rule the proxy
+                   tester and the connectivity check follow. A bare request failed on machines
+                   whose only egress is a configured proxy, which is what "add extension by
+                   store link never works" was. An explicit empty WebProxy still bypasses the
+                   system proxy for everyone else; SOCKS cannot ride an HttpWebRequest and is
+                   skipped rather than guaranteed to fail. */
+                try
+                {
+                    System.Net.IWebProxy via = null;
+                    foreach (var entry in ProxyVault.Load())
+                    {
+                        var c = entry == null ? null : entry.Config;
+                        if (c == null || !c.Enabled || string.IsNullOrWhiteSpace(c.Host) || c.Port <= 0) continue;
+                        if (c.Type != null && c.Type.Equals("socks5", StringComparison.OrdinalIgnoreCase)) continue;
+                        via = new WebProxy(c.Host, c.Port);
+                        break;
+                    }
+                    req.Proxy = via ?? new WebProxy();
+                }
+                catch { req.Proxy = new WebProxy(); }
                 /* A store that answers 404 or 403 for a withdrawn listing throws before any body
                    can be read, and the inner exception is the one that says what happened. */
                 try { req.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate; }

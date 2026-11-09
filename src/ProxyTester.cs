@@ -92,8 +92,11 @@ namespace JoeBrowser
                 try
                 {
                     var req = (HttpWebRequest)WebRequest.Create(url);
-                    if (proxy != null) req.Proxy = proxy;
-                    else req.Proxy = null;
+                    /* null is NOT "direct" in .NET - it means "use the system default proxy".
+                       A machine with a system proxy then graded its own proxied traffic as
+                       "This PC (direct)", which poisoned the baseline. An empty WebProxy really
+                       bypasses everything. */
+                    req.Proxy = proxy ?? new WebProxy();
                     req.Timeout = proxy == null ? 8000 : 20000;
                     req.ReadWriteTimeout = 20000;
                     req.UserAgent = "JoeBrowser/1.0";

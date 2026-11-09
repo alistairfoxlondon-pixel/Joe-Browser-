@@ -59,6 +59,10 @@ namespace JoeBrowser
         /// itself onto a direct connection. The argument is the proxy that failed.</summary>
         public event Action<string> ProxyFallback;
 
+        /// <summary>Raised when the proxy and the direct fallback are both dead: the machine is
+        /// offline. The window turns this into its own alert rather than the proxy warning.</summary>
+        public event Action<string> ProxyOffline;
+
         public bool ProxyFellBack { get; private set; }
 
         /// <summary>True when this window's traffic goes through a relay that can be re-pointed
@@ -204,6 +208,11 @@ namespace JoeBrowser
                 {
                     s.ProxyFellBack = true;
                     var h = s.ProxyFallback;
+                    if (h != null) { try { h(endpoint); } catch { } }
+                };
+                s._relay.Offline += delegate(string endpoint)
+                {
+                    var h = s.ProxyOffline;
                     if (h != null) { try { h(endpoint); } catch { } }
                 };
             }
@@ -370,7 +379,11 @@ namespace JoeBrowser
             bool customExtensions = settings == null || settings.EnableCustomExtensions;
             var folders = !engineTakesExtensions || DiagnosticNoExtensions
                 ? new List<string>()
-                : ExtensionManager.EnabledFolders(profile.Tools, masterExtensions, customExtensions, proxyOn);
+                : ExtensionManager.EnabledFolders(profile.Tools, masterExtensions, customExtensions, proxyOn,
+                    /* The shipped store pair is a Chrome/Brave feature by the owner's explicit
+                       requirement - not Chromium, not Edge, never Firefox. The first-party
+                       tools keep loading on every Chromium engine through CDP. */
+                    browser.EngineKey == "chrome" || browser.EngineKey == "brave");
             if (folders.Count > 0)
             {
                 /* Every folder is on the command line twice, once for each switch. Duplicates
@@ -1054,6 +1067,13 @@ namespace JoeBrowser
                 try { toolParams["persistAcrossRestarts"] = true; } catch { }
                 var toolRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", toolParams, session);
                 toolId = toolRes != null ? Str(toolRes, "identifier") : "";
+                /* Human paste, right-click and the proxy banner all live in this script. When
+                   its registration failed the tools were simply off and nothing said so - the
+                   user saw "paste as human" missing with no reason anywhere. A failed
+                   registration is now a log line instead of a mystery. */
+                if (string.IsNullOrEmpty(toolId))
+                    Log.Error("The tools script (human paste, right click, proxy banner) could not be registered over CDP" +
+                              (session != null ? " for this session." : " - no CDP session."));
             }
 
             lock (_scriptState)

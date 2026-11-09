@@ -1343,9 +1343,13 @@ namespace JoeBrowser
                     var parsed = ProxyVault.ParseLine(lineBox.Value ?? "");
                     if (string.IsNullOrWhiteSpace(parsed.Host) || parsed.Port <= 0)
                     {
-                        Toast("Enter the proxy as host:port, or paste the full link - for example socks5://user:pass@host:1080", ToastKind.Warn);
+                        /* Shown inside this dialog, where the eye is - a toast on the main
+                           window behind a modal dialog is invisible, which is exactly why
+                           "add proxy" looked like a dead button. */
+                        dlg.SetError("Enter the proxy as host:port, or paste the full link - for example socks5://user:pass@host:1080");
                         return false;
                     }
+                    dlg.SetError(null);
                     return true;
                 };
 
@@ -1766,8 +1770,8 @@ namespace JoeBrowser
                 dlg.AddNote("Downloaded into Joe Browser's own extensions folder. No store account needed.");
                 dlg.Validator = delegate
                 {
-                    if (!string.IsNullOrWhiteSpace(field.Value)) return true;
-                    Toast("Paste the extension link first", ToastKind.Info);
+                    if (!string.IsNullOrWhiteSpace(field.Value)) { dlg.SetError(null); return true; }
+                    dlg.SetError("Paste the extension link first.");
                     return false;
                 };
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
@@ -3638,6 +3642,16 @@ namespace JoeBrowser
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 _store.Save(dlg.Result);
+                /* The shipped store pair has to ride every new profile. It used to be fetched
+                   once per process in the background: a profile created in the first seconds,
+                   or after a failed first fetch, launched with neither extension. Fetching
+                   here, off the UI thread, closes that gap; the removal mark inside the
+                   catalog is what keeps a user-removed pair from coming back. */
+                System.Threading.Tasks.Task.Run(new Action(delegate
+                {
+                    try { ExtensionCatalog.FetchMissing(false); }
+                    catch (Exception ex) { Log.Error("Profile-creation extension fetch failed", ex); }
+                }));
                 ReloadCards(true);
                 Toast("Profile created", ToastKind.Success);
             }
@@ -4206,6 +4220,22 @@ namespace JoeBrowser
                         {
                             Toast("Proxy " + endpoint + " stopped responding. \u201c" + p.Name +
                                   "\u201d is now on a direct connection, so the real IP is visible.", ToastKind.Error);
+                        }));
+                    }
+                    catch { }
+                };
+                /* Proxy AND direct route both dead: the machine itself is offline. Without this
+                   handler the tabs just went quiet - the reported "offline alert no longer
+                   works". One toast per outage (the relay de-duplicates), in the window. */
+                session.ProxyOffline += delegate(string endpoint)
+                {
+                    if (IsDisposed) return;
+                    try
+                    {
+                        BeginInvoke(new Action(delegate
+                        {
+                            Toast("No internet connection. \u201c" + p.Name + "\u201d cannot reach the web " +
+                                  "through the proxy or directly. Check the network and the proxy.", ToastKind.Error);
                         }));
                     }
                     catch { }

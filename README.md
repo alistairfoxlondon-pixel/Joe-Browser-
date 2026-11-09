@@ -30,6 +30,18 @@ the Browsers page can fetch Chromium for you.
 | **Built to be read** | 16 px body text, square corners, one measured layout at every window width, and no control that cuts its own label. |
 | **Private by default** | Profile data stays in `%APPDATA%\JoeBrowser`. Proxy passwords and the account store are encrypted with Windows DPAPI. No telemetry, no server, no cloud. |
 
+## What changed in 1.8.1
+
+- The included store pair now loads on **Chrome and Brave only** - not Chromium, not Edge, never Firefox - exactly as specified.
+- Every profile creation fetches the missing pair, so a profile made in the first seconds after launch (or after a failed first fetch) no longer starts without them.
+- A removal mark now beats a stale library entry: a shipped extension the user removed can no longer ride back onto the command line.
+- "Add extension by store link" leaves through the proxy library when one is configured; on proxied machines the bare request it used was what failed.
+- Proxy add/edit and store-link dialogs show their validation error **inside the dialog** (the toast used to sit behind the modal and read as a dead button), and the parser accepts a full-width `：` colon.
+- An outage where neither the proxy nor a direct route works now says so in the window, once per outage; a relay accept loop that dies is logged instead of going silent.
+- The "This PC (direct)" proxy baseline really bypasses proxies now (an empty `WebProxy`, not `null`, which meant the system proxy).
+- Tool-script registration failures (human paste, right-click, proxy banner) are logged instead of vanishing.
+- The Account page gained a **usage card**: profile slots bar, days the subscription still runs, and the invite code with the days it has earned, one click to copy.
+
 ## Getting started
 
 1. Run the installer and create an account. It is verified on this PC only, so there is no

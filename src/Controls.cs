@@ -1143,7 +1143,7 @@ namespace JoeBrowser
     internal class JBIconButton : Control, IReStyle
     {
         public string Icon = "dots";
-        public int IconSize = 20;
+        public int IconSize = 22;
         private string _tip = "";
         public string Tip { get { return _tip; } set { _tip = value ?? ""; ToolTips.Attach(this, _tip); } }
         public bool Danger;

@@ -296,21 +296,24 @@ namespace JoeBrowser
         /// Custom folders are copied into the profile-neutral extensions root so the command
         /// line never contains a path with a comma (Chrome's separator).
         /// </summary>
-        public static List<string> EnabledFolders(ToolConfig tools, bool masterSwitch, bool customExtensions = true, bool hasProxy = true)
+        public static List<string> EnabledFolders(ToolConfig tools, bool masterSwitch, bool customExtensions = true, bool hasProxy = true, bool storePair = true)
         {
             var result = new List<string>();
             if (!masterSwitch || tools == null) return result;
             EnsureAll();
-            /* The two store extensions requested for Chrome and Brave load for every supported
-               Chromium profile regardless of the "custom extensions" switch, because they are
+            /* The two store extensions requested for Chrome and Brave load for those two brands
+               only - the owner's requirement is explicit, and Chromium/Edge builds must not
+               receive them regardless of the "custom extensions" switch, because they are
                shipped defaults rather than user imports. They are NOT downloaded from here:
                this is the launch path, and a fifteen second HTTP timeout in front of every
                launch is why the pair often looked missing. The download runs off the launch
-               path from Start(), and the Extensions page offers an immediate retry.
+               path from Start() and on profile creation, and the Extensions page offers an
+               immediate retry.
                Every folder this method emits goes through the comma guard: Chromium splits the
                switch on commas, and a Windows account named "Smith, J" once silently corrupted
                the whole list, so the browser loaded NO extensions at all. */
-            foreach (string folder in ExtensionCatalog.DefaultFolders()) Add(result, folder);
+            if (storePair)
+                foreach (string folder in ExtensionCatalog.DefaultFolders()) Add(result, folder);
             if (tools.HumanPaste) Add(result, Dir(HumanPaste));
             /* The proxy watcher extension is always loaded so that adding a proxy to a running
                profile works without a restart. It stays idle until the page runtime tells it

@@ -30,7 +30,16 @@ namespace JoeBrowser
         /// so the window can say so instead of the tabs simply going quiet.</summary>
         public event Action<string> Fallback;
 
+        /// <summary>
+        /// Raised when the proxy is unreachable AND the direct fallback also failed - the
+        /// network itself is down. The fallback event deliberately stays quiet in that case,
+        /// so the window needs this one: dead tabs with no word were reported as "the offline
+        /// alert no longer works".
+        /// </summary>
+        public event Action<string> Offline;
+
         private int _fellBack;
+        private int _offline;
 
         public ProxyRelay(ProxyConfig proxy)
             : this(delegate { return proxy; })
@@ -73,7 +82,15 @@ namespace JoeBrowser
             {
                 TcpClient client;
                 try { client = await _listener.AcceptTcpClientAsync().ConfigureAwait(false); }
-                catch { break; }
+                catch (Exception ex)
+                {
+                    /* The listener dying used to be a silent break: every later browser request
+                       hung with no log and no event, which is indistinguishable from an offline
+                       machine. Say why it stopped. */
+                    if (!_cts.IsCancellationRequested)
+                        Log.Error("Proxy relay accept loop stopped", ex);
+                    break;
+                }
                 var ignored = HandleClientAsync(client);
             }
         }
@@ -210,17 +227,33 @@ namespace JoeBrowser
         private async Task<TcpClient> FallBackAsync(ProxyConfig proxy, string host, int port, CancellationToken ct)
         {
             var tcp = await ConnectTcpAsync(host, port, ct).ConfigureAwait(false);
-            if (tcp == null) return null;
-            if (Interlocked.Exchange(ref _fellBack, 1) == 0)
+            if (tcp != null)
             {
-                Log.Info("Proxy " + proxy.Host + ":" + proxy.Port + " unreachable; using a direct connection");
-                var h = Fallback;
-                if (h != null)
+                if (Interlocked.Exchange(ref _fellBack, 1) == 0)
                 {
-                    try { h(proxy.Host + ":" + proxy.Port); } catch { }
+                    Log.Info("Proxy " + proxy.Host + ":" + proxy.Port + " unreachable; using a direct connection");
+                    var h = Fallback;
+                    if (h != null)
+                    {
+                        try { h(proxy.Host + ":" + proxy.Port); } catch { }
+                    }
+                }
+                /* Back online: the next outage may speak again. */
+                Interlocked.Exchange(ref _offline, 0);
+                return tcp;
+            }
+            /* Proxy down AND direct down: the machine itself is offline. Say so once, not once
+               per request. */
+            if (Interlocked.Exchange(ref _offline, 1) == 0)
+            {
+                Log.Info("Proxy " + proxy.Host + ":" + proxy.Port + " unreachable and no direct route either");
+                var off = Offline;
+                if (off != null)
+                {
+                    try { off(proxy.Host + ":" + proxy.Port); } catch { }
                 }
             }
-            return tcp;
+            return null;
         }
 
         private async Task<TcpClient> HttpConnectAsync(ProxyConfig proxy, string host, int port, CancellationToken ct)

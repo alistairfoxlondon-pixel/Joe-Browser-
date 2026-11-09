@@ -108,6 +108,36 @@ namespace JoeBrowser
             return l;
         }
 
+        /* A validation problem belongs inside the dialog the user is looking at, not in a toast
+           on the window underneath a modal dialog, which is where it used to go: the Save click
+           appeared to do nothing at all. SetError shows a danger-coloured line at the foot of
+           the body and disappears again on a passing check. */
+        private JBLabel _error;
+        private string _errorText;
+
+        public void SetError(string text)
+        {
+            string next = text ?? "";
+            if (next == _errorText) return;
+            _errorText = next;
+            if (next.Length == 0)
+            {
+                if (_error != null) _error.Visible = false;
+                return;
+            }
+            if (_error == null)
+            {
+                _error = new JBLabel(LabelRole.Faint, next);
+                _error.Wrap = true;
+                _error.TextAlign = ContentAlignment.TopLeft;
+                AddRow(null, _error, Ui.S(34), true);
+            }
+            else _error.Text = next;
+            try { _error.ForeColor = Theme.Danger; } catch { }
+            _error.Visible = true;
+            RefreshLayout();
+        }
+
         public JBTextBox AddField(string label, string value, string placeholder, string icon,
             bool multiline, int height)
         {
