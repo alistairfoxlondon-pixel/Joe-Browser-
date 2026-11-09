@@ -34,6 +34,15 @@ namespace JoeBrowser
         private const int SaltLen = 16;
         private const int KeyLen = 32;
 
+        /* Every read-modify-write operation goes through this gate. Two dialogs writing at once
+           (a registration finishing while a TouchLogin runs) used to lose one write - a
+           registered account that existed only until the next save. */
+        private static readonly object _gate = new object();
+        /// <summary>Set when the store on disk could not be read. Saves are refused while it
+        /// stands, so a corrupt or undecryptable file is never silently overwritten with an
+        /// empty list - which used to erase every registered account.</summary>
+        private static bool _unreadable;
+
         public static string File { get { return Path.Combine(AppPaths.Root, "accounts.json"); } }
 
         /// <summary>
@@ -44,24 +53,60 @@ namespace JoeBrowser
 
         private static List<Account> Load()
         {
-            try
+            lock (_gate)
             {
-                if (!System.IO.File.Exists(File)) return new List<Account>();
-                string json = Decrypt(System.IO.File.ReadAllText(File));
-                var ser = new JavaScriptSerializer();
-                return ser.Deserialize<List<Account>>(json) ?? new List<Account>();
+                try
+                {
+                    if (!System.IO.File.Exists(File)) { _unreadable = false; return new List<Account>(); }
+                    string json = Decrypt(System.IO.File.ReadAllText(File));
+                    var ser = new JavaScriptSerializer();
+                    var list = ser.Deserialize<List<Account>>(json);
+                    if (list == null) throw new InvalidDataException("null account list");
+                    _unreadable = false;
+                    return list;
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("Cannot read accounts", ex);
+                    _unreadable = true;
+                    /* Preserve whatever is on disk before anything can overwrite it. A backup
+                       copy plus the refusal to save below is what turns "all accounts gone"
+                       into "accounts intact, store needs repair". */
+                    try
+                    {
+                        string bak = File + ".bak-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+                        if (System.IO.File.Exists(File) && !System.IO.File.Exists(bak))
+                            System.IO.File.Copy(File, bak, true);
+                    }
+                    catch { }
+                    return new List<Account>();
+                }
             }
-            catch (Exception ex) { Log.Error("Cannot read accounts", ex); return new List<Account>(); }
         }
 
-        private static void Save(List<Account> list)
+        private static bool Save(List<Account> list)
         {
-            try
+            lock (_gate)
             {
-                var ser = new JavaScriptSerializer();
-                System.IO.File.WriteAllText(File, Encrypt(ser.Serialize(list)), new UTF8Encoding(false));
+                if (_unreadable)
+                {
+                    Log.Error("Account store unreadable; refusing to overwrite accounts.json");
+                    return false;
+                }
+                try
+                {
+                    var ser = new JavaScriptSerializer();
+                    /* Write to a temp file and replace atomically: a crash or power cut in the
+                       middle of the old WriteAllText truncated accounts.json and lost every
+                       registered account on this PC. */
+                    string tmp = File + ".tmp";
+                    System.IO.File.WriteAllText(tmp, Encrypt(ser.Serialize(list)), new UTF8Encoding(false));
+                    if (System.IO.File.Exists(File)) System.IO.File.Replace(tmp, File, null);
+                    else System.IO.File.Move(tmp, File);
+                    return true;
+                }
+                catch (Exception ex) { Log.Error("Cannot write accounts", ex); return false; }
             }
-            catch (Exception ex) { Log.Error("Cannot write accounts", ex); }
         }
 
         private static string Protect(byte[] data)
@@ -153,7 +198,7 @@ namespace JoeBrowser
             };
             var list = Load();
             list.Add(a);
-            Save(list);
+            if (!Save(list)) return "The account could not be stored on this PC. Nothing was saved - please try again.";
             return null;
         }
 
@@ -207,7 +252,7 @@ namespace JoeBrowser
                 if (!string.IsNullOrEmpty(picture)) a.GooglePicture = picture;
             }
             a.LastLogin = DateTime.UtcNow.ToString("o");
-            Save(list);
+            if (!Save(list)) return null;   /* sign-in state not persisted - caller treats it as failure */
             return a;
         }
 
@@ -235,7 +280,7 @@ namespace JoeBrowser
                 a.GooglePicture = updated.GooglePicture;
                 a.DisplayName = updated.DisplayName;
             }
-            Save(list);
+            if (!Save(list)) throw new InvalidOperationException("The account could not be saved on this PC.");
         }
 
         public static string SetPin(string email, string pin)

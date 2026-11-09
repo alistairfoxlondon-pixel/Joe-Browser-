@@ -143,9 +143,7 @@ namespace JoeBrowser
             _toggle.Text = _registering ? "Already have an account? Sign in" : "New here? Create an account";
             Text = "Joe Browser";
             _title.Text = _registering ? "Create your Joe Browser account" : "Welcome to Joe Browser";
-            _subtitle.Text = _registering
-                ? "An email address and a password are all that is required."
-                : "Your profiles, proxies and settings stay on this device.";
+            _subtitle.Text = "Your profiles, proxies and settings stay on this device.";
             _error.Visible = false;
             LayoutForm();
         }

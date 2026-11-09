@@ -768,7 +768,7 @@ namespace JoeBrowser
                 /* A store outage or a captive portal must fail in seconds, not freeze the
                    browser launch behind WebClient's two-minute default. */
                 var req = (HttpWebRequest)WebRequest.Create(endpoint);
-                req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) JoeBrowser/1.2";
+                req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
                 req.Timeout = 15000;
                 req.ReadWriteTimeout = 15000;
                 /* Leave through the first usable proxy in the library, the same rule the proxy
@@ -788,9 +788,12 @@ namespace JoeBrowser
                         via = new WebProxy(c.Host, c.Port);
                         break;
                     }
-                    req.Proxy = via ?? new WebProxy();
+                    req.Proxy = via;   /* null falls back to the system proxy - an explicit empty
+                                           WebProxy here silently bypassed it, which killed every
+                                           store download on machines whose only egress is the
+                                           Windows/PAC proxy. */
                 }
-                catch { req.Proxy = new WebProxy(); }
+                catch { req.Proxy = null; }
                 /* A store that answers 404 or 403 for a withdrawn listing throws before any body
                    can be read, and the inner exception is the one that says what happened. */
                 try { req.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate; }

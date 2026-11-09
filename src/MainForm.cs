@@ -127,6 +127,7 @@ namespace JoeBrowser
             Theme.SetMode(_settings.ThemeMode != 2);
             _proxies = ProxyVault.Load();
             _extensions = ExtensionCatalog.Load();
+            BuildTray();
             Build();
             L10n.Changed += OnLanguageChanged;
             /* The shipped pair downloads on a worker thread started before this window existed.
@@ -828,7 +829,6 @@ namespace JoeBrowser
 
             using (var dlg = new ToolDialog("Batch create", "Create", "Cancel", 520, 660))
             {
-                dlg.AddNote("Every profile gets its own fingerprint, cookies and browser data.");
                 var prefixBox = dlg.AddField("NAME PREFIX", "Profile", "", "pencil", false, 33);
                 var countBox = dlg.AddSelect(Entitlements.IsPro ? "HOW MANY" : "HOW MANY  \u00b7  " + slots + " LEFT",
                     new[] { "5", "10", "25", "50", "100" }, 1, "layers");
@@ -836,7 +836,7 @@ namespace JoeBrowser
                     L10n.T("set.group.hint"), "folder", false, 33);
                 var proxyBox = dlg.AddField("PROXIES · ONE PER LINE (OPTIONAL)", "",
                     "http://user:pass@host:port", "proxy", true, 120);
-                dlg.AddNote("Also accepts socks5:// and host:port:user:pass.");
+                dlg.AddNote("Also accepts socks5:// or host:port:user:pass.");
 
                 dlg.Validator = delegate
                 {
@@ -1213,23 +1213,23 @@ namespace JoeBrowser
             if (which == "rightclick")
             {
                 title = "Right click & copy";
-                where = "On by default for every new profile. Edit a profile, Tools tab, to switch it off.";
-                what = "Sites that cancel the context menu, the copy key or text selection lose that power inside the profile. The menu opens, Ctrl+C copies, and dragging selects text.";
-                how = "Nothing to press. Open a page that blocks copying, right click it, and copy.";
+                where = "Every new profile. Tools tab, per profile.";
+                what = "Restores the right-click menu, Ctrl+C and text selection on sites that block them.";
+                how = "Right-click the page and copy.";
             }
             else if (which == "watch")
             {
                 title = "Proxy IP change & offline alerts";
-                where = "On by default. Edit a profile, Tools tab, to change the check interval.";
-                what = "The profile asks a public IP service what its exit address is. When the address changes, or the check fails twice in a row, you are told in the page and in a browser notification.";
-                how = "It runs only while a profile that has a proxy is open. After a live proxy change it re-arms itself.";
+                where = "On when a proxy is set. Tools tab, per profile.";
+                what = "Alerts when the exit IP changes or the proxy goes offline.";
+                how = "Runs while a profile with a proxy is open.";
             }
             else
             {
                 title = "Paste as human";
-                where = "On by default. Edit a profile, Tools tab, to choose the typing speed.";
-                what = "The clipboard text is typed into the page one character at a time with human timings, instead of being inserted in one jump. Keystrokes are real key events, so a field that watches typing sees typing.";
-                how = "Copy as usual, then press Ctrl+V in the page. The right-click menu on a text box also has \"Paste as human\".";
+                where = "On by default. Tools tab, per profile.";
+                what = "Ctrl+V types the clipboard with human timing, keystroke by keystroke.";
+                how = "Copy as usual, then press Ctrl+V in the page.";
             }
             using (var dlg = new ToolDialog(title, "Close", "", 600, 460))
             {
@@ -1408,7 +1408,7 @@ namespace JoeBrowser
             var entry = ProxyAt(index);
             if (entry == null) return;
             if (!ConfirmForm.Ask(this, "Delete proxy", "Remove \"" + (string.IsNullOrWhiteSpace(entry.Name) ? entry.Connection : entry.Name) + "\" from the library?",
-                "Profiles already using it keep their own copy.", "Delete", BtnKind.Danger)) return;
+                null, "Delete", BtnKind.Danger)) return;
             _proxies.RemoveAt(index);
             SaveProxies();
             Toast("Proxy removed", ToastKind.Success);
@@ -1436,7 +1436,7 @@ namespace JoeBrowser
                 SaveProxies();
                 Toast(added > 0
                         ? added + (added == 1 ? " proxy" : " proxies") + " imported"
-                        : "No proxy in that file could be read. One per line, as host:port or a full proxy link.",
+                        : "No readable proxies. One per line, as host:port or a full proxy link.",
                     added > 0 ? ToastKind.Success : ToastKind.Info);
             }
         }
@@ -1764,10 +1764,8 @@ namespace JoeBrowser
                    wrong text ends up in the box. Fill it when it really holds a store link. */
                 string clip = "";
                 try { clip = Clipboard.ContainsText() ? (Clipboard.GetText() ?? "").Trim() : ""; } catch { }
-                if (ExtensionCatalog.StoreId(clip).Length == 32) dlg.AddNote("The link on your clipboard is filled in.");
-                else clip = "";
+                if (ExtensionCatalog.StoreId(clip).Length != 32) clip = "";
                 var field = dlg.AddField("CHROME WEB STORE LINK", clip, "https://chromewebstore.google.com/detail/...", "link", false, 33);
-                dlg.AddNote("Downloaded into Joe Browser's own extensions folder. No store account needed.");
                 dlg.Validator = delegate
                 {
                     if (!string.IsNullOrWhiteSpace(field.Value)) { dlg.SetError(null); return true; }
@@ -1857,7 +1855,7 @@ namespace JoeBrowser
             if (index < 0 || index >= visible.Count) return;
             var item = visible[index];
             if (!ConfirmForm.Ask(this, "Remove extension", "Remove \"" + item.Name + "\" from Joe Browser?",
-                "Its files are deleted from Joe Browser's extensions folder.", "Remove", BtnKind.Danger)) return;
+                null, "Remove", BtnKind.Danger)) return;
 
             /* The dialog used to promise the files stayed, and they did - in a folder that the
                page offered no way to reach, one copy per import. Removing an entry therefore
@@ -1874,7 +1872,7 @@ namespace JoeBrowser
             SaveExtensions();
             _extensionPage.RefreshShipped();
             bool removed = ExtensionCatalog.DeleteFiles(item);
-            Toast(ExtensionNote(removed ? "Extension removed" : "Extension removed. Close the browsers it was open in to free its files"),
+            Toast(ExtensionNote(removed ? "Extension removed" : "Extension removed - close its browsers to free files"),
                 removed ? ToastKind.Success : ToastKind.Info);
         }
 
@@ -1891,8 +1889,7 @@ namespace JoeBrowser
             string name = statuses[statusIndex][1];
             if (!ConfirmForm.Ask(this, "Remove included extension",
                 "Remove \"" + name + "\" from Joe Browser?",
-                "It will not be downloaded again or loaded into new profiles until you add it back.",
-                "Remove", BtnKind.Danger)) return;
+                null, "Remove", BtnKind.Danger)) return;
             ExtensionCatalog.MarkRemoved(id, true);
             ExtensionItem found = null;
             foreach (var e in _extensions)
@@ -3631,7 +3628,7 @@ namespace JoeBrowser
             return p;
         }
 
-        private void NewProfile()
+        private async void NewProfile()
         {
             if (!AllowAnotherProfile()) return;
             /* A new profile is generated unique against the workspace before the editor opens,
@@ -3642,16 +3639,17 @@ namespace JoeBrowser
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 _store.Save(dlg.Result);
-                /* The shipped store pair has to ride every new profile. It used to be fetched
-                   once per process in the background: a profile created in the first seconds,
-                   or after a failed first fetch, launched with neither extension. Fetching
-                   here, off the UI thread, closes that gap; the removal mark inside the
-                   catalog is what keeps a user-removed pair from coming back. */
-                System.Threading.Tasks.Task.Run(new Action(delegate
-                {
-                    try { ExtensionCatalog.FetchMissing(false); }
-                    catch (Exception ex) { Log.Error("Profile-creation extension fetch failed", ex); }
-                }));
+                /* The shipped store pair has to ride every new profile. It used to be a
+                   fire-and-forget background task: the first launch of the profile raced the
+                   download and started with neither extension, and a single transient failure
+                   armed a 24-hour skip that kept every later profile empty too. Now the fetch
+                   is awaited before the profile is announced, and it ignores the backoff - a
+                   user asking for a profile is an explicit retry. The removal mark inside the
+                   catalog still keeps a user-removed pair from coming back. */
+                int fetched = -1;
+                try { fetched = await System.Threading.Tasks.Task.Run(new Func<int>(delegate { return ExtensionCatalog.FetchMissing(true); })); }
+                catch (Exception ex) { fetched = -1; Log.Error("Profile-creation extension fetch failed", ex); }
+                if (fetched == 0) Toast("Store extensions could not be fetched - open the Extensions page to retry", ToastKind.Info);
                 ReloadCards(true);
                 Toast("Profile created", ToastKind.Success);
             }
@@ -4218,7 +4216,7 @@ namespace JoeBrowser
                     {
                         BeginInvoke(new Action(delegate
                         {
-                            Toast("Proxy " + endpoint + " stopped responding. \u201c" + p.Name +
+                            TrayAlert("Proxy " + endpoint + " stopped responding. \u201c" + p.Name +
                                   "\u201d is now on a direct connection, so the real IP is visible.", ToastKind.Error);
                         }));
                     }
@@ -4234,7 +4232,7 @@ namespace JoeBrowser
                     {
                         BeginInvoke(new Action(delegate
                         {
-                            Toast("No internet connection. \u201c" + p.Name + "\u201d cannot reach the web " +
+                            TrayAlert("No internet connection. \u201c" + p.Name + "\u201d cannot reach the web " +
                                   "through the proxy or directly. Check the network and the proxy.", ToastKind.Error);
                         }));
                     }
@@ -4428,6 +4426,47 @@ namespace JoeBrowser
             System.Threading.ThreadPool.QueueUserWorkItem(delegate { DiskSpace.AutoCleanCaches(); });
         }
 
+        /// <summary>
+        /// A tray icon whose whole job is to carry the alerts a user must not miss. A toast
+        /// dies with the window: behind a fullscreen browser, or on a second desktop, the
+        /// "proxy offline - your real IP is visible" message was never seen, which is exactly
+        /// the reported "offline alert no longer works". A balloon tooltip reaches the user
+        /// wherever the window happens to be.
+        /// </summary>
+        private NotifyIcon _tray;
+
+        private void BuildTray()
+        {
+            try
+            {
+                _tray = new NotifyIcon
+                {
+                    Icon = System.Drawing.SystemIcons.Shield,
+                    Text = "Joe Browser",
+                    Visible = true
+                };
+                _tray.DoubleClick += delegate { try { Show(); WindowState = FormWindowState.Normal; Activate(); } catch { } };
+            }
+            catch (Exception ex) { Log.Error("Tray icon unavailable", ex); _tray = null; }
+        }
+
+        /// <summary>Toast in the window, and also a tray balloon so the alert survives the
+        /// window being hidden or covered.</summary>
+        private void TrayAlert(string message, ToastKind kind)
+        {
+            Toast(message, kind);
+            try
+            {
+                if (_tray == null) return;
+                _tray.BalloonTipTitle = "Joe Browser";
+                _tray.BalloonTipText = message;
+                _tray.BalloonTipIcon = kind == ToastKind.Error ? ToolTipIcon.Error
+                    : kind == ToastKind.Success ? ToolTipIcon.Info : ToolTipIcon.Info;
+                _tray.ShowBalloonTip(6000);
+            }
+            catch { }
+        }
+
         private void Toast(string message, ToastKind kind)
         {
             try
@@ -4481,6 +4520,9 @@ namespace JoeBrowser
             {
                 L10n.Changed -= OnLanguageChanged;
                 if (_pulse != null) _pulse.Stop();
+                /* The tray icon outlives the window if it is not disposed here - Windows keeps
+                   a dead icon in the tray until the mouse passes over it. */
+                try { if (_tray != null) { _tray.Visible = false; _tray.Dispose(); _tray = null; } } catch { }
 
                 // Remember how the window was left so the next launch opens the same width.
                 var restore = Maximized ? LastNormalBounds : new Rectangle(Location, Size);

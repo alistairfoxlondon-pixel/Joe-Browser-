@@ -918,7 +918,7 @@ namespace JoeBrowser
             _customExt = Txt(_tabTools, _tools.CustomExtensions, "C:\\extensions\\my-extension", null, true, 76);
 
             _lblExtHint = new JBLabel(LabelRole.Faint,
-                "Tools are injected directly, so no extension install is needed. Extra folders are optional unpacked extensions.");
+                "Tools are injected directly; extra folders are optional.");
             _lblExtHint.Wrap = true;
             _lblExtHint.TextAlign = ContentAlignment.TopLeft;
             _tabTools.Controls.Add(_lblExtHint);
@@ -960,13 +960,13 @@ namespace JoeBrowser
             if (_toolHow == null) return;
             var lines = new List<string>();
             if (_toolHumanPaste.Checked)
-                lines.Add("Paste as human: copy as usual, then press Ctrl+V in the page - or right-click a text box and pick \"Paste as human\".");
+                lines.Add("Paste as human: Ctrl+V types the clipboard with human timing.");
             if (_toolRightClick.Checked)
-                lines.Add("Right click & copy: the menu and text selection work again on sites that block them, and copy is never stopped.");
+                lines.Add("Right click & copy: restores copy and selection on sites that block them.");
             if (_toolProxyWatch.Checked)
-                lines.Add("IP change & offline alerts: checked in the page while a profile is open, and the browser shows a notification when your exit IP changes.");
+                lines.Add("IP change & offline alerts: alerts when the exit IP changes or the proxy dies.");
             if (_freshSession != null && _freshSession.Checked)
-                lines.Add("Fresh session: cookies, storage and cache are deleted the moment the browser closes, so the next open starts signed out.");
+                lines.Add("Fresh session: cookies and cache are deleted when the browser closes.");
             _toolHow.Text = string.Join("\r\n", lines.ToArray());
             _toolHow.Visible = lines.Count > 0;
         }

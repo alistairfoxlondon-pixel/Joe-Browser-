@@ -474,8 +474,6 @@ namespace JoeBrowser
             Ui.Text(g, "Static residential proxy", Theme.H2, Theme.Text, tx, blockTop, textW);
             Ui.Text(g, "1 proxy  ·  $3.50 / month  ·  clean, dedicated home IP", Theme.Small, Theme.TextDim,
                 tx, blockTop + h2 + Ui.S(2), textW);
-            Ui.Text(g, "Buy direct inside Joe Browser. No third-party checkout, no tracking.",
-                Theme.Caption, Theme.TextFaint, tx, blockTop + h2 + sm + Ui.S(4), textW);
 
             var badge = new RectangleF(Width - Ui.S(20) - bw, (Height - bh) / 2f, bw, bh);
             Ui.Fill(g, badge, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);

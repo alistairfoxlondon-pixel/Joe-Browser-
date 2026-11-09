@@ -218,7 +218,7 @@ namespace JoeBrowser
             float ic = Ui.S(22);
             Icons.Draw(g, "extension", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
             Ui.Text(g, "No extensions added yet", Theme.H3, Theme.Text, cr.Right + Ui.S(16), Ui.S(26), w - cr.Right - Ui.S(30));
-            Ui.Text(g, "Paste a Chrome Web Store link, or choose a folder that contains manifest.json.",
+            Ui.Text(g, "Store link or manifest.json folder.",
                 Theme.Small, Theme.TextDim, cr.Right + Ui.S(16), Ui.S(50), w - cr.Right - Ui.S(30), "left", 2);
         }
 

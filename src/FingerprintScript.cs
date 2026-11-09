@@ -114,11 +114,17 @@ namespace JoeBrowser
   'use strict';
   var F = __CFG__;
 
-  /* Idempotence guard. A named window property is the shortest detection shortcut there is
-     (Object.getOwnPropertyNames(window) names the tool), so the marker is a symbol on
-     Navigator.prototype instead: reachable again on re-injection, invisible to name scans. */
+  /* Google's sign-in and sign-up risk engine scores canvas/audio tampering on its own pages
+     and fails the login with this browser may not be secure. The fingerprint noise stays
+     on everywhere else; on Google's own auth domains it steps aside so accounts.google.com
+     behaves exactly like the real browser underneath. */
+  try {
+    var __h = (location && location.hostname) ? location.hostname : '';
+    if (/(^|\.)accounts\.google\.com$|(^|\.)accounts\.youtube\.com$/.test(__h)) {
+      F.canvas = false; F.audio = false; F.webgl = false; F.hwNoise = false;
+    }
+  } catch (e) {}
   var NP = (typeof Navigator !== 'undefined' && Navigator.prototype) ? Navigator.prototype : Object.getPrototypeOf(navigator);
-  var GUARD = Symbol.for('jb.realm');
   try { if (NP[GUARD]) return; Object.defineProperty(NP, GUARD, { value: 1, configurable: true }); } catch (e) {}
 
   var origToString = Function.prototype.toString;
@@ -1239,6 +1245,10 @@ namespace JoeBrowser
 (function () {
   'use strict';
   var F = __CFG__;
+  try {
+    var __h = (location && location.hostname) ? location.hostname : '';
+    if (/(^|\.)accounts\.google\.com$/.test(__h)) { F.canvas = false; F.audio = false; }
+  } catch (e) {}
   var NP = (typeof WorkerNavigator !== 'undefined' && WorkerNavigator.prototype)
     ? WorkerNavigator.prototype : Object.getPrototypeOf(navigator);
   var G = Symbol.for('jb.realm');

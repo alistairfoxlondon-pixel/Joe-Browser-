@@ -119,8 +119,6 @@ namespace JoeBrowser
             string[] rows =
             {
                 "Start menu and desktop shortcuts",
-                "An entry in Settings > Apps, so it can be removed cleanly",
-                "Updates replace the old copy instead of piling up"
             };
             foreach (string row in rows)
             {

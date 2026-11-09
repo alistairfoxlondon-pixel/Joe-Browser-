@@ -19,7 +19,7 @@ namespace JoeBrowser
         private GoogleSetupDialog(string currentId)
             : base("Set up Google sign-in", "Save and continue", "Cancel", 600, 700)
         {
-            AddNote("Joe Browser signs in through Google's official OAuth flow. The consent page opens in your own "
+            AddNote("Signs in via Google's official OAuth own "
                   + "browser and only the name, email and photo Google returns are kept, on this PC. No password "
                   + "ever reaches the app.");
 

@@ -236,8 +236,12 @@ namespace JoeBrowser
 
         public void AddRow(Control label, Control field, int height, bool wrap)
         {
-            if (label != null) _body.Controls.Add(label);
-            if (field != null) _body.Controls.Add(field);
+            /* Rows belong on the scrolled content panel, not on the host itself. Adding them
+               to the host left every field a blank rectangle: the host lays out and measures
+               only its content child, so the rows sat unmapped at 0x0 - which is how the Add
+               proxy and Add extension dialogs opened with an empty body. */
+            if (label != null) _content.Controls.Add(label);
+            if (field != null) _content.Controls.Add(field);
             _rows.Add(new Row { Label = label, Field = field, Height = height, Wrap = wrap });
         }
 
@@ -253,7 +257,7 @@ namespace JoeBrowser
         {
             base.OnLoad(e);
             _initial.Clear();
-            foreach (Control c in _body.Controls)
+            foreach (Control c in _content.Controls)
             {
                 var box = c as JBTextBox;
                 if (box != null) _initial[box] = box.Value ?? "";
@@ -272,7 +276,7 @@ namespace JoeBrowser
         {
             base.ReStyle();
             _body.BackColor = Theme.Bg;
-            foreach (Control c in _body.Controls)
+            foreach (Control c in _content.Controls)
             {
                 if (c is TextBox) { c.BackColor = Theme.Input; c.ForeColor = Theme.Text; }
             }
