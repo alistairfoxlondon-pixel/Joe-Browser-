@@ -254,7 +254,7 @@ namespace JoeBrowser
                                three. If it needs a fourth at some scale, that block is a clipped
                                block - which is the defect being fixed. */
                             float three = 3f * Theme.LineHeight(Theme.Small);
-                            float need = Theme.MeasureWrapped(g, L10n.T("acct.pin.off.state"), Theme.Small, rowW, 99);
+                            float need = Ui.MeasureWrapped(g, L10n.T("acct.pin.off.state"), Theme.Small, rowW, 99);
                             if (need > three + 1f)
                                 sb.Append(" [a card caption needs more than three lines at " + scale + "]");
                         }
