@@ -251,7 +251,7 @@ namespace JoeBrowser
 
         private JBButton Nav(string text, string icon, EventHandler click)
         {
-            var b = new JBButton { Kind = BtnKind.Nav, Icon = icon, Text = text, Radius = 8, Height = Ui.S(42) };
+            var b = new JBButton { Kind = BtnKind.Nav, Icon = icon, Text = text, Radius = Theme.ButtonRadius, Height = Ui.S(42) };
             b.Click += click;
             return b;
         }
@@ -292,26 +292,26 @@ namespace JoeBrowser
             _themeSwitch.DayText = L10n.T("theme.day");
             _themeSwitch.CheckedChanged += delegate { ToggleTheme(); };
 
-            _search = new JBTextBox { Icon = "search", Placeholder = L10n.T("btn.search"), Height = Ui.S(33) };
+            _search = new JBTextBox { Icon = "search", Placeholder = L10n.T("btn.search"), Height = Ui.S(Theme.ControlHeight) };
             _search.Box.TextChanged += delegate
             {
                 _filter = (_search.Value ?? "").Trim();
                 ApplyFilter();
             };
 
-            _newBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("btn.new"), Radius = 6, Height = Ui.S(34) };
+            _newBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("btn.new"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _newBtn.Click += delegate { NewProfile(); };
 
-            _sortBtn = new JBButton { Text = "Sort: recent", Radius = 6, Height = Theme.Field, Tip = "Change the order of the list (Ctrl+O)" };
+            _sortBtn = new JBButton { Text = "Sort: recent", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = "Change the order of the list (Ctrl+O)" };
             _sortBtn.Click += delegate { CycleSort(); };
 
             _bulk = new JBPanel { Visible = false };
             _bulkCount = new Label { AutoSize = true, Font = Theme.H3, ForeColor = Theme.Text, BackColor = Color.Transparent };
-            _bulkOpen = new JBButton { Kind = BtnKind.Primary, Icon = "play", Text = L10n.T("btn.openall"), Radius = 6, Height = Ui.S(32) };
-            _bulkStop = new JBButton { Kind = BtnKind.Soft, Icon = "power", Text = L10n.T("btn.stop"), Radius = 6, Height = Ui.S(32) };
-            _bulkDup = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = L10n.T("btn.duplicate"), Radius = 6, Height = Ui.S(32) };
-            _bulkDel = new JBButton { Kind = BtnKind.Danger, Icon = "trash", Text = L10n.T("btn.delete"), Radius = 6, Height = Ui.S(32) };
-            _bulkCancel = new JBButton { Kind = BtnKind.Ghost, Icon = "close", Radius = 6, Height = Ui.S(32), Tip = "Clear selection (Esc)" };
+            _bulkOpen = new JBButton { Kind = BtnKind.Primary, Icon = "play", Text = L10n.T("btn.openall"), Radius = Theme.ButtonRadius, Height = Ui.S(32) };
+            _bulkStop = new JBButton { Kind = BtnKind.Soft, Icon = "power", Text = L10n.T("btn.stop"), Radius = Theme.ButtonRadius, Height = Ui.S(32) };
+            _bulkDup = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = L10n.T("btn.duplicate"), Radius = Theme.ButtonRadius, Height = Ui.S(32) };
+            _bulkDel = new JBButton { Kind = BtnKind.Danger, Icon = "trash", Text = L10n.T("btn.delete"), Radius = Theme.ButtonRadius, Height = Ui.S(32) };
+            _bulkCancel = new JBButton { Kind = BtnKind.Ghost, Icon = "close", Radius = Theme.ButtonRadius, Height = Ui.S(32), Tip = "Clear selection (Esc)" };
             _bulkOpen.Click += delegate { BulkOpen(); };
             _bulkStop.Click += delegate { BulkStop(); };
             _bulkDup.Click += delegate { BulkDuplicate(); };
@@ -324,11 +324,11 @@ namespace JoeBrowser
             _bulk.Controls.Add(_bulkDel);
             _bulk.Controls.Add(_bulkCancel);
 
-            _saveSettings = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = L10n.T("btn.save"), Radius = 6, Height = Ui.S(34) };
+            _saveSettings = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = L10n.T("btn.save"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _saveSettings.Click += delegate { SaveSettings(); };
 
-            _minBtn = new JBIconButton { Icon = "min", IconSize = 11, Caption = true, Tip = "Minimize" };
-            _maxBtn = new JBIconButton { Icon = "max", IconSize = 11, Caption = true, Tip = "Maximize" };
+            _minBtn = new JBIconButton { Icon = "min", IconSize = 13, Caption = true, Tip = "Minimize" };
+            _maxBtn = new JBIconButton { Icon = "max", IconSize = 13, Caption = true, Tip = "Maximize" };
             _closeBtn = new JBIconButton { Icon = "close", IconSize = 12, Caption = true, Danger = true, Tip = "Close" };
             _minBtn.Click += delegate { WindowState = FormWindowState.Minimized; };
             _maxBtn.Click += delegate { ToggleMaximize(); };
@@ -347,13 +347,13 @@ namespace JoeBrowser
 
             _emptyPanel = new Panel { BackColor = Theme.Bg, Visible = false };
             _emptyPanel.Paint += EmptyPaint;
-            _emptyBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("empty.action"), Radius = 6, Height = Ui.S(34) };
+            _emptyBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("empty.action"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _emptyBtn.Click += delegate
             {
                 if (_filter.Length > 0) { ClearSearch(); }
                 else NewProfile();
             };
-            _clearFilter = new JBButton { Kind = BtnKind.Soft, Icon = "close", Text = "Clear search", Radius = 6, Height = Theme.Field, Visible = false };
+            _clearFilter = new JBButton { Kind = BtnKind.Soft, Icon = "close", Text = "Clear search", Radius = Theme.ButtonRadius, Height = Theme.Field, Visible = false };
             _clearFilter.Click += delegate { ClearSearch(); };
             _emptyPanel.Controls.Add(_emptyBtn);
             _emptyPanel.Controls.Add(_clearFilter);
@@ -421,7 +421,7 @@ namespace JoeBrowser
             _aboutColumn = new Panel { BackColor = Theme.Bg };
             _aboutColumn.Paint += AboutPaint;
             _aboutHost = new JBScrollHost(_aboutColumn);
-            _aboutTelegram = new JBButton { Kind = BtnKind.Soft, BrandIcon = "telegram", Text = "@joegoldberg2025", Radius = 6, Height = Ui.S(34) };
+            _aboutTelegram = new JBButton { Kind = BtnKind.Soft, BrandIcon = "telegram", Text = "@joegoldberg2025", Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _aboutTelegram.Click += delegate { OpenUrl("https://t.me/joegoldberg2025"); };
             _aboutColumn.Controls.Add(_aboutTelegram);
             _aboutPage.Controls.Add(_aboutHost);
@@ -1798,14 +1798,14 @@ namespace JoeBrowser
 
             _setBrowserPath = Field("Automatic (recommended)");
             _setBrowserPath.Value = _settings.BrowserPath ?? "";
-            _setBrowse = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.browse"), Radius = 6, Height = Ui.S(34) };
-            _setDetect = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = L10n.T("btn.detect"), Radius = 6, Height = Ui.S(34) };
+            _setBrowse = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.browse"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
+            _setDetect = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = L10n.T("btn.detect"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _setStartUrl = Field(Profile.FingerprintTestUrl);
             _setDefaultGroup = Field(L10n.T("set.group.hint"));
             _setDefaultGroup.Value = _settings.DefaultGroup ?? "";
-            _setOpenData = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.opendata"), Radius = 6, Height = Ui.S(34) };
-            _setDownload = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.download"), Radius = 6, Height = Ui.S(34) };
-            _setClearCache = new JBButton { Kind = BtnKind.Soft, Icon = "sync", Text = L10n.T("btn.clean"), Radius = 6, Height = Ui.S(34) };
+            _setOpenData = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.opendata"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
+            _setDownload = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.download"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
+            _setClearCache = new JBButton { Kind = BtnKind.Soft, Icon = "sync", Text = L10n.T("btn.clean"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _setClearCache.Click += delegate { ClearCaches(); };
 
             /* Interface language: circular flag + full language name, never a bare code. */
@@ -1875,13 +1875,13 @@ namespace JoeBrowser
             Row(storage, "set.row.build", new[] { Ui.S(110) }, _setDownload);
             /* History off means nothing new is recorded; what is already there stays until the
                user clears it, because turning recording off should not quietly delete evidence. */
-            _setClearHistory = new JBButton { Kind = BtnKind.Soft, Icon = "trash", Text = L10n.T("set.clearhistory"), Radius = 6, Height = Ui.S(34) };
+            _setClearHistory = new JBButton { Kind = BtnKind.Soft, Icon = "trash", Text = L10n.T("set.clearhistory"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _setClearHistory.Click += delegate { ClearAllHistory(); };
             Row(storage, "set.row.history", new[] { Ui.S(46), Ui.S(120) }, _setHistory, _setClearHistory);
 
             /* The one line to the developer when anything looks wrong. It opens Telegram with
                the user's own words; the technical details ride on the clipboard. */
-            _setReport = new JBButton { Kind = BtnKind.Soft, Icon = "error", Text = L10n.T("btn.report"), Radius = 6, Height = Ui.S(34) };
+            _setReport = new JBButton { Kind = BtnKind.Soft, Icon = "error", Text = L10n.T("btn.report"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _setReport.Click += delegate { Report.OpenForm(this, ""); };
             Row(storage, "set.row.report", new[] { Ui.S(96) }, _setReport);
 
@@ -1898,15 +1898,15 @@ namespace JoeBrowser
             _setGoogleSecret = Field("GOCSPX-…  (optional)");
             _setGoogleSecret.Value = string.IsNullOrWhiteSpace(_settings.GoogleClientSecret)
                 ? GoogleSignIn.DefaultClientSecret : _settings.GoogleClientSecret;
-            _setSecurity = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.security"), Radius = 6, Height = Ui.S(34) };
+            _setSecurity = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.security"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             /* The Google client id is the only setting that cannot be pre-filled by the app,
                so it gets a guided setup and a button that actually runs the flow and reports
                what Google said. Without those two, a wrong id just looks like a dead button. */
-            _setGoogleGuide = new JBButton { Kind = BtnKind.Soft, Icon = "help", Text = "Set up", Radius = 6, Height = Theme.Field, Tip = L10n.T("set.google.hint") };
-            _setGoogleTest = new JBButton { Kind = BtnKind.Soft, Icon = "check", Text = "Test", Radius = 6, Height = Theme.Field, Tip = "Run the real Google sign-in now" };
+            _setGoogleGuide = new JBButton { Kind = BtnKind.Soft, Icon = "help", Text = "Set up", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = L10n.T("set.google.hint") };
+            _setGoogleTest = new JBButton { Kind = BtnKind.Soft, Icon = "check", Text = "Test", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = "Run the real Google sign-in now" };
             _setGoogleGuide.Click += delegate { GoogleSetupHelp(); };
             _setGoogleTest.Click += delegate { TestGoogleSignIn(); };
-            _setSignOut = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("set.row.signout"), Radius = 6, Height = Ui.S(34) };
+            _setSignOut = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("set.row.signout"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _setSecurity.Click += delegate
             {
                 if (Session.Current == null) { Toast("Sign in first.", ToastKind.Error); return; }
@@ -1984,7 +1984,7 @@ namespace JoeBrowser
 
         private JBTextBox Field(string placeholder)
         {
-            return new JBTextBox { Placeholder = placeholder, Height = Ui.S(33) };
+            return new JBTextBox { Placeholder = placeholder, Height = Ui.S(Theme.ControlHeight) };
         }
 
         private void BrowseBrowser()
@@ -3340,8 +3340,8 @@ namespace JoeBrowser
 
             float badgeX = (w - badge) / 2f;
             var br = new RectangleF(badgeX, top, badge, badge);
-            Ui.Fill(g, br, Ui.S(16), Theme.AccentOnBg);
-            Ui.Stroke(g, br, Ui.S(16), Theme.AccentBorder);
+            Ui.Fill(g, br, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
+            Ui.Stroke(g, br, Ui.S(Theme.ButtonRadius), Theme.AccentBorder);
             float ic = Ui.S(26);
             Icons.Draw(g, searching ? "search" : "layers",
                 new RectangleF(br.X + (badge - ic) / 2f, br.Y + (badge - ic) / 2f, ic, ic), Theme.Accent);
@@ -4321,8 +4321,8 @@ namespace JoeBrowser
             float pathH = Theme.LineHeight(Theme.Caption);
             float idH = Math.Max(markSize, dispH + Ui.S(4) + subH + Ui.S(4) + pathH) + Ui.S(32);
             var card = new RectangleF(x, Ui.S(8), colW, idH);
-            Ui.Fill(g, card, Ui.S(10), Theme.Panel);
-            Ui.Stroke(g, card, Ui.S(10), Theme.Line);
+            Ui.Fill(g, card, Ui.S(Theme.ButtonRadius), Theme.Panel);
+            Ui.Stroke(g, card, Ui.S(Theme.ButtonRadius), Theme.Line);
 
             var mark = new RectangleF(card.X + Ui.S(20), card.Y + (idH - markSize) / 2f, markSize, markSize);
             Logo.Draw(g, mark);
@@ -4362,8 +4362,8 @@ namespace JoeBrowser
             for (int i = 0; i < features.Length; i++)
             {
                 var r = new RectangleF(x + (i % cols) * (tileW + gap), tileY + (i / cols) * (tileH + gap), tileW, tileH);
-                Ui.Fill(g, r, Ui.S(10), Theme.Card);
-                Ui.Stroke(g, r, Ui.S(10), Theme.Line);
+                Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Theme.Card);
+                Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), Theme.Line);
 
                 float chip = Ui.S(28);
                 /* The block is centred in the tile: pinning the description to a fixed offset left
@@ -4375,7 +4375,7 @@ namespace JoeBrowser
                 float top = r.Y + Math.Max(Ui.S(12), (tileH - blockH) / 2f);
 
                 var cr = new RectangleF(r.X + Ui.S(16), top, chip, chip);
-                Ui.Fill(g, cr, Ui.S(6), Theme.AccentOnBg);
+                Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
                 float ic = Ui.S(17);
                 Icons.Draw(g, features[i][0], new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
 
@@ -4396,8 +4396,8 @@ namespace JoeBrowser
             int perCol = (int)Math.Ceiling(shortcuts.Count / (double)scCols);
             float rowH = Math.Max(Ui.S(38), Theme.LineHeight(Theme.Caption) + Ui.S(14));
             var sc = new RectangleF(x, scSect + Ui.S(26), colW, perCol * rowH + Ui.S(14));
-            Ui.Fill(g, sc, Ui.S(10), Theme.Panel);
-            Ui.Stroke(g, sc, Ui.S(10), Theme.Line);
+            Ui.Fill(g, sc, Ui.S(Theme.ButtonRadius), Theme.Panel);
+            Ui.Stroke(g, sc, Ui.S(Theme.ButtonRadius), Theme.Line);
 
             float halfW = colW / scCols;
             for (int i = 0; i < shortcuts.Count; i++)
@@ -4423,8 +4423,8 @@ namespace JoeBrowser
 
                 int keyW = (int)Math.Ceiling(Ui.Measure(g, shortcuts[i][0], Theme.Caption).Width) + Ui.S(18);
                 var chipR = new RectangleF(kx, cy, keyW, Math.Min(Ui.S(24), rowH - Ui.S(8)));
-                Ui.Fill(g, chipR, Ui.S(4), Theme.Card);
-                Ui.Stroke(g, chipR, Ui.S(4), Theme.Line, 1f);
+                Ui.Fill(g, chipR, Ui.S(Theme.ButtonRadius), Theme.Card);
+                Ui.Stroke(g, chipR, Ui.S(Theme.ButtonRadius), Theme.Line, 1f);
                 Ui.Text(g, shortcuts[i][0], Theme.Caption, Theme.Text, chipR.X, chipR.Y, chipR.Width, "center");
 
                 Ui.Text(g, shortcuts[i][1], Theme.Small, Theme.TextDim, chipR.Right + Ui.S(12),
@@ -4444,8 +4444,8 @@ namespace JoeBrowser
             };
             float wsRowH = Math.Max(Ui.S(44), Theme.LineHeight(Theme.Body) + Ui.S(20));
             var ws = new RectangleF(x, wsSect + Ui.S(26), colW, stats.Length * wsRowH + Ui.S(12));
-            Ui.Fill(g, ws, Ui.S(10), Theme.Panel);
-            Ui.Stroke(g, ws, Ui.S(10), Theme.Line);
+            Ui.Fill(g, ws, Ui.S(Theme.ButtonRadius), Theme.Panel);
+            Ui.Stroke(g, ws, Ui.S(Theme.ButtonRadius), Theme.Line);
             for (int i = 0; i < stats.Length; i++)
             {
                 float ry = ws.Y + Ui.S(6) + i * wsRowH;

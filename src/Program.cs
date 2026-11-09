@@ -224,6 +224,14 @@ namespace JoeBrowser
                     Ui.Scale = wasScale;
                     Theme.ClearFontCache();
 
+                    /* The type scale is a promise now, not a preference, so it is asserted
+                       rather than eyeballed: body text at 16 px or more and nothing anywhere
+                       below 14 px at 100%. "The font is too small" has come back once; a build
+                       that reintroduces it should fail here instead of in a screenshot. */
+                    if (Theme.PxBody < 16) sb.Append(" [body text is below 16 px]");
+                    if (Math.Min(Theme.PxMicro, Theme.PxCaption) < 14) sb.Append(" [text below 14 px is in the scale]");
+                    if (Theme.ButtonRadius != 0 || Theme.CardRadius != 0) sb.Append(" [a rounded corner is back in the theme]");
+
                     /* The reported defect of this round: every profile on a machine claimed the
                        installed browser's build, so a workspace of ten profiles reported one
                        number, the same one as the user's own Chrome. Asserted here the way the

@@ -180,11 +180,11 @@ namespace JoeBrowser
             if (!string.IsNullOrEmpty(preset)) _what.Value = preset;
             Controls.Add(_what);
 
-            _send = new JBButton { Kind = BtnKind.Primary, Icon = "arrow-right", Text = "Open Telegram", Radius = 6, Height = Theme.Field };
+            _send = new JBButton { Kind = BtnKind.Primary, Icon = "arrow-right", Text = "Open Telegram", Radius = Theme.ButtonRadius, Height = Theme.Field };
             _send.Click += delegate { Send(); };
             Controls.Add(_send);
 
-            _copy = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy details", Radius = 6, Height = Theme.Field, Tip = "App version, browser, plan and the last log lines" };
+            _copy = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy details", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = "App version, browser, plan and the last log lines" };
             _copy.Click += delegate
             {
                 Report.CopyDetails(_what.Value);
@@ -195,7 +195,7 @@ namespace JoeBrowser
             _status = new JBLabel(LabelRole.Faint, "");
             Controls.Add(_status);
 
-            _x = new JBIconButton { Icon = "close", Danger = true, IconSize = 13, Tip = "Close" };
+            _x = new JBIconButton { Icon = "close", Danger = true, IconSize = 16, Tip = "Close" };
             _x.Click += delegate { Close(); };
             Controls.Add(_x);
 
@@ -241,8 +241,8 @@ namespace JoeBrowser
             /* The pair is measured before either is placed: at a large scale they were wider
                than the window and the left button was pushed under the window edge. */
             Ui.FitPair(ref cw, ref sw, Ui.S(8), Math.Max(Ui.S(200), w - pad * 2), Ui.S(72), Ui.S(72));
-            _send.SetBounds(w - pad - sw, h - Ui.S(16) - Ui.S(33), sw, Ui.S(33));
-            _copy.SetBounds(w - pad - sw - Ui.S(8) - cw, h - Ui.S(16) - Ui.S(33), cw, Ui.S(33));
+            _send.SetBounds(w - pad - sw, h - Ui.S(16) - Ui.S(Theme.ControlHeight), sw, Ui.S(Theme.ControlHeight));
+            _copy.SetBounds(w - pad - sw - Ui.S(8) - cw, h - Ui.S(16) - Ui.S(Theme.ControlHeight), cw, Ui.S(Theme.ControlHeight));
         }
 
         protected override void OnPaint(PaintEventArgs e)

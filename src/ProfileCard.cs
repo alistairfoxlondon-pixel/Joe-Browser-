@@ -257,7 +257,7 @@ namespace JoeBrowser
             Ui.Quality(g);
             if (Model == null) return;
 
-            float rad = Ui.S(10);
+            float rad = Ui.S(Theme.ButtonRadius);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
 
             /* A card is a surface, not a border: the fill carries it and the hairline is only
@@ -289,8 +289,8 @@ namespace JoeBrowser
                 CheckRect.Width - 1f, CheckRect.Height - 1f);
             if (Picked || _hover || _checkHover)
             {
-                Ui.Fill(g, box, Ui.S(4), Picked ? Theme.Accent : Theme.Bg);
-                Ui.Stroke(g, box, Ui.S(4), Picked ? Theme.Accent : Theme.ButtonBorder, 1f);
+                Ui.Fill(g, box, Ui.S(Theme.ButtonRadius), Picked ? Theme.Accent : Theme.Bg);
+                Ui.Stroke(g, box, Ui.S(Theme.ButtonRadius), Picked ? Theme.Accent : Theme.ButtonBorder, 1f);
                 if (Picked)
                 {
                     float ci = Ui.S(12);
@@ -322,7 +322,7 @@ namespace JoeBrowser
             string sub = HeaderSub();
             Ui.Text(g, sub, Theme.Caption, Theme.TextFaint, tx, Ui.S(42), avail);
 
-            Ui.Fill(g, pill, Ui.S(10), Theme.Panel2);
+            Ui.Fill(g, pill, Ui.S(Theme.ButtonRadius), Theme.Panel2);
             using (var b = new SolidBrush(statusColor))
                 g.FillEllipse(b, pill.X + Ui.S(10), pill.Y + (pillH - dot) / 2f, dot, dot);
             Ui.Text(g, status, Theme.Micro, statusColor, pill.X + Ui.S(10) + dot + Ui.S(6),
@@ -430,7 +430,7 @@ namespace JoeBrowser
 
             float w = Math.Min(maxW, padX * 2 + iconW + flagW + textW + trailW);
             var rect = new RectangleF(x, y, w, h);
-            Ui.Fill(g, rect, Ui.S(6), Theme.Panel2);
+            Ui.Fill(g, rect, Ui.S(Theme.ButtonRadius), Theme.Panel2);
 
             float cy = y + (h - Theme.Caption.GetHeight(g)) / 2f;
             if (flagCode != null)
@@ -471,7 +471,7 @@ namespace JoeBrowser
                 float w = Ui.S(9) * 2 + Ui.Measure(g, s, Theme.Micro).Width;
                 w = Math.Min(w, right - x);
                 var rect = new RectangleF(x, y, w, h);
-                Ui.Fill(g, rect, Ui.S(5), Theme.AccentOnBg);
+                Ui.Fill(g, rect, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
                 Ui.Text(g, s, Theme.Micro, Theme.AccentText, rect.X + Ui.S(9),
                     rect.Y + (h - Theme.Micro.GetHeight(g)) / 2f, w - Ui.S(18));
                 x = rect.Right + Ui.S(6);
@@ -483,7 +483,7 @@ namespace JoeBrowser
                 float w = Ui.S(8) * 2 + Ui.Measure(g, t, Theme.Micro).Width;
                 if (x + w > right) break;
                 var rect = new RectangleF(x, y, w, h);
-                Ui.Fill(g, rect, Ui.S(5), Theme.Panel2);
+                Ui.Fill(g, rect, Ui.S(Theme.ButtonRadius), Theme.Panel2);
                 Ui.Text(g, t, Theme.Micro, Theme.TextDim, rect.X + Ui.S(8),
                     rect.Y + (h - Theme.Micro.GetHeight(g)) / 2f, w - Ui.S(16));
                 x = rect.Right + Ui.S(6);
@@ -534,7 +534,7 @@ namespace JoeBrowser
             float w = Math.Min(right - x, padX * 2 + ic + gap + tw);
 
             var rect = new RectangleF(x, y, w, h);
-            Ui.Fill(g, rect, Ui.S(5), Theme.Panel2);
+            Ui.Fill(g, rect, Ui.S(Theme.ButtonRadius), Theme.Panel2);
             Icons.Draw(g, icon, new RectangleF(x + padX, y + (h - ic) / 2f, ic, ic), Theme.TextFaint);
             Ui.Text(g, shown, Theme.Micro, Theme.TextDim, x + padX + ic + gap,
                 y + (h - Theme.Micro.GetHeight(g)) / 2f, tw + Ui.S(2));
@@ -568,7 +568,7 @@ namespace JoeBrowser
                the card will do, and it costs no text. */
             var or = OpenRect;
             bool enabled = !Launching;
-            float rad = Ui.S(6);
+            float rad = Ui.S(Theme.ButtonRadius);
             if (Running || Locked) Ui.Fill(g, or, rad, _openHover ? Theme.PanelHover : Theme.Panel2);
             else Ui.Fill(g, or, rad, Launching ? Theme.Panel2 : _openHover ? Theme.AccentHi : Theme.Accent);
             if (!Running && !Locked && !Launching && _openHover) { /* accent fill already brightened */ }
@@ -593,8 +593,8 @@ namespace JoeBrowser
 
             if (_kebabHover)
             {
-                Ui.Fill(g, KebabRect, Ui.S(6), Theme.HoverOverlay);
-                Ui.Stroke(g, KebabRect, Ui.S(6), Theme.Line);
+                Ui.Fill(g, KebabRect, Ui.S(Theme.ButtonRadius), Theme.HoverOverlay);
+                Ui.Stroke(g, KebabRect, Ui.S(Theme.ButtonRadius), Theme.Line);
             }
             float kd = Ui.S(16);
             Icons.Draw(g, "dots", new RectangleF(KebabRect.X + (KebabRect.Width - kd) / 2f,

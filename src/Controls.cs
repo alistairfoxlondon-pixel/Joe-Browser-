@@ -741,9 +741,9 @@ namespace JoeBrowser
         public string Icon;
         public string BrandIcon;
         public bool Selected;
-        /// <summary>A control radius, not a card radius: the rounded rectangle Windows itself
-        /// uses for a push button. Corners sharper than this read as a 2010 form.</summary>
-        public int Radius = 6;
+        /// <summary>Corners are square throughout; the field is kept so existing callers still
+        /// compile and a future shape can be introduced in one place.</summary>
+        public int Radius = Theme.ButtonRadius;
         private string _tip = "";
         public string Tip { get { return _tip; } set { _tip = value ?? ""; ToolTips.Attach(this, _tip); } }
         private bool _hover, _down;
@@ -767,7 +767,7 @@ namespace JoeBrowser
             ForeColor = Theme.Text;
             Ui.Opaque(this);
             TabStop = true;
-            Height = Ui.S(33);
+            Height = Ui.S(36);
         }
 
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
@@ -861,7 +861,7 @@ namespace JoeBrowser
                 if (Selected)
                 {
                     float barH = Height - Ui.S(16);
-                    Ui.Fill(g, new RectangleF(0, Ui.S(8), Ui.S(3), barH), Ui.S(1.5f), Theme.Accent);
+                    Ui.Fill(g, new RectangleF(0, Ui.S(Theme.ButtonRadius), Ui.S(3), barH), Ui.S(1.5f), Theme.Accent);
                 }
             }
             else
@@ -917,7 +917,7 @@ namespace JoeBrowser
     internal class JBIconButton : Control, IReStyle
     {
         public string Icon = "dots";
-        public int IconSize = 18;
+        public int IconSize = 20;
         private string _tip = "";
         public string Tip { get { return _tip; } set { _tip = value ?? ""; ToolTips.Attach(this, _tip); } }
         public bool Danger;
@@ -1109,7 +1109,7 @@ namespace JoeBrowser
                 _trailing = value;
                 if (_trailing != null)
                 {
-                    _trailing.IconSize = 15;
+                    _trailing.IconSize = 18;
                     _trailing.Size = new Size(Ui.S(26), Ui.S(26));
                     Controls.Add(_trailing);
                 }
@@ -1223,7 +1223,7 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            float rad = Ui.S(8);
+            float rad = Ui.S(Theme.ButtonRadius);
             /* A field is a rounded surface with one hairline, and focus thickens that hairline to
                the accent colour. The old field carried BOTH a full frame and a second rule under
                it, which is two outlines for one control - the reason every form looked busy. */
@@ -1360,7 +1360,7 @@ namespace JoeBrowser
             Cursor = Cursors.Hand;
             Font = Theme.Body;
             Ui.Opaque(this);
-            Height = Ui.S(33);
+            Height = Ui.S(36);
             TabStop = true;
             /* The popup outlives a close (see CloseMenu), so the control has to be the last
                owner: replacing it while an old strip is still alive leaked a top-level window. */
@@ -1592,7 +1592,7 @@ namespace JoeBrowser
                hairline, and the same accent on focus. The extra underline it used to draw made a
                select look different from the text box beside it for no reason a user could read. */
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            float rad = Ui.S(8);
+            float rad = Ui.S(Theme.ButtonRadius);
             Ui.Fill(g, r, rad, Theme.Input);
             Ui.Stroke(g, r, rad, _open || Focused ? Theme.Accent : _hover ? Theme.HoverStrong : Theme.Line,
                 _open || Focused ? Ui.S(1.5f) : 1f);
@@ -1842,7 +1842,7 @@ namespace JoeBrowser
                 if (!sel && i == _hover)
                 {
                     var pill = new RectangleF(cell.X + Ui.S(4), Ui.S(4), cell.Width - Ui.S(8), rule - Ui.S(8));
-                    Ui.Fill(g, pill, Ui.S(7), Theme.HoverOverlay);
+                    Ui.Fill(g, pill, Ui.S(Theme.ButtonRadius), Theme.HoverOverlay);
                 }
 
                 Font f = sel ? Theme.BodyBold : Theme.Body;
@@ -2356,7 +2356,7 @@ namespace JoeBrowser
                warning for one second reads as a warning and not as a coloured background with
                text on it. The 4 px radius was the giveaway that it was a rectangle. */
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            float rad = Ui.S(12);
+            float rad = Ui.S(Theme.ButtonRadius);
             Ui.Shadow(g, r, rad, 2, Theme.Dark);
             Ui.Fill(g, r, rad, Theme.Dark ? Theme.Panel : Theme.Card);
             Ui.Stroke(g, r, rad, Theme.Line);
@@ -2520,7 +2520,7 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0, 0, Width, Height);
-            if (_hover) Ui.Fill(g, r, Ui.S(4), Theme.HoverStrong);
+            if (_hover) Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Theme.HoverStrong);
 
             float s = Ui.S(22);
             Icons.Draw(g, _checked ? "moon" : "sun", new RectangleF(Ui.S(15), (Height - s) / 2f, s, s), Theme.Text);
@@ -2672,8 +2672,8 @@ namespace JoeBrowser
                 var r = new RectangleF(Ui.S(4), y + 1f, Width - Ui.S(8), rowH - 2f);
                 bool sel = i == _selected;
                 bool hov = i == _hoverIndex;
-                if (sel) Ui.Fill(g, r, Ui.S(4), Theme.AccentOnBg);
-                else if (hov) Ui.Fill(g, r, Ui.S(4), Theme.HoverOverlay);
+                if (sel) Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
+                else if (hov) Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Theme.HoverOverlay);
 
                 var it = _items[i];
                 float textLeft = r.X + Ui.S(10);

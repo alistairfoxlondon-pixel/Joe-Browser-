@@ -185,7 +185,7 @@ namespace JoeBrowser
             _title = new JBLabel(LabelRole.Title, _isNew ? "New profile" : "Edit profile");
             Controls.Add(_title);
 
-            _close = new JBIconButton { Icon = "close", Danger = true, IconSize = 14, Tip = "Close" };
+            _close = new JBIconButton { Icon = "close", Danger = true, IconSize = 17, Tip = "Close" };
             _close.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(_close);
 
@@ -277,7 +277,7 @@ namespace JoeBrowser
             _lblKind = Lbl(_tabGeneral, "BROWSER");
             _browserKind = Pick(_tabGeneral, "window");
             BuildBrowserOptions();
-            _browserKind.SetBounds(0, 0, Ui.S(210), Ui.S(33));
+            _browserKind.SetBounds(0, 0, Ui.S(210), Ui.S(Theme.ControlHeight));
 
             _lblPath = Lbl(_tabGeneral, "CUSTOM PATH (OPTIONAL)");
             _browserPath = Txt(_tabGeneral, _profile.BrowserKind == "custom" ? _profile.BrowserPath : "",
@@ -1238,7 +1238,7 @@ namespace JoeBrowser
         {
             int w = ClientSize.Width, h = ClientSize.Height;
             int pad = Ui.S(28);
-            int saveW = _save.PreferredWidth(Ui.S(150)), saveH = Ui.S(33);
+            int saveW = _save.PreferredWidth(Ui.S(150)), saveH = Ui.S(Theme.ControlHeight);
             int cancelW = _cancel.PreferredWidth(Ui.S(88));
             /* Both buttons and the error line have to fit in the footer. At a wide scale on a
                narrow window they did not, and the Cancel button was pushed past the left edge
@@ -1269,7 +1269,7 @@ namespace JoeBrowser
         private void LayoutGeneral(Panel page, JBScrollHost host, int cw)
         {
             int y = Ui.S(4);
-            int lh = Ui.S(18), fh = Ui.S(33), lg = Ui.S(6), rg = Ui.S(16);
+            int lh = Theme.LineHeight(Theme.Caption), fh = Ui.S(Theme.ControlHeight), lg = Ui.S(6), rg = Ui.S(16);
             int browseW = _browse.PreferredWidth(Ui.S(76));
 
             _lblName.SetBounds(0, y, cw, lh); y += lh + lg;
@@ -1363,7 +1363,7 @@ namespace JoeBrowser
 
         private void LayoutFingerprint(Panel page, JBScrollHost host, int cw)
         {
-            int lh = Ui.S(18), fh = Ui.S(33), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
+            int lh = Theme.LineHeight(Theme.Caption), fh = Ui.S(Theme.ControlHeight), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
             bool two = cw >= Ui.S(560);
 
             int y = Ui.S(4);
@@ -1388,9 +1388,9 @@ namespace JoeBrowser
             int regenW = _regen.PreferredWidth(Ui.S(160));
             int randomW = _random.PreferredWidth(Ui.S(160));
             Ui.FitPair(ref regenW, ref randomW, Ui.S(8), Math.Max(Ui.S(200), cw), Ui.S(96), Ui.S(96));
-            _regen.SetBounds(0, y, regenW, Ui.S(33));
-            _random.SetBounds(_regen.Right + Ui.S(8), y, randomW, Ui.S(33));
-            y += Ui.S(33) + Ui.S(10);
+            _regen.SetBounds(0, y, regenW, Ui.S(Theme.ControlHeight));
+            _random.SetBounds(_regen.Right + Ui.S(8), y, randomW, Ui.S(Theme.ControlHeight));
+            y += Ui.S(Theme.ControlHeight) + Ui.S(10);
             UpdateFirefoxWarn(0, y, cw);
             if (_fpWarn.Visible) y += Ui.S(26) + Ui.S(6);
 
@@ -1399,7 +1399,7 @@ namespace JoeBrowser
 
         private void LayoutPrivacy(Panel page, JBScrollHost host, int cw)
         {
-            int lh = Ui.S(18), fh = Ui.S(33), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
+            int lh = Theme.LineHeight(Theme.Caption), fh = Ui.S(Theme.ControlHeight), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
             bool two = cw >= Ui.S(560);
 
             int y = Ui.S(4);
@@ -1446,7 +1446,7 @@ namespace JoeBrowser
 
         private void LayoutProxy(Panel page, JBScrollHost host, int cw)
         {
-            int lh = Ui.S(18), fh = Ui.S(33), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
+            int lh = Theme.LineHeight(Theme.Caption), fh = Ui.S(Theme.ControlHeight), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
             bool two = cw >= Ui.S(520);
 
             int y = Ui.S(4);
@@ -1476,7 +1476,7 @@ namespace JoeBrowser
 
         private void LayoutTools(Panel page, JBScrollHost host, int cw)
         {
-            int lh = Ui.S(18), fh = Ui.S(33), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
+            int lh = Theme.LineHeight(Theme.Caption), fh = Ui.S(Theme.ControlHeight), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
             bool two = cw >= Ui.S(560);
             int y = Ui.S(4);
 
@@ -1961,7 +1961,7 @@ namespace JoeBrowser
                 int mh = MeasureLines(g, msg, Theme.Body, textW);
                 int dh = _detail.Visible ? MeasureLines(g, det, Theme.Caption, textW) : 0;
                 int bottom = bodyTop + mh + (dh > 0 ? Ui.S(8) + dh : 0) + Ui.S(24);
-                int height = bottom + Ui.S(33) + pad;
+                int height = bottom + Ui.S(Theme.ControlHeight) + pad;
                 int minButtons = textX + Ui.S(60) + saveW + cancelW + Ui.S(10);
                 if (width < minButtons) width = Math.Min(minButtons, screenMax.Width);
                 if (height > screenMax.Height) height = screenMax.Height;
@@ -1974,8 +1974,8 @@ namespace JoeBrowser
                     _title.SetBounds(textX, pad + Ui.S(2), ClientSize.Width - textX - pad, Ui.S(32));
                     _message.SetBounds(textX, bodyTop, textW, mh);
                     _detail.SetBounds(textX, bodyTop + mh + Ui.S(8), textW, dh);
-                    _ok.SetBounds(ClientSize.Width - pad - saveW, finalBottom, saveW, Ui.S(33));
-                    _cancel.SetBounds(_ok.Left - Ui.S(8) - cancelW, finalBottom, cancelW, Ui.S(33));
+                    _ok.SetBounds(ClientSize.Width - pad - saveW, finalBottom, saveW, Ui.S(Theme.ControlHeight));
+                    _cancel.SetBounds(_ok.Left - Ui.S(8) - cancelW, finalBottom, cancelW, Ui.S(Theme.ControlHeight));
                 });
             }
             Invalidate();

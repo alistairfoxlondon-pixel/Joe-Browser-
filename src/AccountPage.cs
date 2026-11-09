@@ -89,7 +89,7 @@ namespace JoeBrowser
 
         private static JBButton MakeButton(string text, string icon, BtnKind kind)
         {
-            return new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 6, Height = Theme.Field };
+            return new JBButton { Kind = kind, Icon = icon, Text = text, Radius = Theme.ButtonRadius, Height = Theme.Field };
         }
 
         /// <summary>Re-reads the account store and the plan, then rebuilds.</summary>
@@ -282,8 +282,8 @@ namespace JoeBrowser
                 Ui.Quality(g);
                 g.Clear(Theme.Bg);
                 var box = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-                Ui.Fill(g, box, Ui.S(10), _hover ? Theme.PanelHover : Theme.Card);
-                Ui.Stroke(g, box, Ui.S(10), _hover ? Theme.HoverStrong : Theme.Line);
+                Ui.Fill(g, box, Ui.S(Theme.ButtonRadius), _hover ? Theme.PanelHover : Theme.Card);
+                Ui.Stroke(g, box, Ui.S(Theme.ButtonRadius), _hover ? Theme.HoverStrong : Theme.Line);
 
                 float left = Ui.S(14);
                 /* The remove button is measured, not assumed: a fixed 120 px reserve is narrower

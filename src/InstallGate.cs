@@ -80,7 +80,7 @@ namespace JoeBrowser
             {
                 Kind = BtnKind.Primary,
                 Text = "Install now",
-                Radius = 6,
+                Radius = Theme.ButtonRadius,
                 Size = new Size(Ui.S(180), Ui.S(38)),
                 Location = new Point(Ui.S(40), Ui.S(344))
             };
@@ -90,7 +90,7 @@ namespace JoeBrowser
             {
                 Kind = BtnKind.Ghost,
                 Text = "Not now",
-                Radius = 6,
+                Radius = Theme.ButtonRadius,
                 Size = new Size(Ui.S(120), Ui.S(38)),
                 Location = new Point(Ui.S(232), Ui.S(344))
             };

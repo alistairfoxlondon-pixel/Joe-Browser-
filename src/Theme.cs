@@ -122,9 +122,16 @@ namespace JoeBrowser
         public static Color ActiveBg { get { return Dark ? C(0x26, 0x26, 0x26) : C(0xD8, 0xD8, 0xD8); } }
 
         // windows-ui control metrics
-        public const int ControlHeight = 33;
-        public const int ButtonRadius = 6;
-        public const int CardRadius = 8;
+        public const int ControlHeight = 36;
+        /// <summary>
+        /// The app draws square corners. Every surface used to be a rounded rectangle - 6 px on
+        /// a control, 8 px on a card - and asking for "no border radius" cannot be honoured by
+        /// editing call sites one at a time: there were sixty of them, and the next control
+        /// added would have been round again. Every rounded rectangle in the app goes through
+        /// the helpers below, so the corner lives here, in one number.
+        /// </summary>
+        public const int ButtonRadius = 0;
+        public const int CardRadius = 0;
         public const int NavbarWidth = 280;
 
         public static readonly int Radius = CardRadius;
@@ -653,23 +660,40 @@ namespace JoeBrowser
             return f;
         }
 
-        /* The type scale. DevToys, which this interface is measured against, runs its body at
-           14 and its captions at 12; this app used 15 for body but 13 for labels and 12 for
-           captions, and "the text is not clear" almost always means a caption that small. The
-           scale below keeps one rhythm (14, 16, 18, 20, 24) and stops at 13 for anything a
-           person has to read rather than glance at: 12 is for a footnote, not for the label of
-           a field. Line heights come from the font, so a row that is sized from Theme.Row
-           below stays in step with the size. */
-        public static Font Display { get { return F(24, Semi); } }      // page/dialog title
-        public static Font H1 { get { return F(20, Semi); } }           // section heading
-        public static Font H2 { get { return F(16, Semi); } }           // card title
-        public static Font H3 { get { return F(15, Semi); } }           // row title / button
-        public static Font Body { get { return F(14); } }               // base text
-        public static Font BodyBold { get { return F(14, Semi); } }
-        public static Font Small { get { return F(13); } }              // secondary, labels
-        public static Font SmallBold { get { return F(13, Semi); } }
-        public static Font Caption { get { return F(13); } }            // captions, hints
-        public static Font Micro { get { return F(12, Semi); } }        // section eyebrow
+        /* The type scale.
+        
+           Read at arm's length, on a 100% display, in a window that is often not maximised:
+           the previous scale started at 12 px for an eyebrow and 13 px for a field label, and
+           the complaint that came back was simply "the font is too small". Every step below is
+           one or two pixels larger, and the small end - the labels and captions people read
+           most often - is moved furthest. The rhythm stays the same shape (Display > H1 > H2 >
+           H3 > body > small > micro), so a page that was composed reads the same way, larger.
+          
+           Nothing here is in device pixels: Ui.S applies the user's scale, and F() applies the
+           system DPI, so the increase compounds nothing and a 200% display still gets 200%. */
+        /* The sizes themselves, named, because they are now a product promise: the base text is
+           at least 16 px and the smallest text anywhere is 14 px, at 100%. The self test asserts
+           those two floors against these constants, so a future "it looks a bit large" edit has
+           to be a deliberate change to the promise rather than a number typed into a font call. */
+        public const double PxDisplay = 30;
+        public const double PxH1 = 24;
+        public const double PxH2 = 19;
+        public const double PxH3 = 17;
+        public const double PxBody = 16;
+        public const double PxSmall = 15;
+        public const double PxCaption = 15;
+        public const double PxMicro = 14;
+
+        public static Font Display { get { return F(PxDisplay, Semi); } }   // page/dialog title
+        public static Font H1 { get { return F(PxH1, Semi); } }             // section heading
+        public static Font H2 { get { return F(PxH2, Semi); } }             // card title
+        public static Font H3 { get { return F(PxH3, Semi); } }             // row title / button
+        public static Font Body { get { return F(PxBody); } }               // base text
+        public static Font BodyBold { get { return F(PxBody, Semi); } }
+        public static Font Small { get { return F(PxSmall); } }             // secondary, labels
+        public static Font SmallBold { get { return F(PxSmall, Semi); } }
+        public static Font Caption { get { return F(PxCaption); } }         // captions, hints
+        public static Font Micro { get { return F(PxMicro, Semi); } }       // section eyebrow
 
         /// <summary>Line height of a face, in device pixels, rounded up.</summary>
         /* Line heights are asked for on every row of every page and of every card, and each
@@ -697,7 +721,7 @@ namespace JoeBrowser
            that hard codes 18 for a label row and 33 for a field gets 1 px of clipping the day
            the font gets a pixel taller; these are derived from the fonts instead. */
         public static int Row { get { return LineHeight(Small) + Ui.S(4); } }
-        public static int Field { get { return Ui.S(34); } }
+        public static int Field { get { return Ui.S(36); } }
         public static int Gap { get { return Ui.S(8); } }
 
         /// <summary>
@@ -721,8 +745,8 @@ namespace JoeBrowser
             return f;
         }
 
-        public static Font MonoBody { get { return Mono(13); } }
-        public static Font MonoSmall { get { return Mono(12); } }
+        public static Font MonoBody { get { return Mono(15); } }
+        public static Font MonoSmall { get { return Mono(14); } }
 
         public static event EventHandler ModeChanged;
 
@@ -925,6 +949,15 @@ namespace JoeBrowser
 
         public static void Fill(Graphics g, RectangleF r, float radius, Color color)
         {
+            /* A square surface is filled as a rectangle, not as a path: a path edge that lands
+               on a fractional coordinate is antialiased, and a card whose four edges are half
+               covered rows of grey reads as a soft, slightly blurry box next to crisp text. */
+            if (radius <= 0.5f)
+            {
+                using (var b = new SolidBrush(color))
+                    g.FillRectangle(b, new RectangleF(r.X, r.Y, r.Width, r.Height));
+                return;
+            }
             using (var p = Round(r, radius))
             using (var b = new SolidBrush(color))
                 g.FillPath(b, p);
@@ -932,6 +965,12 @@ namespace JoeBrowser
 
         public static void Fill(Graphics g, RectangleF r, float radius, Color color, float opacity)
         {
+            if (radius <= 0.5f)
+            {
+                using (var b = new SolidBrush(Color.FromArgb((int)(255 * opacity), color)))
+                    g.FillRectangle(b, new RectangleF(r.X, r.Y, r.Width, r.Height));
+                return;
+            }
             using (var p = Round(r, radius))
             using (var b = new SolidBrush(Color.FromArgb((int)(255 * opacity), color)))
                 g.FillPath(b, p);
@@ -946,9 +985,12 @@ namespace JoeBrowser
         /// </summary>
         public static void Stroke(Graphics g, RectangleF r, float radius, Color color, float width = 1f)
         {
-            using (var p = Round(r, radius))
             using (var pen = new Pen(color, width < 1.2f ? Hair : width))
-                g.DrawPath(pen, p);
+            {
+                if (radius <= 0.5f) { g.DrawRectangle(pen, r.X, r.Y, r.Width, r.Height); return; }
+                using (var p = Round(r, radius))
+                    g.DrawPath(pen, p);
+            }
         }
 
         /// <summary>windows-ui focus-visible: a single 1px outline in the text colour.</summary>

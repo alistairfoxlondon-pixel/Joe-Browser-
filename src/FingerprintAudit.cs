@@ -433,16 +433,16 @@ namespace JoeBrowser
                 _column.Controls.Add(row);
             }
 
-            _fix = new JBButton { Kind = BtnKind.Primary, Icon = "refresh", Text = "Fix what can be fixed", Radius = 6, Height = Theme.Field };
+            _fix = new JBButton { Kind = BtnKind.Primary, Icon = "refresh", Text = "Fix what can be fixed", Radius = Theme.ButtonRadius, Height = Theme.Field };
             _fix.Click += delegate { DoFix(); };
             _fix.Visible = _findings.Count(f => f.Fixable) > 0;
             Controls.Add(_fix);
 
-            _close = new JBButton { Kind = BtnKind.Soft, Text = "Close", Radius = 6, Height = Theme.Field };
+            _close = new JBButton { Kind = BtnKind.Soft, Text = "Close", Radius = Theme.ButtonRadius, Height = Theme.Field };
             _close.Click += delegate { Close(); };
             Controls.Add(_close);
 
-            _x = new JBIconButton { Icon = "close", Danger = true, IconSize = 13, Tip = "Close" };
+            _x = new JBIconButton { Icon = "close", Danger = true, IconSize = 16, Tip = "Close" };
             _x.Click += delegate { Close(); };
             Controls.Add(_x);
 
@@ -510,7 +510,7 @@ namespace JoeBrowser
             _column.SetBounds(0, 0, Math.Max(cw, _host.Width - Ui.S(10)), Math.Max(y, _host.Height));
             _host.SyncExtent();
 
-            int bh = Ui.S(33), by = h - Ui.S(16) - bh;
+            int bh = Ui.S(Theme.ControlHeight), by = h - Ui.S(16) - bh;
             int cw2 = _close.PreferredWidth(Ui.S(100));
             _close.SetBounds(w - pad - cw2, by, cw2, bh);
             if (_fix.Visible)

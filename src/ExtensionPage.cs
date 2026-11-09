@@ -109,7 +109,7 @@ namespace JoeBrowser
 
         private JBButton MakeButton(string text, string icon, BtnKind kind, string key)
         {
-            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 6, Height = Theme.Field };
+            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = Theme.ButtonRadius, Height = Theme.Field };
             b.Click += delegate { Raise(key, -1); };
             return b;
         }
@@ -169,7 +169,7 @@ namespace JoeBrowser
             float w = _empty.Width;
             float chip = Ui.S(44);
             var cr = new RectangleF(Ui.S(22), (Ui.S(92) - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(8), Theme.AccentOnBg);
+            Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
             float ic = Ui.S(22);
             Icons.Draw(g, "extension", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
             Ui.Text(g, "No extensions added yet", Theme.H3, Theme.Text, cr.Right + Ui.S(16), Ui.S(26), w - cr.Right - Ui.S(30));
@@ -208,7 +208,7 @@ namespace JoeBrowser
                 JBButton[] actions = { _addUrl, _addFolder, _addFile, _openFolder };
                 /* The bar wraps instead of running off the edge, and the scroller starts under
                    whatever height it ended up needing. */
-                int bandBottom = Ui.FlowButtons(actions, pad, Ui.S(6), bandW, Ui.S(10), Ui.S(33));
+                int bandBottom = Ui.FlowButtons(actions, pad, Ui.S(6), bandW, Ui.S(10), Ui.S(Theme.ControlHeight));
                 int gapBelow = Ui.S(10);
                 _host.SetBounds(0, bandBottom + gapBelow, Math.Max(1, Width),
                     Math.Max(1, Height - bandBottom - gapBelow));
@@ -332,8 +332,8 @@ namespace JoeBrowser
             /* One radius for both halves of the surface. Filling at 6 and stroking at 10 drew
                the border a couple of pixels proud of the fill at every corner, which is exactly
                the "not quite right" edge the whole redesign is about. */
-            Ui.Fill(g, r, Ui.S(10), cues ? Theme.PanelHover : Theme.Card);
-            Ui.Stroke(g, r, Ui.S(10), Theme.Line);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), cues ? Theme.PanelHover : Theme.Card);
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), Theme.Line);
 
             float chip = Ui.S(34);
             var cr = new RectangleF(Ui.S(16), (Height - chip) / 2f, chip, chip);
@@ -355,7 +355,7 @@ namespace JoeBrowser
             }
             else
             {
-                Ui.Fill(g, cr, Ui.S(7), Theme.AccentOnBg);
+                Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
                 float ic = Ui.S(18);
                 Icons.Draw(g, "extension", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
             }
@@ -378,8 +378,8 @@ namespace JoeBrowser
                 Math.Max(Ui.S(120), StoreRect.Left - x - Ui.S(16)));
 
             // quick actions
-            if (_hover == 2) Ui.Fill(g, StoreRect, Ui.S(4), Theme.HoverOverlay);
-            if (_hover == 1) Ui.Fill(g, DeleteRect, Ui.S(4), Theme.HoverOverlay);
+            if (_hover == 2) Ui.Fill(g, StoreRect, Ui.S(Theme.ButtonRadius), Theme.HoverOverlay);
+            if (_hover == 1) Ui.Fill(g, DeleteRect, Ui.S(Theme.ButtonRadius), Theme.HoverOverlay);
             float s = Ui.S(16);
             if (!string.IsNullOrWhiteSpace(Item.StoreUrl))
                 Icons.Draw(g, "external",
@@ -459,13 +459,13 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(8), _hover ? Theme.PanelHover : Theme.Panel);
-            Ui.Stroke(g, r, Ui.S(8), _hover ? Theme.AccentBorder : Theme.Line, 1f);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), _hover ? Theme.PanelHover : Theme.Panel);
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), _hover ? Theme.AccentBorder : Theme.Line, 1f);
             if (Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(8));
 
             float chip = Ui.S(34);
             var cr = new RectangleF(Ui.S(14), (Height - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(7), Theme.AccentOnBg);
+            Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
             float ic = Ui.S(18);
             Icons.Draw(g, _icon, new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
 
