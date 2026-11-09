@@ -138,14 +138,25 @@ namespace JoeBrowser
             ApplyLanguage();
         }
 
+        /// <summary>Set at construction, so the first log line measures the whole start.</summary>
+        private readonly System.Diagnostics.Stopwatch _startup = System.Diagnostics.Stopwatch.StartNew();
+
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
             ApplyScale();
             ResolveAutoBrowserKind();
+            long tDetect = _startup.ElapsedMilliseconds;
             ReloadCards(true);
+            long tCards = _startup.ElapsedMilliseconds;
             SetPage(0);
             LayoutAll();
+            /* One line per launch, so a slow start can be diagnosed from the log instead of
+               guessed at: reading the workspace, building the cards for it, and the first
+               layout are the three costs that grow with the number of profiles. */
+            Log.Info("Startup " + _startup.ElapsedMilliseconds + " ms: detect " + tDetect +
+                ", " + _cards.Count + " cards " + (tCards - tDetect) +
+                ", first layout " + (_startup.ElapsedMilliseconds - tCards));
             ShowInTaskbar = true;
             _search.Box.AccessibleName = "Search profiles";
 
@@ -3083,38 +3094,41 @@ namespace JoeBrowser
 
             foreach (var c in _cards.Values) c.Dispose();
             _cards.Clear();
-            _grid.Controls.Clear();
+            _grid.Batch(delegate { _grid.Controls.Clear(); });
 
             /* Worked out once per rebuild rather than per card: the ordering that decides which
                profiles a lapsed plan still covers is a sort of the whole list. */
             var locked = Entitlements.LockedProfiles(_profiles);
-            foreach (var p in _profiles)
+            _grid.Batch(delegate
             {
-                string id = p.Id;
-                var card = new ProfileCard
+                foreach (var p in _profiles)
                 {
-                    Model = p,
-                    Running = _sessions.ContainsKey(id),
-                    Launching = _launching.Contains(id),
-                    Locked = locked.Contains(id),
-                    AccessibleName = p.Name,
-                    AccessibleRole = AccessibleRole.PushButton
-                };
-                card.OpenRequested += delegate { OpenProfile(id); };
-                card.FocusRequested += delegate { FocusSession(id); };
-                card.CloseRequested += delegate { CloseSession(id); };
-                card.EditRequested += delegate { EditProfile(id); };
-                card.ProxyRequested += delegate { EditProfile(id, 3); };
-                card.RenameRequested += delegate { RenameProfile(id); };
-                card.ClearCacheRequested += delegate { ClearProfileData(id); };
-                card.LeakTestRequested += delegate { RunLeakTest(id); };
-                card.HistoryRequested += delegate { ShowProfileHistory(id); };
-                card.DuplicateRequested += delegate { DuplicateProfile(id); };
-                card.DeleteRequested += delegate { DeleteProfile(id); };
-                card.PickToggled += delegate { TogglePick(id, (ModifierKeys & Keys.Shift) != 0); };
-                _grid.Controls.Add(card);
-                _cards[id] = card;
-            }
+                    string id = p.Id;
+                    var card = new ProfileCard
+                    {
+                        Model = p,
+                        Running = _sessions.ContainsKey(id),
+                        Launching = _launching.Contains(id),
+                        Locked = locked.Contains(id),
+                        AccessibleName = p.Name,
+                        AccessibleRole = AccessibleRole.PushButton
+                    };
+                    card.OpenRequested += delegate { OpenProfile(id); };
+                    card.FocusRequested += delegate { FocusSession(id); };
+                    card.CloseRequested += delegate { CloseSession(id); };
+                    card.EditRequested += delegate { EditProfile(id); };
+                    card.ProxyRequested += delegate { EditProfile(id, 3); };
+                    card.RenameRequested += delegate { RenameProfile(id); };
+                    card.ClearCacheRequested += delegate { ClearProfileData(id); };
+                    card.LeakTestRequested += delegate { RunLeakTest(id); };
+                    card.HistoryRequested += delegate { ShowProfileHistory(id); };
+                    card.DuplicateRequested += delegate { DuplicateProfile(id); };
+                    card.DeleteRequested += delegate { DeleteProfile(id); };
+                    card.PickToggled += delegate { TogglePick(id, (ModifierKeys & Keys.Shift) != 0); };
+                    _grid.Controls.Add(card);
+                    _cards[id] = card;
+                }
+            });
 
             ApplySignatures();
 

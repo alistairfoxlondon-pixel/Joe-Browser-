@@ -2178,16 +2178,40 @@ namespace JoeBrowser
             LayoutGrid();
         }
 
+        /* A batch keeps adding and removing cards from laying the grid out once per card.
+           Rebuilding a workspace of sixty profiles added sixty cards, and each one ran the
+           whole layout over every card added so far: sixty passes of sixty SetBounds calls
+           while the window was opening. One pass at the end is the same result for a fraction
+           of the work, and it is what made opening a large workspace feel slow. */
+        private int _batch;
+
         protected override void OnControlAdded(ControlEventArgs e)
         {
             base.OnControlAdded(e);
-            LayoutGrid();
+            if (_batch == 0) LayoutGrid();
         }
 
         protected override void OnControlRemoved(ControlEventArgs e)
         {
             base.OnControlRemoved(e);
-            LayoutGrid();
+            if (_batch == 0) LayoutGrid();
+        }
+
+        /// <summary>Runs a block that changes many children, then lays the grid out once.</summary>
+        public void Batch(Action changes)
+        {
+            _batch++;
+            try
+            {
+                SuspendLayout();
+                try { changes(); }
+                finally { ResumeLayout(false); }
+            }
+            finally
+            {
+                _batch--;
+                if (_batch == 0) LayoutGrid();
+            }
         }
 
         /// <summary>
