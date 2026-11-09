@@ -751,13 +751,12 @@ namespace JoeBrowser
         /// <summary>Width needed for this button's icon and label, so text is never clipped.</summary>
         public int PreferredWidth(int minimum)
         {
-            using (var g = CreateGraphics())
-            {
-                Font f = Font ?? Theme.Body;
-                float w = Ui.Measure(g, Text ?? "", f).Width;
-                if (!string.IsNullOrEmpty(Icon) || !string.IsNullOrEmpty(BrandIcon)) w += Ui.S(16 + 8);
-                return Math.Max(minimum, (int)Math.Ceiling(w) + Ui.S(24));
-            }
+            /* Measured on the shared ruler: CreateGraphics() on every button in a footer is a
+               device context per button, per layout pass. The measurement is the same. */
+            Font f = Font ?? Theme.Body;
+            float w = Ui.Measure(Ui.Ruler, Text ?? "", f).Width;
+            if (!string.IsNullOrEmpty(Icon) || !string.IsNullOrEmpty(BrandIcon)) w += Ui.S(16 + 8);
+            return Math.Max(minimum, (int)Math.Ceiling(w) + Ui.S(24));
         }
 
         public JBButton()
@@ -2274,7 +2273,7 @@ namespace JoeBrowser
                 {
                     using (var g = CreateGraphics())
                     {
-                        int avail = Math.Max(Ui.S(60), Width - Ui.S(56));
+                        int avail = Math.Max(Ui.S(60), Width - Ui.S(56) - Ui.S(40));
                         Size sz = TextRenderer.MeasureText(g, _text, Font, new Size(avail, 4000),
                             TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
                         lines = (int)Math.Round(sz.Height / (double)lineH);
@@ -2287,7 +2286,7 @@ namespace JoeBrowser
                with nothing to say there was more. Five lines is enough for every message the app
                shows, and the timer still dismisses it. */
             _lines = Math.Max(1, Math.Min(5, lines));
-            int target = Ui.S(44) + (_lines - 1) * lineH;
+            int target = Ui.S(52) + (_lines - 1) * lineH;
             if (Height != target) Height = target;
             if (_bottom > 0) Top = _bottom - Height;
         }
@@ -2302,35 +2301,39 @@ namespace JoeBrowser
         {
             var g = e.Graphics;
             Ui.Quality(g);
+            /* A floating panel, not a tinted strip. The bar is a solid raised surface with a
+               hairline, a round icon chip in the status colour and the message beside it, so a
+               warning for one second reads as a warning and not as a coloured background with
+               text on it. The 4 px radius was the giveaway that it was a rectangle. */
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            float rad = Ui.S(4);
+            float rad = Ui.S(12);
+            Ui.Shadow(g, r, rad, 2, Theme.Dark);
+            Ui.Fill(g, r, rad, Theme.Dark ? Theme.Panel : Theme.Card);
+            Ui.Stroke(g, r, rad, Theme.Line);
 
-            // windows-ui alert bar: a 1px tinted surface with a leading status icon.
-            Color wash = _kind == ToastKind.Error ? Color.FromArgb(0xE8, 0x47, 0x56)
-                : _kind == ToastKind.Warn ? Color.FromArgb(0xF2, 0xA8, 0x1B)
-                : _kind == ToastKind.Info ? Color.FromArgb(0x60, 0xCD, 0xFF) : Color.FromArgb(0x57, 0xE8, 0x4A);
-            Ui.Fill(g, r, rad, Ui.Blend(Theme.Dark ? Theme.Panel : Theme.Bg, wash, Theme.Dark ? 0.18f : 0.14f));
-            Ui.Stroke(g, r, rad, Color.FromArgb(Theme.Dark ? 38 : 26, Theme.Text), 1f);
-
+            Color tint = _kind == ToastKind.Error ? Theme.Danger
+                : _kind == ToastKind.Warn ? Theme.Warn
+                : _kind == ToastKind.Info ? Theme.Accent : Theme.Success;
             string icon = _kind == ToastKind.Error ? "error"
                 : _kind == ToastKind.Warn ? "alert"
                 : _kind == ToastKind.Info ? "info" : "check-circle";
-            Color tint = _kind == ToastKind.Error ? Theme.Danger
-                : _kind == ToastKind.Warn ? Color.FromArgb(0xF2, 0xA8, 0x1B)
-                : _kind == ToastKind.Info ? Theme.Accent : Theme.Success;
-            float ic = Ui.S(16);
-            Icons.Draw(g, icon, new RectangleF(Ui.S(14), (Height - ic) / 2f, ic, ic), tint);
+            float chip = Ui.S(30);
+            var cr = new RectangleF(Ui.S(12), (Height - chip) / 2f, chip, chip);
+            Ui.Fill(g, cr, chip / 2f, Color.FromArgb(Theme.Dark ? 40 : 28, tint));
+            float ic = Ui.S(17);
+            Icons.Draw(g, icon, new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), tint);
 
+            float textX = cr.Right + Ui.S(12);
             float lineH = Font.GetHeight(g);
             if (_lines <= 1)
-                Ui.Text(g, _text, Font, Theme.Text, Ui.S(40), (Height - lineH) / 2f, Width - Ui.S(56));
+                Ui.Text(g, _text, Font, Theme.Text, textX, (Height - lineH) / 2f, Width - textX - Ui.S(32));
             else
                 /* WordBreak without EndEllipsis draws nothing for the part that does not fit, so
                    a message one line longer than the box silently loses its tail. EndEllipsis
                    cannot be combined with WordBreak, so the width is what is trusted here and the
                    line count above is measured from the same font and width. */
-                Ui.Text(g, _text, Font, Theme.Text, Ui.S(40), (Height - lineH * _lines) / 2f,
-                    Math.Max(Ui.S(80), Width - Ui.S(56)), "left", _lines);
+                Ui.Text(g, _text, Font, Theme.Text, textX, (Height - lineH * _lines) / 2f,
+                    Math.Max(Ui.S(80), Width - textX - Ui.S(32)), "left", _lines);
 
             float close = Ui.S(16);
             Icons.Draw(g, "close", new RectangleF(Width - Ui.S(14) - close, (Height - close) / 2f, close, close),

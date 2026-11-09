@@ -1027,9 +1027,33 @@ namespace JoeBrowser
             return lines;
         }
 
+        private static Graphics _ruler;
+
+        /// <summary>
+        /// A measuring surface that is reused instead of one per call.
+        ///
+        /// Ui.Measure was called with whatever Graphics a caller happened to have; on a control
+        /// that meant CreateGraphics(), which allocates a device context and releases it on every
+        /// label. A layout pass with sixty labels then spent its time in GDI handle churn, which is
+        /// exactly the hitch a user feels when a page opens. One process wide surface does the
+        /// same measurement with no allocation.
+        /// </summary>
+        public static Graphics Ruler
+        {
+            get
+            {
+                if (_ruler == null)
+                {
+                    try { _ruler = Graphics.FromHwnd(IntPtr.Zero); } catch { }
+                }
+                return _ruler;
+            }
+        }
+
         public static SizeF Measure(Graphics g, string text, Font font)
         {
             if (string.IsNullOrEmpty(text)) return SizeF.Empty;
+            if (g == null) g = Ruler;
             Size s = TextRenderer.MeasureText(g, text, font, new Size(4000, 4000),
                 TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
             return new SizeF(s.Width, s.Height);

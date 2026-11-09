@@ -265,8 +265,8 @@ namespace JoeBrowser
             {
                 int bw = _remove.PreferredWidth(Ui.S(96));
                 if (bw > Math.Max(Ui.S(40), Width - Ui.S(28))) bw = Math.Max(Ui.S(40), Width - Ui.S(28));
-                _remove.SetBounds(Math.Max(Ui.S(6), Width - bw - Ui.S(12)),
-                    (RowHeight - Ui.S(28)) / 2, bw, Ui.S(28));
+                _remove.SetBounds(Math.Max(Ui.S(6), Width - bw - Ui.S(14)),
+                    (RowHeight - Ui.S(30)) / 2, bw, Ui.S(30));
                 Invalidate();
             }
 

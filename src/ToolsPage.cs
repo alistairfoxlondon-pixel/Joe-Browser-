@@ -252,13 +252,15 @@ namespace JoeBrowser
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            try { _measure = CreateGraphics(); } catch { _measure = null; }
+            try { _measure = Ui.Ruler; } catch { _measure = null; }
             LayoutTiles();
         }
 
         protected override void OnHandleDestroyed(EventArgs e)
         {
-            if (_measure != null) { _measure.Dispose(); _measure = null; }
+            /* The ruler belongs to Ui and outlives this control: releasing it here disposed a
+               surface every other page was measuring with. Only the reference is dropped. */
+            _measure = null;
             base.OnHandleDestroyed(e);
         }
 
