@@ -4280,8 +4280,8 @@ namespace JoeBrowser
 
             float tx = mark.Right + Ui.S(18);
             float textW = Math.Max(Ui.S(120), colW - (tx - card.X) - Ui.S(28));
-            float blockH = dispH + Ui.S(4) + subH + Ui.S(4) + pathH;
-            float ty = card.Y + (idH - blockH) / 2f;
+            float idBlockH = dispH + Ui.S(4) + subH + Ui.S(4) + pathH;
+            float ty = card.Y + (idH - idBlockH) / 2f;
             Ui.Text(g, "Joe Browser", Theme.Display, Theme.Text, tx, ty, textW);
             Ui.Text(g, L10n.T("sub.about"), Theme.Small, Theme.TextDim, tx, ty + dispH + Ui.S(4), textW);
             Ui.Text(g, AppPaths.Root, Theme.Caption, Theme.TextFaint, tx, ty + dispH + Ui.S(4) + subH + Ui.S(4), textW);
