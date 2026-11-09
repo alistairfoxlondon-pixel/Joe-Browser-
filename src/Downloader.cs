@@ -444,9 +444,9 @@ namespace JoeBrowser
             Ui.Text(g, (int)_pct + "%", Theme.SmallBold, Theme.Text, w - Ui.S(76), Ui.S(46), Ui.S(52), "right");
 
             var barRect = new RectangleF(Ui.S(24), Ui.S(74), w - Ui.S(48), Ui.S(4));
-            Ui.Fill(g, barRect, Ui.S(2), Theme.Panel2);
+            Ui.Fill(g, barRect, Ui.S(Theme.ButtonRadius), Theme.Panel2);
             if (_pct > 0)
-                Ui.Fill(g, new RectangleF(barRect.X, barRect.Y, (float)barRect.Width * (_pct / 100f), barRect.Height), Ui.S(2), Theme.Accent);
+                Ui.Fill(g, new RectangleF(barRect.X, barRect.Y, (float)barRect.Width * (_pct / 100f), barRect.Height), Ui.S(Theme.ButtonRadius), Theme.Accent);
         }
     }
 }

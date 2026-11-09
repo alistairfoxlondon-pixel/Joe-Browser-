@@ -277,49 +277,58 @@ namespace JoeBrowser
                         map[key ?? ""] = n + 1;
                         return n + 1;
                     };
+                    /* The version a profile reports has to be the version of the binary that answers
+                       the request. The previous round got this backwards: it gave profiles builds of
+                       other majors so a workspace would look diverse, and ipfighter called that
+                       fingerprint masking - correctly, because the claim and the engine can never
+                       agree. Asserted here in both directions. */
                     try
                     {
                         var workspace = new List<Profile>();
+                        var info = new BrowserInfo
+                        {
+                            Name = "self test",
+                            Version = "141.0.7390.122",
+                            MajorVersion = 141,
+                            Path = System.IO.Path.Combine(sandbox, "chrome.exe")
+                        };
                         for (int i = 0; i < 12; i++)
                         {
                             var p = new Profile { Name = "version test " + (i + 1) };
                             FingerprintIdentity.Comparison c;
                             FingerprintIdentity.MakeUnique(p.Fp, "System default", p.Proxy, workspace, out c);
                             string vnote;
-                            BrowserVersions.Assign(p, workspace, out vnote);
-                            FingerprintFactory.ResolveUserAgent(p.Fp, new BrowserInfo
-                            {
-                                Name = "self test",
-                                Version = "157.0.8103.38",
-                                MajorVersion = 157,
-                                Path = System.IO.Path.Combine(sandbox, "chrome.exe")
-                            });
+                            BrowserVersions.Assign(p, workspace, info.Version, out vnote);
+                            FingerprintFactory.ResolveUserAgent(p.Fp, info);
                             workspace.Add(p);
                         }
-                        var majors = new Dictionary<string, int>(StringComparer.Ordinal);
-                        var builds = new Dictionary<string, int>(StringComparer.Ordinal);
-                        var agents = new Dictionary<string, int>(StringComparer.Ordinal);
                         foreach (var p in workspace)
                         {
                             if (!BrowserVersions.IsReal(p.BrowserVersion))
                                 sb.Append(" [a profile reports " + (p.BrowserVersion ?? "no build") + ", which is not a build a browser shipped]");
+                            if (p.BrowserVersion != info.Version)
+                                sb.Append(" [a profile reports " + p.BrowserVersion + " while the binary it runs is " + info.Version + "]");
                             if (p.Fp.BrowserVersion != p.BrowserVersion)
                                 sb.Append(" [the profile and its fingerprint name different builds]");
-                            string uaBuild = BrowserVersions.FromUserAgent(p.Fp.UserAgent);
-                            /* The reduced user agent carries the major and nothing else, which
-                               is exactly what a checker prints. */
                             int uaMajor = BrowserVersions.MajorFromUserAgent(p.Fp.UserAgent);
-                            if (uaMajor != BrowserVersions.MajorOf(p.BrowserVersion))
-                                sb.Append(" [a profile's user agent says " + uaMajor + " but it reports " + p.BrowserVersion + "]");
-                            if (p.Fp.UserAgent != null && p.Fp.UserAgent.IndexOf("157.0.0.0", StringComparison.Ordinal) >= 0)
-                                sb.Append(" [a profile still claims the installed browser's major]");
-                            Count(majors, BrowserVersions.MajorOf(p.BrowserVersion).ToString());
-                            Count(builds, p.BrowserVersion);
-                            Count(agents, p.Fp.UserAgent ?? "");
+                            if (uaMajor != 141)
+                                sb.Append(" [a profile running 141 sends a user agent naming " + uaMajor + "]");
                         }
-                        if (majors.Count < 10) sb.Append(" [12 profiles only cover " + majors.Count + " majors]");
-                        if (builds.Count != 12) sb.Append(" [12 profiles share builds: " + builds.Count + " distinct]");
-                        if (agents.Count != 12) sb.Append(" [12 profiles share user agents: " + agents.Count + " distinct]");
+
+                        /* A pinned kernel IS a different executable, so it may - and must - report a
+                           different build. That is where a workspace's version diversity comes from. */
+                        var pinnedProfile = new Profile { Fp = new FingerprintConfig(), KernelFullVersion = "143.0.7499.41" };
+                        string pnote;
+                        BrowserVersions.Assign(pinnedProfile, workspace, info.Version, out pnote);
+                        if (pinnedProfile.BrowserVersion != "143.0.7499.41")
+                            sb.Append(" [a pinned kernel does not report its own build]");
+
+                        /* And with no binary known, nothing may be invented. */
+                        var noBinary = new Profile { Fp = new FingerprintConfig() };
+                        string unote;
+                        BrowserVersions.Assign(noBinary, new List<Profile>(), "", out unote);
+                        if (!BrowserVersions.IsReal(noBinary.BrowserVersion))
+                            sb.Append(" [a profile with no binary got an unreal build]");
 
                         /* And a removal of a shipped extension has to survive the next start. */
                         string shipped = ExtensionCatalog.DefaultStoreExtensions[0][0];
@@ -337,6 +346,28 @@ namespace JoeBrowser
                     {
                         sb.Append(" [version checks threw " + ex.GetType().Name + ": " + ex.Message + "]");
                     }
+
+                    /* Every routed rectangle in the app is square. Asserted as a swept range rather
+                       than a constant, because the sweep is what a regression would look like: a
+                       radius of 1 or 2 still rounds the corners of every card in the app. */
+                    try
+                    {
+                        {
+                            foreach (float r in new[] { 0f, 0.4f, 0.5f })
+                            {
+                                var box = new System.Drawing.RectangleF(0, 0, 40, 20);
+                                using (var path = Ui.Round(box, r))
+                                {
+                                    /* A square corner keeps all four box edges; a rounded one cuts
+                                       them away from the corners. */
+                                    var b = path.GetBounds();
+                                    if (Math.Abs(b.Width - box.Width) > 0.6f || Math.Abs(b.Height - box.Height) > 0.6f)
+                                        sb.Append(" [a surface is rounded at radius " + r + "]");
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex) { sb.Append(" [radius check threw: " + ex.Message + "]"); }
 
                     var saved = new Profile { Name = "self test save" };
                     store.Save(saved);
@@ -537,6 +568,21 @@ namespace JoeBrowser
                    a profile launched straight from a fresh install had the folders on disk and
                    the catalog listing them as absent. Listing is cheap and idempotent. */
                 try { ExtensionCatalog.ListPresentDefaults(); } catch (Exception ex) { Log.Error("Default extensions", ex); }
+                /* And fetch whatever is not there, off the launch path. The two shipped store
+                   extensions were downloaded from the browser launch path, which meant a fifteen
+                   second timeout in front of every launch and a silent failure behind a proxy -
+                   reported, accurately, as "the two extensions are never installed". One
+                   background attempt per process, started here, with the Extensions page able to
+                   retry at once if it fails. */
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                {
+                    try
+                    {
+                        ExtensionCatalog.EnsureDefaults();
+                        ExtensionCatalog.ListPresentDefaults();
+                    }
+                    catch (Exception ex) { Log.Error("Default extension fetch", ex); }
+                });
                 /* The account gate only appears until the first account exists. After that the
                    app remembers the sign-in for this Windows user (DPAPI-protected session
                    marker), so daily use stays a double-click. */

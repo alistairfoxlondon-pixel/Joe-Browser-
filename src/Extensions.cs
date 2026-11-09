@@ -282,10 +282,12 @@ namespace JoeBrowser
             var result = new List<string>();
             if (!masterSwitch || tools == null) return result;
             EnsureAll();
-            /* The two store extensions requested for Chrome and Brave are fetched once into
-               the managed library. They load for every Chromium profile regardless of the
-               "custom extensions" switch, because they are shipped defaults, not user imports. */
-            try { ExtensionCatalog.EnsureDefaults(); } catch (Exception ex) { Log.Error("Default extensions", ex); }
+            /* The two store extensions requested for Chrome and Brave load for every Chromium
+               profile regardless of the "custom extensions" switch, because they are shipped
+               defaults rather than user imports. They are NOT downloaded from here: this is the
+               launch path, and a fifteen second HTTP timeout in front of every launch is why the
+               pair often looked missing. The download runs off the launch path from Start(), and
+               the Extensions page offers an immediate retry. */
             foreach (string folder in ExtensionCatalog.DefaultFolders()) Add(result, folder);
             if (tools.HumanPaste) Add(result, Dir(HumanPaste));
             /* The proxy watcher extension is always loaded so that adding a proxy to a running

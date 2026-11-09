@@ -750,13 +750,27 @@ namespace JoeBrowser
 
         public static event EventHandler ModeChanged;
 
+        /// <summary>True while a theme change is being applied, so painted controls can hold.</summary>
+        public static bool Restyling { get; private set; }
+
         public static void SetMode(bool dark)
         {
             if (Dark == dark) return;
             Dark = dark;
             P = dark ? DarkPal : LightPal;
             var h = ModeChanged;
-            if (h != null) h(null, EventArgs.Empty);
+            if (h == null) return;
+            /* One window, one repaint.
+            
+               Every control on the page used to repaint itself the moment it heard the mode
+               changed - a hundred Invalidate calls, each painting against a palette the next one
+               was about to contradict - and that is the flash and the half-styled frame reported
+               when switching between light and dark. The listeners now run with repainting
+               suppressed, and the invalidation happens once, at the end, from the top of each
+               window. A single paint cannot show a mixture of two themes. */
+            Restyling = true;
+            try { h(null, EventArgs.Empty); }
+            finally { Restyling = false; }
         }
 
         public static void Restyle(Control root)

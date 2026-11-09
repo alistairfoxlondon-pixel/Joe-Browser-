@@ -206,6 +206,48 @@ namespace JoeBrowser
             AutoPopDelay = 7000
         };
 
+        /// <summary>
+        /// Tooltips redraw in the system's own colours, so in Night Mode they appeared as a pale
+        /// yellow rectangle with black text - the one surface in the whole app that ignored the
+        /// theme, and the thing that looked most broken about a dark window. Drawing them here
+        /// keeps them in the palette: a card surface, the hairline, and the app's own type.
+        /// </summary>
+        static ToolTips()
+        {
+            _tip.OwnerDraw = true;
+            _tip.Popup += delegate(object sender, PopupEventArgs e)
+            {
+                /* A tooltip must never be able to stop the app: this runs on the UI thread while
+                   the pointer is moving, and an exception here would surface as a crash while
+                   hovering a button. */
+                try
+                {
+                    if (e.AssociatedControl == null || !e.AssociatedControl.IsHandleCreated) return;
+                    string text = _tip.GetToolTip(e.AssociatedControl);
+                    using (var g = e.AssociatedControl.CreateGraphics())
+                    {
+                        Size size = TextRenderer.MeasureText(g, text ?? "", Theme.Body,
+                            new Size(Ui.S(360), int.MaxValue),
+                            TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
+                        e.ToolTipSize = new Size(size.Width + Ui.S(20), size.Height + Ui.S(14));
+                    }
+                }
+                catch { }
+            };
+            _tip.Draw += delegate(object sender, DrawToolTipEventArgs e)
+            {
+                var g = e.Graphics;
+                Ui.Quality(g);
+                var box = new RectangleF(0.5f, 0.5f, e.Bounds.Width - 1.5f, e.Bounds.Height - 1.5f);
+                Ui.Fill(g, box, Ui.S(Theme.CardRadius), Theme.Card);
+                Ui.Stroke(g, box, Ui.S(Theme.CardRadius), Theme.Line);
+                TextRenderer.DrawText(g, e.ToolTipText ?? "", Theme.Body,
+                    new Rectangle(e.Bounds.X + Ui.S(10), e.Bounds.Y + Ui.S(7),
+                        e.Bounds.Width - Ui.S(20), e.Bounds.Height - Ui.S(14)),
+                    Theme.Text, TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak | TextFormatFlags.Left);
+            };
+        }
+
         public static void Attach(Control owner, string text)
         {
             if (owner == null || string.IsNullOrEmpty(text)) return;
@@ -307,6 +349,43 @@ namespace JoeBrowser
 
         private readonly EventHandler _onModeChanged;
 
+        /// <summary>
+        /// Applies a theme change to this window in one step: repainting is stopped over the
+        /// whole window, every control is re-styled, the layout is redone and one paint follows.
+        /// Controls that invalidate themselves during the walk are therefore not painted against
+        /// a palette the next control is about to change - which is what the flash was.
+        /// </summary>
+        private void ApplyModeChange()
+        {
+            bool frozen = false;
+            try
+            {
+                if (IsHandleCreated)
+                {
+                    try { Native.SendMessage(Handle, 0x000B, IntPtr.Zero, IntPtr.Zero); frozen = true; } catch { }
+                }
+                ReStyle();
+                Theme.Restyle(this);
+            }
+            finally
+            {
+                if (frozen && IsHandleCreated)
+                {
+                    try { Native.SendMessage(Handle, 0x000B, (IntPtr)1, IntPtr.Zero); } catch { }
+                }
+                /* The caption bar and the scrollbars of a themed dialog are Windows' own, so the
+                   DWM attributes have to be re-applied on a mode change or the window keeps a dark
+                   border and a light body until it is reopened. */
+                if (IsHandleCreated)
+                {
+                    try { Native.WindowBorderColor(Handle, Theme.Line); } catch { }
+                    try { Native.ImmersiveDarkMode(Handle, Theme.Dark); } catch { }
+                }
+                Invalidate(true);
+                Update();
+            }
+        }
+
         public JBForm()
         {
             FormBorderStyle = FormBorderStyle.None;
@@ -320,7 +399,7 @@ namespace JoeBrowser
             Icon = AppIcon.Window;
             ShowIcon = true;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
-            _onModeChanged = delegate { ReStyle(); };
+            _onModeChanged = delegate { ApplyModeChange(); };
             Theme.ModeChanged += _onModeChanged;
             Disposed += delegate { Theme.ModeChanged -= _onModeChanged; };
         }
@@ -589,7 +668,11 @@ namespace JoeBrowser
         private static void Round(ToolStrip strip)
         {
             if (strip.Width <= 0 || strip.Height <= 0) return;
-            using (var path = Ui.Round(new RectangleF(0, 0, strip.Width, strip.Height), Ui.S(8)))
+            /* Square, like every other surface. A window region is also the one place a mistake is
+               visible for a whole second: while a context menu is still a plain rectangle the
+               default grey border shows at its edge, which is the pale line that flashed when a
+               menu opened before the region was applied. */
+            using (var path = Ui.Round(new RectangleF(0, 0, strip.Width, strip.Height), Ui.S(Theme.ButtonRadius)))
                 strip.Region = new Region(path);
         }
 
@@ -861,7 +944,7 @@ namespace JoeBrowser
                 if (Selected)
                 {
                     float barH = Height - Ui.S(16);
-                    Ui.Fill(g, new RectangleF(0, Ui.S(Theme.ButtonRadius), Ui.S(3), barH), Ui.S(1.5f), Theme.Accent);
+                    Ui.Fill(g, new RectangleF(0, Ui.S(Theme.ButtonRadius), Ui.S(3f), barH), Ui.S(1.5f), Theme.Accent);
                 }
             }
             else
@@ -907,7 +990,7 @@ namespace JoeBrowser
                 {
                     var outer = new RectangleF(r.X - Ui.S(2.5f), r.Y - Ui.S(2.5f),
                         r.Width + Ui.S(5f), r.Height + Ui.S(5f));
-                    Ui.Stroke(g, outer, rad + Ui.S(2.5f), Ui.Blend(Theme.Accent, Theme.Text, 0.35f), Ui.S(1.5f));
+                    Ui.Stroke(g, outer, rad + Ui.S(2.5f), Ui.Blend(Theme.Accent, Theme.Text, 0.35f), Ui.S(1.4f));
                 }
                 else Ui.FocusRing(g, r, rad);
             }
@@ -1230,7 +1313,7 @@ namespace JoeBrowser
             Ui.Fill(g, r, rad, Theme.Input);
             if (Tapped)
             {
-                Ui.Stroke(g, r, rad, Theme.Accent, Ui.S(1.5f));
+                Ui.Stroke(g, r, rad, Theme.Accent, Ui.S(Theme.ButtonRadius));
             }
             else
             {
@@ -1922,14 +2005,14 @@ namespace JoeBrowser
             };
         }
 
-        private bool ShowBar
-        {
-            get
-            {
-                return MaxOffset > 0 &&
-                       (_thumbHover || _dragging || (DateTime.UtcNow - _barShownAt).TotalMilliseconds < 900);
-            }
-        }
+        /// <summary>
+        /// True whenever the content is taller than the viewport - and that is all. The bar used
+        /// to appear only while the user was scrolling and fade a second later, so a page that
+        /// needed scrolling looked exactly like a page that did not, and a cut-off list read as
+        /// "the app is truncating my data" rather than "there is more below". A persistent bar is
+        /// also what makes the page feel responsive: it answers on the first frame.
+        /// </summary>
+        private bool ShowBar { get { return MaxOffset > 0; } }
 
         protected override void Dispose(bool disposing)
         {
@@ -2034,7 +2117,7 @@ namespace JoeBrowser
             if (hit.IsEmpty) return;
             // The visible bar is inset inside the grab zone so the two never disagree.
             var bar = new RectangleF(Width - Ui.S(9), hit.Y, Ui.S(5), hit.Height);
-            Ui.Fill(e.Graphics, bar, Ui.S(2.5f), _dragging || _thumbHover ? Theme.Accent : Theme.Line);
+            Ui.Fill(e.Graphics, bar, Ui.S(Theme.ButtonRadius), _dragging || _thumbHover ? Theme.Accent : Theme.Line);
         }
 
         /// <summary>Thumb geometry, shared by painting and hit-testing so the grab zone matches the bar.</summary>
@@ -2532,7 +2615,7 @@ namespace JoeBrowser
             Ui.Text(g, _checked ? NightText : DayText, Theme.Body, Theme.Text,
                 Ui.S(47), (Height - Theme.Body.GetHeight(g)) / 2f, Width - Ui.S(58));
 
-            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(4));
+            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(Theme.ButtonRadius));
         }
     }
 
@@ -2690,22 +2773,22 @@ namespace JoeBrowser
                         textLeft, y + rowH - Theme.Caption.GetHeight(g) - Ui.S(6), textW);
             }
 
-            // The scroll indicator is drawn over the rows, never beside them, and only while the
-            // list is being scrolled or the pointer is on the thumb.
-            bool showBar = MaxScroll > 0 &&
-                           (_thumbHover || _dragging || (DateTime.UtcNow - _barShownAt).TotalMilliseconds < 900);
+            /* Always shown when the list is longer than the box. A hint that appears only while
+               scrolling cannot tell a user that a list is long before they try to scroll it, and
+               a cut-off list with no bar is read as lost data. */
+            bool showBar = MaxScroll > 0;
             if (showBar)
             {
                 var hit = ThumbRect();
                 if (!hit.IsEmpty)
                 {
                     var bar = new RectangleF(Width - Ui.S(9), hit.Y, Ui.S(5), hit.Height);
-                    Ui.Fill(g, bar, Ui.S(2.5f), _dragging || _thumbHover ? Theme.Accent : Theme.Line);
+                    Ui.Fill(g, bar, Ui.S(Theme.ButtonRadius), _dragging || _thumbHover ? Theme.Accent : Theme.Line);
                 }
             }
 
             if (Focused && Ui.FocusCues(this))
-                Ui.FocusRing(g, new RectangleF(0.5f, 0.5f, Math.Max(1f, Width - 1f), Math.Max(1f, Height - 1f)), Ui.S(4));
+                Ui.FocusRing(g, new RectangleF(0.5f, 0.5f, Math.Max(1f, Width - 1f), Math.Max(1f, Height - 1f)), Ui.S(Theme.ButtonRadius));
         }
 
         private RectangleF ThumbRect()

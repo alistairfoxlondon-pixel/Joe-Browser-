@@ -48,6 +48,8 @@ namespace JoeBrowser
         private JBToggle _canvas, _audio, _fonts, _dnt, _battery, _autoMatch, _autoUa;
         private JBButton _regen, _browse, _testBtn, _save, _cancel, _getBrowser, _openExtFolder, _random;
         private JBToggle _toolHumanPaste, _toolProxyWatch, _toolRightClick, _toolAllowShift;
+        /// <summary>Wipe cookies and site data when this profile's browser closes.</summary>
+        private JBToggle _freshSession;
         /* One line under the switches that says how to use the two tools a user cannot find by
            clicking around: the paste that waits in the clipboard, and the menu that a page had
            taken away. It is a label rather than a paragraph, and it changes with the switches. */
@@ -890,6 +892,9 @@ namespace JoeBrowser
             _toolProxyWatch = new JBToggle { Text = "Proxy IP change & offline alerts", Checked = _tools.ProxyWatch };
             _toolRightClick = new JBToggle { Text = "Enable right click & copy", Checked = _tools.EnableRightClick };
             _toolAllowShift = new JBToggle { Text = "Also unlock text selection", Checked = _tools.UnlockSelection };
+            _freshSession = new JBToggle { Text = "Clear cookies and site data when the browser closes", Checked = _profile.FreshSession };
+            _tabTools.Controls.Add(_freshSession);
+
             _toolHow = new JBLabel(LabelRole.Faint, "");
             _toolHow.Wrap = true;
             _toolHow.TextAlign = ContentAlignment.TopLeft;
@@ -939,6 +944,7 @@ namespace JoeBrowser
                 LayoutAll();
             };
             _toolHumanPaste.CheckedChanged += delegate { UpdateToolHow(); LayoutAll(); };
+            _freshSession.CheckedChanged += delegate { UpdateToolHow(); LayoutAll(); };
             _toolProxyWatch.CheckedChanged += delegate { UpdateToolHow(); LayoutAll(); };
             UpdateToolHow();
         }
@@ -959,6 +965,8 @@ namespace JoeBrowser
                 lines.Add("Right click & copy: the menu and text selection work again on sites that block them, and copy is never stopped.");
             if (_toolProxyWatch.Checked)
                 lines.Add("IP change & offline alerts: checked in the page while a profile is open, and the browser shows a notification when your exit IP changes.");
+            if (_freshSession != null && _freshSession.Checked)
+                lines.Add("Fresh session: cookies, storage and cache are deleted the moment the browser closes, so the next open starts signed out.");
             _toolHow.Text = string.Join("\r\n", lines.ToArray());
             _toolHow.Visible = lines.Count > 0;
         }
@@ -1500,6 +1508,13 @@ namespace JoeBrowser
             }
             y += ((placed + cols - 1) / cols) * (th + Ui.S(6)) + Ui.S(2);
 
+            if (_freshSession != null)
+            {
+                _freshSession.SetBounds(0, y, cw, th);
+                _freshSession.Visible = true;
+                y += th + Ui.S(8);
+            }
+
             if (_toolHow != null && _toolHow.Visible)
             {
                 int howH = HowHeight(cw);
@@ -1758,6 +1773,7 @@ namespace JoeBrowser
             _tools.UnlockSelection = _toolAllowShift.Checked;
             _tools.CustomExtensions = _customExt.Value.Trim();
             _profile.Tools = _tools;
+            _profile.FreshSession = _freshSession.Checked;
 
             Result = _profile;
             DialogResult = DialogResult.OK;

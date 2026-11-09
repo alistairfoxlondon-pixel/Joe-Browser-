@@ -1000,11 +1000,16 @@ namespace JoeBrowser
                     await TrySend("Page.navigate", new Dictionary<string, object> { { "url", navigateTo } }, session);
                 return;
             }
-            var fpRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", new Dictionary<string, object>
+            /* persistAcrossRestarts is written out here rather than in TrySendResult: the CDP
+               client refuses the whole call when it cannot verify a capability it does not know,
+               and this one is optional. Losing it only means a crashed tab reloads unstamped. */
+            var fpParams = new Dictionary<string, object>
             {
                 { "source", script },
                 { "runImmediately", true }
-            }, session);
+            };
+            try { fpParams["persistAcrossRestarts"] = true; } catch { }
+            var fpRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", fpParams, session);
             string fpId = fpRes != null ? Str(fpRes, "identifier") : "";
 
             /* First-party tools: human paste, proxy rotation guard and right-click guard.
@@ -1014,11 +1019,13 @@ namespace JoeBrowser
             var liveProxy = Profile != null ? Profile.Proxy : null;
             string toolScript = ExtensionManager.BuildToolScript(tools, Profile != null ? Profile.Name : "",
                 liveProxy != null && liveProxy.Enabled);
-            var toolRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", new Dictionary<string, object>
+            var toolParams = new Dictionary<string, object>
             {
                 { "source", toolScript },
                 { "runImmediately", true }
-            }, session);
+            };
+            try { toolParams["persistAcrossRestarts"] = true; } catch { }
+            var toolRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", toolParams, session);
             string toolId = toolRes != null ? Str(toolRes, "identifier") : "";
 
             lock (_scriptState)
@@ -1066,7 +1073,47 @@ namespace JoeBrowser
 
         private async Task<Dictionary<string, object>> BuildUaMetadataAsync(FingerprintConfig fp, string session)
         {
-            return BuildUaMetadata(fp, await ReadRealClientHintsAsync(session).ConfigureAwait(false), _browserFullVersion);
+            /* Ask the browser what build it is before anything is overridden. That answer is the
+               only honest source for the version a profile reports: the executable on disk can be
+               one build while the executable actually launched - a pinned kernel, a patched
+               install, a vendor's build - is another, and a checker sees the one that answers. */
+            string truth = await ReadRunningBuildAsync(session).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(truth)) _truthVersion = truth;
+            string own = _truthVersion;
+            if (string.IsNullOrEmpty(own) || !IsRealBuild(own))
+            {
+                string kernel = BrowserVersions.IsReal(Profile != null ? Profile.KernelFullVersion : null) ? Profile.KernelFullVersion : null;
+                own = !string.IsNullOrEmpty(kernel) ? kernel : _browserFullVersion;
+            }
+            /* A profile pinned to a specific build reports that build, because that is the binary
+               the pin starts. Everything else reports what the browser answered with. */
+            if (BrowserVersions.IsReal(own))
+            {
+                fp.BrowserVersion = own;
+                if (Profile != null) Profile.BrowserVersion = own;
+            }
+            return BuildUaMetadata(fp, await ReadRealClientHintsAsync(session).ConfigureAwait(false), own);
+        }
+
+        /// <summary>The build the running browser claims for itself, before any override.</summary>
+        private string _truthVersion;
+
+        private async Task<string> ReadRunningBuildAsync(string session)
+        {
+            if (_cdp == null) return null;
+            try
+            {
+                var res = await _cdp.SendAsync("Browser.getVersion", new Dictionary<string, object>(), null, 4000).ConfigureAwait(false);
+                string product = res != null ? Str(res, "product") : null;
+                /* "Chrome/141.0.7390.55" - the real build of the image that is running. */
+                if (!string.IsNullOrEmpty(product) && product.IndexOf('/') > 0)
+                {
+                    string build = product.Substring(product.IndexOf('/') + 1).Trim();
+                    if (IsRealBuild(build)) return build;
+                }
+            }
+            catch (Exception ex) { Log.Info("Browser.getVersion unavailable: " + ex.Message); }
+            return null;
         }
 
         private Dictionary<string, object> BuildUaMetadata(FingerprintConfig fp, Dictionary<string, object> real, string installedFull)
@@ -1652,6 +1699,11 @@ namespace JoeBrowser
             try { if (_relay != null) _relay.Dispose(); } catch { }
             try { if (_proc != null) _proc.Dispose(); } catch { }
             try { if (_dirLock != null) { _dirLock.Close(); _dirLock = null; } } catch { }
+            /* A profile marked as a fresh session is wiped here, on the way out, not when the
+               next one starts: the data must not survive the window that created it. It runs on
+               the closing path so the user sees no delay before the browser disappears. */
+            if (Profile != null && Profile.FreshSession && !string.IsNullOrEmpty(DataDir))
+                ProfileStore.WipeSessionData(DataDir);
             var handler = Closed;
             if (handler != null) { try { handler(this); } catch { } }
         }

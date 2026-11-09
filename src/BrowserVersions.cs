@@ -233,55 +233,76 @@ namespace JoeBrowser
         }
 
         /// <summary>
-        /// Gives a profile a build of its own, or one it is pinned to.
-        ///
-        /// A pinned kernel wins: the profile runs that binary, so it must report that build.
-        /// Otherwise the profile keeps the major it already had - the one its user agent names -
-        /// and takes a build of that major that nothing else in the workspace has. That is the
-        /// difference the user asked for: the version changes, and it stays a version that
-        /// browser really shipped.
+        /// True when two builds are the same major, i.e. indistinguishable in a reduced user
+        /// agent. Two profiles may differ in the patch and still be one browser to a checker.
         /// </summary>
-        public static bool Assign(Profile target, IEnumerable<Profile> workspace, out string note)
+        public static bool SameMajor(string a, string b)
+        {
+            int ma = MajorOf(a), mb = MajorOf(b);
+            return ma > 0 && ma == mb;
+        }
+
+        /// <summary>
+        /// Chooses the version a profile reports, and keeps it inside what the running binary
+        /// can honestly claim.
+        ///
+        /// This is the correction of the previous round, which assigned each profile a build of
+        /// ANY major in the table. That produced the report that matters most: ipfighter said
+        /// "fingerprint masking detected", because the profile said 143 and the binary answering
+        /// the request was 131. Nothing in the user agent, the client hints or the header can
+        /// hide that - the TLS stack, the HTTP/2 settings and the JavaScript engine all belong to
+        /// the real build, and a checker compares the claimed version against them.
+        ///
+        /// So the rule is now: report exactly the build that is running. Diversity is produced by
+        /// PINNED KERNELS - a profile pinned to Chrome 143 really runs Chrome 143 and reports it -
+        /// and by the workspace's own spread of pins, never by fabricating a number.
+        ///
+        /// <paramref name="baseVersion"/> is the version of the binary this profile will launch:
+        /// the pinned kernel when there is one, otherwise the browser found on the machine. When
+        /// it is unknown the stored version is kept rather than guessed.
+        /// </summary>
+        public static bool Assign(Profile target, IEnumerable<Profile> workspace, string baseVersion, out string note)
         {
             note = "";
             if (target == null) return false;
             if (target.Fp == null) target.Fp = new FingerprintConfig();
 
+            string running = IsReal(baseVersion) ? baseVersion.Trim() : "";
+
+            /* A pinned kernel is a fact about the executable, so it wins outright. */
             if (!string.IsNullOrEmpty(target.KernelFullVersion) && IsReal(target.KernelFullVersion))
             {
-                target.BrowserVersion = target.KernelFullVersion;
-                target.Fp.BrowserVersion = target.KernelFullVersion;
+                Set(target, target.KernelFullVersion.Trim());
                 return true;
             }
 
-            /* Which major this profile reports.
+            if (string.IsNullOrEmpty(running))
+            {
+                /* No binary to read: keep what the profile already says and say nothing about it
+                   rather than inventing a build that no executable on this machine will match. */
+                if (string.IsNullOrEmpty(target.BrowserVersion))
+                {
+                    int fallback = MajorOf(target.KernelVersion);
+                    if (fallback <= 0 || fallback < Oldest || fallback > Newest) fallback = Newest;
+                    Set(target, Pick(fallback, Taken(workspace)));
+                }
+                return false;
+            }
 
-               Chrome has shipped a reduced user agent since M113: the string says
-               "Chrome/157.0.0.0" and nothing else. A build number alone is therefore invisible in
-               the user agent, and a workspace whose profiles all report 157 is still a workspace
-               whose profiles are indistinguishable in the one line a checker prints first. So the
-               major varies too: this keeps the profile's own major when the workspace has not
-               claimed it, and otherwise steps back through the last two dozen releases. */
-            int wanted = MajorOf(target.BrowserVersion);
-            if (wanted <= 0) wanted = MajorFromUserAgent(target.Fp.UserAgent);
-            if (wanted <= 0 && !string.IsNullOrEmpty(target.KernelVersion)) wanted = MajorOf(target.KernelVersion);
-            if (wanted <= 0) wanted = 131;
+            if (!SameMajor(target.BrowserVersion, running))
+            {
+                /* The first assignment, or a profile left on a major the binary does not have.
+                   This is the case that was reported as masking. */
+                note = "Reports the build it runs.";
+            }
+            Set(target, running);
+            return true;
+        }
 
-            var avoid = Taken(workspace);
-            if (!string.IsNullOrEmpty(target.BrowserVersion)) avoid.Remove(target.BrowserVersion);
-
-            int major = FreeMajor(avoid, wanted);
-            if (!string.IsNullOrEmpty(target.BrowserVersion) && MajorOf(target.BrowserVersion) == major)
-                note = "";
-            else if (avoid.Count >= 12)
-                note = "This workspace reports a wide range of builds, so some profiles share a major.";
-
-            string version = Pick(major, avoid);
+        private static void Set(Profile target, string version)
+        {
             target.BrowserVersion = version;
             target.Fp.BrowserVersion = version;
-            if (avoid.Contains(version))
-                note = "This workspace already has " + avoid.Count + " builds, so some profiles share one.";
-            return true;
         }
     }
 }

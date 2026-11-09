@@ -382,7 +382,7 @@ namespace JoeBrowser
                     float track = _list.Height;
                     float thumb = Math.Max(Ui.S(24), track * VisibleRows / (float)_visible.Count);
                     float pos = (track - thumb) * (_scroll / (float)Math.Max(1, _visible.Count - VisibleRows));
-                    Ui.Fill(g, new RectangleF(w - Ui.S(7), pos, Ui.S(Theme.ButtonRadius), thumb), Ui.S(2), Theme.Line);
+                    Ui.Fill(g, new RectangleF(w - Ui.S(7), pos, Ui.S(3f), thumb), Ui.S(1.5f), Theme.Line);
                 }
 
                 /* A search that matches nothing used to leave a blank white box with no

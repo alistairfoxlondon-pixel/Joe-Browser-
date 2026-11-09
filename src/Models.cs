@@ -288,6 +288,19 @@ namespace JoeBrowser
         /// </summary>
         public string BrowserVersion { get; set; }
 
+        /// <summary>
+        /// Clear this profile's cookies, site data, storage and cache when the browser closes.
+        ///
+        /// Asked for as "when I use run-until app, all cookies and everything must be clean": a
+        /// profile that is opened, used for one session and closed should not leave a login
+        /// behind for the next person at the machine, and should not carry a cookie from one job
+        /// into the next. Everything that identifies the session - cookies, local storage,
+        /// IndexedDB, service workers, sessions, history - goes; the profile's fingerprint,
+        /// proxy, extensions and pinned build stay, because those define the identity rather
+        /// than the session.
+        /// </summary>
+        public bool FreshSession { get; set; }
+
         /// <summary>The full build a pinned kernel reports. Set together with KernelVersion.</summary>
         [ScriptIgnore]
         public string KernelFullVersion { get; set; }

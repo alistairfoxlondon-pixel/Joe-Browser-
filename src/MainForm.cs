@@ -249,8 +249,24 @@ namespace JoeBrowser
                 _maxBtn.Tip = Maximized ? "Restore" : "Maximize";
                 _maxBtn.Invalidate();
             }
-            LayoutAll();
+            /* A resize re-lays every page, and each page's own layout calls Invalidate. During a
+               drag-resize that happens dozens of times a second, so the queue is coalesced here:
+               one layout per paint, and the paint happens immediately rather than whenever the
+               message loop gets to it. That is the difference between a window that follows the
+               pointer and one that snaps a frame behind it. */
+            _pendingLayout = true;
+            BeginInvoke((Action)delegate
+            {
+                if (!_pendingLayout || IsDisposed) return;
+                _pendingLayout = false;
+                LayoutAll();
+                Invalidate(true);
+                Update();
+            });
         }
+
+        /// <summary>Set by OnSurfaceChanged, cleared by the layout that follows it.</summary>
+        private bool _pendingLayout;
 
         private JBButton Nav(string text, string icon, EventHandler click)
         {
@@ -2492,6 +2508,9 @@ namespace JoeBrowser
 
         private void ToggleTheme()
         {
+            /* SetMode delivers the change to every open window, and each of them applies it in
+               one frozen repaint (see JBForm.ApplyModeChange). Restyling again from here would
+               run the walk twice and paint the intermediate state - the flash. */
             Theme.SetMode(_themeSwitch.Checked);
             if (_settings != null)
             {
@@ -2499,11 +2518,6 @@ namespace JoeBrowser
                 try { _store.SaveSettings(_settings); } catch { }
             }
             _themeSwitch.Invalidate();
-            /* Pages paint from Theme.* live, but their BackColor and a few cached brushes are
-               captured at construction, so a theme flip has to walk the tree once. */
-            Theme.Restyle(this);
-            LayoutAll();
-            Invalidate();
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -3470,6 +3484,32 @@ namespace JoeBrowser
         /// different call sites each rolling their own random fingerprint, three of which forgot
         /// to check anything.
         /// </summary>
+        /// <summary>
+        /// The full build of the binary a profile will launch: its pinned kernel when it has one,
+        /// otherwise the browser this machine would start for it. Empty when neither is known.
+        /// </summary>
+        private string KernelFullVersionFor(Profile p)
+        {
+            if (p == null) return "";
+            if (!string.IsNullOrEmpty(p.KernelFullVersion) && BrowserVersions.IsReal(p.KernelFullVersion))
+                return p.KernelFullVersion;
+            try
+            {
+                var k = KernelStore.Find(p.KernelEngine, p.KernelVersion);
+                if (k != null && k.Ready && BrowserVersions.IsReal(k.FileVersion)) return k.FileVersion;
+            }
+            catch { }
+            string pref = p.BrowserKind ?? "auto";
+            string custom = pref == "custom" ? p.BrowserPath : pref == "auto" ? (_settings != null ? _settings.BrowserPath : "") : "";
+            try
+            {
+                var info = BrowserLocator.Detect(pref, custom);
+                if (info != null && BrowserVersions.IsReal(info.Version)) return info.Version;
+            }
+            catch { }
+            return ProfileStore.InstalledFullVersion();
+        }
+
         private Profile SeedNewProfile(string name, ProxyConfig proxy)
         {
             var p = new Profile();
@@ -3480,12 +3520,12 @@ namespace JoeBrowser
             FingerprintIdentity.MakeUnique(p.Fp, "System default", p.Proxy, _profiles, out clash);
             string note;
             KernelDiversity.Assign(p, _profiles, out note);
-            /* And a browser build of its own. This is separate from the kernel: a kernel is a
-               binary that has to be downloaded, while the version a profile reports is chosen
-               here, so a machine with one installed browser still produces profiles that do not
-               all claim that browser's build. */
+            /* And the version it reports. Not an invented one: whatever binary this profile will
+               launch reports its own build, so a profile with no pin says exactly what the
+               installed browser is, and a pinned profile says what its kernel is. A fabricated
+               number here was reported as fingerprint masking by ipfighter, and it was right. */
             string versionNote;
-            BrowserVersions.Assign(p, _profiles, out versionNote);
+            BrowserVersions.Assign(p, _profiles, KernelFullVersionFor(p), out versionNote);
             return p;
         }
 
@@ -3676,12 +3716,11 @@ namespace JoeBrowser
             FingerprintIdentity.MakeUnique(copy.Fp, copy.Fp.Os, copy.Proxy, _profiles, out clash);
             string kernelNote;
             bool pinned = KernelDiversity.AssignDifferent(copy, p, _profiles, out kernelNote);
-            /* A copy that kept its source's build number is the same browser as far as any
-               checker is concerned, whatever else changed. */
-            copy.BrowserVersion = "";
-            if (copy.Fp != null) copy.Fp.BrowserVersion = "";
+            /* The copy reports whatever binary it will launch. Diversity between two profiles on
+               one machine comes from pinning a different kernel, not from a different number for
+               the same executable - that difference is exactly what a checker calls masking. */
             string copyVersionNote;
-            BrowserVersions.Assign(copy, _profiles, out copyVersionNote);
+            BrowserVersions.Assign(copy, _profiles, KernelFullVersionFor(copy), out copyVersionNote);
             string warning = null;
             if (!pinned) warning = kernelNote;
             else if (clash != null && clash.Relation == FingerprintIdentity.Relation.Linked)
