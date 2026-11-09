@@ -2470,6 +2470,18 @@ namespace JoeBrowser
             return n;
         }
 
+        /// <summary>
+        /// Height the rail needs for ten destinations in two captioned groups, at the given row
+        /// height and gap. Used to pick the density that fits the window instead of discovering
+        /// it after the rows have been placed.
+        /// </summary>
+        private static int RailHeight(int row, int gap)
+        {
+            int rows = 10;
+            int captions = 2;
+            return rows * row + rows * gap + captions * (Theme.Row + Ui.S(4)) + Ui.S(8);
+        }
+
         private void LayoutAll()
         {
             if (!_built) return;
@@ -2484,12 +2496,30 @@ namespace JoeBrowser
                rail's content height depended on arithmetic that had to be edited whenever a
                destination was added. */
             int navX = Ui.S(12), navW = sb - Ui.S(24);
-            int navRow = Ui.S(42), navGap = Ui.S(4);
-            int navY = Ui.S(HeaderH + Ui.S(34)) + Ui.S(18);
+            int railTop = Ui.S(HeaderH + Ui.S(34)) + Ui.S(18);
             _themeSwitch.SetBounds(navX, h - Ui.S(58), navW, Ui.S(40));
 
+            /* The rail packs itself into whatever height the window has. It is placed from one
+               running y, and it tries progressively tighter rows until the last destination fits
+               above the theme switch; only when even the tightest does not fit is the switch
+               hidden, because every destination also lives in Settings but the rail is the only
+               way to reach them at all. Before this, the gap was recomputed after the rows had
+               already been placed, so the computation changed nothing and the switch simply
+               disappeared on a short window. */
+            int navRow = Ui.S(42), navGap = Ui.S(4);
+            int room = _themeSwitch.Top - Ui.S(10) - railTop;
+            while (true)
+            {
+                int need = RailHeight(navRow, navGap);
+                if (need <= room) break;
+                if (navGap > Ui.S(1)) { navGap = Ui.S(1); continue; }
+                if (navRow > Ui.S(34)) { navRow -= Ui.S(2); continue; }
+                break;
+            }
+            int navY = railTop;
+
             _navGroupWorkspace.SetBounds(navX + Ui.S(10), navY, navW, Theme.Row);
-            navY += Theme.Row + Ui.S(6);
+            navY += Theme.Row + Ui.S(4);
             _navProfiles.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
             _navHistory.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
             _navAccount.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
@@ -2497,25 +2527,16 @@ namespace JoeBrowser
             _navExtensions.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
             _navBrowsers.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
 
-            navY += Ui.S(10);
+            navY += Ui.S(8);
             _navGroupSystem.SetBounds(navX + Ui.S(10), navY, navW, Theme.Row);
-            navY += Theme.Row + Ui.S(6);
+            navY += Theme.Row + Ui.S(4);
             _navSettings.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
             _navTools.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
             _navPlan.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
             _navAbout.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
 
-            /* On a short window the rail cannot hold every row above the theme switch. The
-               destinations are more important than the switch, which is also in Settings, so the
-               switch is hidden rather than allowed to overlap the last row. */
-            bool railFits = navY <= _themeSwitch.Top - Ui.S(8);
-            _themeSwitch.Visible = railFits;
-            if (!railFits)
-            {
-                int spare = Math.Max(0, (_themeSwitch.Top - Ui.S(8)) - Ui.S(HeaderH + Ui.S(34)) - Ui.S(18));
-                int rows = 10;
-                navGap = Math.Max(0, (spare - rows * navRow) / Math.Max(1, rows + 2));
-            }
+            /* Ten destinations and two captions. The switch gives way before a destination does. */
+            _themeSwitch.Visible = navY <= _themeSwitch.Top;
 
             // caption buttons, flush with the top right corner
             int cw = Ui.S(46), ch = Ui.S(34);

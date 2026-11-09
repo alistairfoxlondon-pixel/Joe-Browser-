@@ -588,7 +588,7 @@ namespace JoeBrowser
             bool pro = Plan.IsPro;
             var r = new RectangleF(0.5f, 0.5f, w - 1.5f, _plan.Height - 1.5f);
             Ui.Fill(g, r, Ui.S(10), Theme.Card);
-            Ui.Stroke(g, r, Ui.S(8), pro ? Theme.AccentBorder : Theme.Line, 1f);
+            Ui.Stroke(g, r, Ui.S(10), pro ? Theme.AccentBorder : Theme.Line);
 
             /* Icon chip, title block, state pill - the same three-part shape as a settings row.
                The plan is a state, not three loose lines of text, and it should read that way

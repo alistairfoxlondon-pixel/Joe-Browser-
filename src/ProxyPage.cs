@@ -358,7 +358,7 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(8), Theme.Panel);
+            Ui.Fill(g, r, Ui.S(10), Theme.Panel);
             Ui.Stroke(g, r, Ui.S(10), Theme.Line);
 
             float chip = Ui.S(46);

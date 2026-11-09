@@ -317,7 +317,10 @@ namespace JoeBrowser
             if (Item == null) return;
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             bool cues = Ui.FocusCues(this);
-            Ui.Fill(g, r, Ui.S(6), cues ? Theme.PanelHover : Theme.Card);
+            /* One radius for both halves of the surface. Filling at 6 and stroking at 10 drew
+               the border a couple of pixels proud of the fill at every corner, which is exactly
+               the "not quite right" edge the whole redesign is about. */
+            Ui.Fill(g, r, Ui.S(10), cues ? Theme.PanelHover : Theme.Card);
             Ui.Stroke(g, r, Ui.S(10), Theme.Line);
 
             float chip = Ui.S(34);
