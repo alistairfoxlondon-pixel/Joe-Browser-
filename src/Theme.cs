@@ -671,7 +671,7 @@ namespace JoeBrowser
         /// <summary>Line height of a face, in device pixels, rounded up.</summary>
         public static int LineHeight(Font f)
         {
-            if (f == null) return S(18);
+            if (f == null) return Ui.S(18);
             try
             {
                 using (var g = Graphics.FromHwnd(IntPtr.Zero))
