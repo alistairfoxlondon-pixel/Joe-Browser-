@@ -188,6 +188,35 @@ namespace JoeBrowser
                     if (ExtensionCatalog.StoreUrlForId("") != "")
                         sb.Append(" [an empty extension id produced a store link]");
 
+                    /* Every row in the interface is sized from the fonts, and the claim this
+                       round rests on is that a row is never shorter than the text it carries.
+                       That is arithmetic, so it can be asserted here at every scale rather than
+                       argued about: for each scale in use, a row built from the type scale must
+                       be at least one line taller than its tallest line, and a two line block
+                       must fit the pair. This is the check that would have caught the fixed
+                       offsets that put a caption under a button. */
+                    float wasScale = Ui.Scale;
+                    foreach (float scale in new[] { 1f, 1.25f, 1.5f, 2f })
+                    {
+                        Ui.Scale = scale;
+                        int body = Theme.LineHeight(Theme.Body);
+                        int cap = Theme.LineHeight(Theme.Caption);
+                        int h3 = Theme.LineHeight(Theme.H3);
+                        if (Theme.Row < cap + Ui.S(2)) sb.Append(" [row is shorter than a caption at " + scale + "]");
+                        if (Theme.Field < body + Ui.S(8)) sb.Append(" [field is shorter than a line of text at " + scale + "]");
+                        if (BrowsersPage.RowH < h3 + cap + Ui.S(8)) sb.Append(" [browser row cannot hold its two lines at " + scale + "]");
+                        if (KernelsUi.KernelRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [kernel row cannot hold its two lines at " + scale + "]");
+                        if (ExtensionPage.ExtensionRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [extension row cannot hold its two lines at " + scale + "]");
+                        if (ProxyPage.PromoCard.CardH < Theme.LineHeight(Theme.H2) + Theme.LineHeight(Theme.Small) + cap) sb.Append(" [promo card cannot hold its three lines at " + scale + "]");
+                        /* The line height itself must grow with the scale, or a measured row
+                           would not follow the text it is measuring. */
+                        if (scale > 1f && Theme.LineHeight(Theme.Body) <= body && body > 0)
+                            sb.Append(" [line height does not grow with the scale at " + scale + "]");
+                        Theme.ClearFontCache();
+                    }
+                    Ui.Scale = wasScale;
+                    Theme.ClearFontCache();
+
                     var saved = new Profile { Name = "self test save" };
                     store.Save(saved);
                     var back = store.LoadAll();
