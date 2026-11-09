@@ -276,6 +276,175 @@ namespace JoeBrowser
             catch (Exception ex) { Log.Error("Could not record the extension removal " + id, ex); }
         }
 
+        /* ---- a status a page can render -------------------------------------------------------
+           The shipped pair arrives by download, and a download can fail: a proxy that blocks the
+           store, a machine that is offline at first launch, a region the listing is not served
+           in. When that happened the library simply had no row for the extension, so the app
+           looked as though it never shipped it - which is indistinguishable, from the user's
+           side, from "the extension is not installed". These read the evidence that already
+           exists and give the page one of five states to draw. */
+
+        /// <summary>A state of one shipped extension.</summary>
+        public enum DefaultState
+        {
+            /// <summary>Its folder is on disk and Chromium can load it.</summary>
+            Present,
+            /// <summary>The user removed it on purpose; it stays removed.</summary>
+            RemovedByUser,
+            /// <summary>Not on disk yet; the next launch will fetch it.</summary>
+            Pending,
+            /// <summary>The last fetch failed; the reason is kept.</summary>
+            Failed,
+            /// <summary>Not shipped with this build.</summary>
+            Unknown
+        }
+
+        /// <summary>The state of a shipped extension, and the reason if it failed.</summary>
+        public static DefaultState StateOf(string id, out string detail)
+        {
+            detail = "";
+            string name = "";
+            bool known = false;
+            foreach (var entry in DefaultStoreExtensions)
+                if (string.Equals(entry[0], id, StringComparison.OrdinalIgnoreCase)) { known = true; name = entry[1]; break; }
+            if (!known) return DefaultState.Unknown;
+            if (IsRemovedByUser(id)) return DefaultState.RemovedByUser;
+            string folder = Path.Combine(ImportedRoot, id);
+            try
+            {
+                if (File.Exists(Path.Combine(folder, "manifest.json"))) return DefaultState.Present;
+            }
+            catch { }
+            string skip = Path.Combine(AppPaths.Extensions, ".store-" + id + ".skip");
+            try
+            {
+                if (File.Exists(skip))
+                {
+                    detail = File.ReadAllText(skip).Trim();
+                    return DefaultState.Failed;
+                }
+            }
+            catch { }
+            detail = name;
+            return DefaultState.Pending;
+        }
+
+        /// <summary>Every shipped extension, as the page lists them: id, display name, state.</summary>
+        public static List<string[]> DefaultStatuses()
+        {
+            var rows = new List<string[]>();
+            foreach (var entry in DefaultStoreExtensions)
+            {
+                string detail;
+                var state = StateOf(entry[0], out detail);
+                rows.Add(new[] { entry[0], entry[1], StateText(state), detail });
+            }
+            return rows;
+        }
+
+        private static string StateText(DefaultState state)
+        {
+            switch (state)
+            {
+                case DefaultState.Present: return "Installed";
+                case DefaultState.RemovedByUser: return "Removed";
+                case DefaultState.Failed: return "Not installed";
+                case DefaultState.Pending: return "Waiting for download";
+                default: return "Unknown";
+            }
+        }
+
+        /// <summary>
+        /// Fetches every shipped extension that is not present, ignoring the once-a-day backoff.
+        /// Called from the Extensions page's own action, so a user whose proxy was blocking the
+        /// store can retry the moment they have fixed it.
+        /// </summary>
+        public static int FetchMissing(bool force)
+        {
+            int added = 0;
+            try
+            {
+                var items = Load();
+                bool changed = false;
+                foreach (var entry in DefaultStoreExtensions)
+                {
+                    string id = entry[0];
+                    if (IsRemovedByUser(id)) continue;
+                    string target = Path.Combine(ImportedRoot, id);
+                    bool present = false;
+                    try { present = File.Exists(Path.Combine(target, "manifest.json")); } catch { }
+                    if (present) continue;
+                    string skip = Path.Combine(AppPaths.Extensions, ".store-" + id + ".skip");
+                    if (!force)
+                    {
+                        try
+                        {
+                            if (File.Exists(skip) && (DateTime.UtcNow - File.GetLastWriteTimeUtc(skip)).TotalHours < 24) continue;
+                        }
+                        catch { }
+                    }
+                    bool listed = false;
+                    foreach (var e in items)
+                    {
+                        if (e == null || string.IsNullOrEmpty(e.Folder)) continue;
+                        if (e.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase)) { listed = true; break; }
+                    }
+                    try
+                    {
+                        var item = ImportFromUrl(StoreUrlFor(id));
+                        item.Name = entry[1];
+                        item.Source = "store";
+                        if (!listed) items.Add(item);
+                        else
+                        {
+                            foreach (var e in items)
+                                if (e != null && e.Folder != null &&
+                                    e.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    e.Folder = item.Folder;
+                                    e.Enabled = true;
+                                }
+                        }
+                        changed = true;
+                        added++;
+                        try { if (File.Exists(skip)) File.Delete(skip); } catch { }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error("Could not fetch default extension " + id, ex);
+                        try
+                        {
+                            Directory.CreateDirectory(AppPaths.Extensions);
+                            File.WriteAllText(skip, ShortReason(ex), new UTF8Encoding(false));
+                        }
+                        catch { }
+                    }
+                }
+                if (changed) Save(items);
+            }
+            catch (Exception ex) { Log.Error("Default extension fetch failed", ex); }
+            return added;
+        }
+
+        /// <summary>The one line worth keeping from a download failure.</summary>
+        private static string ShortReason(Exception ex)
+        {
+            if (ex == null) return "";
+            var web = ex as System.Net.WebException;
+            if (web != null)
+            {
+                if (web.Status == System.Net.WebExceptionStatus.Timeout) return "The store took too long to answer.";
+                if (web.Status == System.Net.WebExceptionStatus.NameResolutionFailure ||
+                    web.Status == System.Net.WebExceptionStatus.ConnectFailure)
+                    return "The store could not be reached. A proxy or firewall may be blocking it.";
+                return "The store did not send a package.";
+            }
+            string m = ex.Message ?? "";
+            int i = m.IndexOfAny(new[] { '\r', '\n' });
+            if (i > 0) m = m.Substring(0, i);
+            return m.Length > 160 ? m.Substring(0, 157) + "..." : m;
+        }
+
         /// <summary>The store id of a shipped extension, from its folder path. Empty for anything else.</summary>
         public static string DefaultIdOf(ExtensionItem item)
         {

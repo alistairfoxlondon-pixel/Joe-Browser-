@@ -1499,6 +1499,7 @@ namespace JoeBrowser
                     case "delete": DeleteExtension(index); break;
                     case "store": OpenExtensionStore(index); break;
                     case "recommend": OpenRecommendation(index); break;
+                    case "fetch": FetchShippedExtensions(); break;
                 }
             }
             catch (Exception ex)
@@ -1757,9 +1758,37 @@ namespace JoeBrowser
             if (!string.IsNullOrEmpty(shippedId)) ExtensionCatalog.MarkRemoved(shippedId, true);
             _extensions.RemoveAt(index);
             SaveExtensions();
+            _extensionPage.RefreshShipped();
             bool removed = ExtensionCatalog.DeleteFiles(item);
             Toast(ExtensionNote(removed ? "Extension removed" : "Extension removed. Close the browsers it was open in to free its files"),
                 removed ? ToastKind.Success : ToastKind.Info);
+        }
+
+        /// <summary>
+        /// Retries the download of an extension this build ships, which is the action a user
+        /// needs exactly when the first attempt failed behind a proxy they have since fixed.
+        /// It runs off the UI thread, reports what came back, and refreshes the state rows.
+        /// </summary>
+        private async void FetchShippedExtensions()
+        {
+            _extensionPage.SetBusy(true, "Downloading\u2026");
+            try
+            {
+                int added = await Task.Run(new Func<int>(delegate { return ExtensionCatalog.FetchMissing(true); }));
+                var items = ExtensionCatalog.Load();
+                _extensions = items;
+                _extensionPage.SetItems(items);
+                _extensionPage.RefreshShipped();
+                int present = 0;
+                foreach (var row in ExtensionCatalog.DefaultStatuses()) if (row[2] == "Installed") present++;
+                Toast(added > 0
+                        ? added + (added == 1 ? " extension" : " extensions") + " downloaded"
+                        : present + " of " + ExtensionCatalog.DefaultStatuses().Count + " included extensions are installed",
+                    added > 0 || present > 0 ? ToastKind.Success : ToastKind.Error);
+                if (added > 0) ReloadCards(false);
+            }
+            catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
+            finally { _extensionPage.SetBusy(false, ""); }
         }
 
         private void OpenExtensionStore(int index)
@@ -3076,6 +3105,7 @@ namespace JoeBrowser
             {
                 _extensions = ExtensionCatalog.Load();
                 _extensionPage.SetItems(_extensions);
+                _extensionPage.RefreshShipped();
             }
             else if (page == 3)
             {
