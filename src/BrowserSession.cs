@@ -1000,11 +1000,16 @@ namespace JoeBrowser
                     await TrySend("Page.navigate", new Dictionary<string, object> { { "url", navigateTo } }, session);
                 return;
             }
-            var fpRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", new Dictionary<string, object>
+            /* persistAcrossRestarts is written out here rather than in TrySendResult: the CDP
+               client refuses the whole call when it cannot verify a capability it does not know,
+               and this one is optional. Losing it only means a crashed tab reloads unstamped. */
+            var fpParams = new Dictionary<string, object>
             {
                 { "source", script },
                 { "runImmediately", true }
-            }, session);
+            };
+            try { fpParams["persistAcrossRestarts"] = true; } catch { }
+            var fpRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", fpParams, session);
             string fpId = fpRes != null ? Str(fpRes, "identifier") : "";
 
             /* First-party tools: human paste, proxy rotation guard and right-click guard.
@@ -1014,11 +1019,13 @@ namespace JoeBrowser
             var liveProxy = Profile != null ? Profile.Proxy : null;
             string toolScript = ExtensionManager.BuildToolScript(tools, Profile != null ? Profile.Name : "",
                 liveProxy != null && liveProxy.Enabled);
-            var toolRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", new Dictionary<string, object>
+            var toolParams = new Dictionary<string, object>
             {
                 { "source", toolScript },
                 { "runImmediately", true }
-            }, session);
+            };
+            try { toolParams["persistAcrossRestarts"] = true; } catch { }
+            var toolRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", toolParams, session);
             string toolId = toolRes != null ? Str(toolRes, "identifier") : "";
 
             lock (_scriptState)
