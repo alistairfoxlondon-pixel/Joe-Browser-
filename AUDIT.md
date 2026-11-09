@@ -861,3 +861,81 @@ text at 100, 125 and 150 percent, no overlap at any window width, the empty stat
 the installer at 150 percent, are argued from measured geometry and have not been seen. The
 launch timing line is the instrument for the performance claim on a real machine. Defender's
 verdict on the next build is likewise not something this environment can run.
+
+## Round 18: the version per profile, and the tools that were silent
+
+### The defect that mattered
+
+Every profile on a machine reported the same browser build: the one installed on that machine,
+which was also the user's own Chrome. Two causes met. The user agent came from
+`installedFull`, and `navigator.userAgentData` was filled from the client hints the running
+browser answers with, so even when the user agent string was edited the hint list still carried
+the host's real `157.0.8103.38`.
+
+A profile now owns its build. `BrowserVersions` holds a table of real Chromium branch and patch
+pairs, one row per major from 120 to 159, and `Pick` walks that branch: forty patch steps first,
+then the six neighbouring branches, then downwards. `Profile.BrowserVersion` is stored and
+mirrored into the fingerprint, `ResolveUserAgent` derives the major from it, and
+`BuildUaMetadata` prefers it over anything read from the host. A profile created in the app is
+assigned against the whole workspace, and `ProfileStore.Load` repairs old workspaces on first
+read, so an installation that already has ten identical profiles comes up with ten distinct
+builds without the user doing anything.
+
+Chrome's reduced user agent prints only the major (`Chrome/157.0.0.0`), so the build number is
+invisible in the one line a checker reads first. The major therefore varies too, and the search
+covers the last two dozen releases - wider than any realistic workspace. The self test creates
+twelve profiles through the same code path the app uses and asserts twelve distinct builds, at
+least ten distinct majors, twelve distinct user agents, and profile-to-fingerprint agreement.
+
+### Why three features were silent
+
+None of the three had been removed. Each had a signal that stopped arriving.
+
+| Reported | Cause | Fix |
+|---|---|---|
+| Right click and copy does nothing | The guard captured at the document; the sites that defeat a document guard register on the window and run first | Capture at the window, ahead of every page handler, and stop the right-button press as well as the menu |
+| No IP change alert | The alarm was created only in `onInstalled`; a restarted worker had none | Alarm and stored proxy flag are re-established on every worker start |
+| No offline alert | `armed()` stayed false because the page's proxy announcement was fire-and-forget and the worker could start after it | The relay asks for the flag and the runtime answers, repeatedly, so a late worker still arms |
+| Paste as human not in the menu | The context menu was created only in `onInstalled`, and an unpacked extension starts with a fresh profile on every launch | The menu is created on every worker start |
+
+The editor also says, in one line under the switches, how to use each tool. Both had been
+reported missing while working, which is a documentation defect, not a feature one.
+
+Add proxy refused a pasted `scheme://user:pass@host:port` link because it required the last two
+colon-separated parts to be host and port; `ProxyVault.ParseLine` already understood the whole
+shape, and the dialog now uses it. A live proxy change re-applies the injected runtime, so a
+profile that opened without a proxy arms the watcher for the rest of its session.
+
+### What the interface promises now
+
+- Body text is 16 px and nothing anywhere is smaller than 14 px. Both floors are asserted in
+  the self test, so a build that reintroduces small text fails rather than ships.
+- Every corner is square. All rounded rectangles go through two helpers in `Theme`, so the
+  radius is one constant; a square surface is filled as a rectangle, because an antialiased
+  path edge reads as a blurry box beside crisp text. The toggles are square tracks with square
+  knobs, the last pills in the app.
+- The window's minimum width is derived from a card, the gutters and the navigation rail rather
+  than chosen by eye.
+- A truncated name carries a tooltip; the fit assertions measure names of the length people use
+  at three scales.
+
+The account page is rebuilt around the three things an account page is for: who is signed in, a
+plan card with the profile count it allows, and a security card whose rows state their own
+state. It was five identical buttons with the two facts that matter hidden in their labels.
+
+The Extensions page lists the two shipped store extensions by name with their state -
+installed, waiting for a download, or not installed with the reason - and a button that retries
+the download at once. A download that failed behind a proxy used to be indistinguishable from an
+extension the app never shipped.
+
+### What this round proves, and what it does not
+
+CI builds every push on `windows-latest` and runs `--selftest` against both binaries. It proves
+the build compiles, that twelve profiles get twelve builds and ten majors, that a removed
+shipped extension is neither loaded nor re-listed, that the type floors hold, and that the
+strings that used to be cut fit at three scales.
+
+It cannot prove what it looks like: there is no Windows desktop here. Nor can it prove the
+extension download end to end, because this sandbox has no route to the store, so the shipped
+pair is reported by the app itself - which is precisely why their state is now on the page
+instead of being assumed.
