@@ -748,14 +748,20 @@ namespace JoeBrowser
                 {
                     /* Tall enough to hold its three lines AND the buttons underneath them. At
                        the old 86 px the buttons sat on top of the last caption line. */
-                    _termsPanel.SetBounds(pad, y, inner, Ui.S(132));
-                    int by = y + Ui.S(86);
                     int w1 = _readTerms.PreferredWidth(Ui.S(150));
                     int w2 = _acceptTerms.PreferredWidth(Ui.S(120));
-                    /* Panel-relative: the buttons live inside the card. */
+                    /* Panel-relative: the buttons live inside the card, and the card grows to
+                       hold a second row when the window is too narrow for both side by side.
+                       Placing them at a fixed offset put the accept button outside the card on
+                       a narrow window, on top of the page behind it. */
+                    bool twoRows = Ui.S(20) + w1 + Ui.S(10) + w2 > inner - Ui.S(20);
+                    int cardH = Ui.S(86) + (twoRows ? Ui.S(32) + Ui.S(10) : 0) + Ui.S(34);
+                    _termsPanel.SetBounds(pad, y, inner, cardH);
+                    int by = y + Ui.S(86);
                     _readTerms.SetBounds(Ui.S(20), Ui.S(86), w1, Ui.S(32));
-                    _acceptTerms.SetBounds(Ui.S(20) + w1 + Ui.S(10), Ui.S(86), w2, Ui.S(32));
-                    y = by + Ui.S(32) + Ui.S(26);
+                    _acceptTerms.SetBounds(twoRows ? Ui.S(20) : Ui.S(20) + w1 + Ui.S(10),
+                        twoRows ? Ui.S(86) + Ui.S(32) + Ui.S(10) : Ui.S(86), w2, Ui.S(32));
+                    y = by + (twoRows ? Ui.S(74) : Ui.S(32)) + Ui.S(26);
                 }
                 else
                 {
@@ -774,40 +780,42 @@ namespace JoeBrowser
                     int w1 = _copy.PreferredWidth(Ui.S(150));
                     int wa = _copyAmount.PreferredWidth(Ui.S(150));
                     int w2 = _check.PreferredWidth(Ui.S(140));
+                    /* All three are measured against the column they sit in, and each drops to
+                       a second row rather than crossing into the QR code's space. The second
+                       button used to be placed at a fixed offset with no check at all, so on a
+                       narrow window it was drawn on top of the code. */
                     _copy.SetBounds(pad, by, w1, Ui.S(33));
-                    _copyAmount.SetBounds(pad + w1 + Ui.S(10), by, wa, Ui.S(33));
-                    /* "I have paid" drops to its own row when the three buttons do not fit, so
-                       it can never be pushed under the QR code on a narrow window. */
-                    int paidX = pad + w1 + wa + Ui.S(20);
-                    if (paidX + w2 <= pad + textW)
-                        _check.SetBounds(paidX, by, w2, Ui.S(33));
-                    else
-                        _check.SetBounds(pad, by + Ui.S(43), w2, Ui.S(33));
+                    bool secondRow = pad + w1 + Ui.S(10) + wa > pad + textW;
+                    _copyAmount.SetBounds(secondRow ? pad : pad + w1 + Ui.S(10),
+                        secondRow ? by + Ui.S(43) : by, wa, Ui.S(33));
+
+                    int paidY = secondRow ? by + Ui.S(86) : by;
+                    int paidX = secondRow ? pad : pad + w1 + wa + Ui.S(20);
+                    bool thirdRow = paidX + w2 > pad + textW;
+                    if (thirdRow) { paidX = pad; paidY += Ui.S(43); }
+                    _check.SetBounds(paidX, paidY, w2, Ui.S(33));
 
                     _qr.SetBounds(pad + inner - qr, y, qr, qr);
 
-                    bool stacked = _check.Top != by;
-                    y = by + (stacked ? Ui.S(76) : Ui.S(33)) + Ui.S(14);
+                    int bottom = Math.Max(by, _check.Bottom);
+                    y = bottom + Ui.S(14);
                     _status.SetBounds(pad, y, Math.Min(inner, Ui.S(720)), Ui.S(40));
                     y += Ui.S(44);
                 }
 
-                int fw = _restore.PreferredWidth(Ui.S(170));
-                _restore.SetBounds(pad, y, fw, Ui.S(33));
-                if (TermsAccepted)
-                    _termsLink.SetBounds(pad + fw + Ui.S(10), y, _termsLink.PreferredWidth(Ui.S(90)), Ui.S(33));
-                y += Ui.S(33) + Ui.S(26);
+                _termsLink.Visible = TermsAccepted;
+                JBButton[] bottomActions = TermsAccepted
+                    ? new[] { _restore, _termsLink }
+                    : new[] { _restore };
+                y = Ui.FlowButtons(bottomActions, pad, y, inner, Ui.S(10), Ui.S(33)) + Ui.S(26);
 
                 _sectionInvite.SetBounds(pad, y, inner, Ui.S(22));
                 y += Ui.S(22) + Ui.S(6);
                 _inviteLine.SetBounds(pad, y, inner, Ui.S(20));
                 y += Ui.S(20) + Ui.S(10);
 
-                int iw1 = _copyInvite.PreferredWidth(Ui.S(140));
-                int iw2 = _claim.PreferredWidth(Ui.S(150));
-                _copyInvite.SetBounds(pad, y, iw1, Ui.S(32));
-                _claim.SetBounds(pad + iw1 + Ui.S(10), y, iw2, Ui.S(32));
-                y += Ui.S(32) + Ui.S(28);
+                JBButton[] invite = { _copyInvite, _claim };
+                y = Ui.FlowButtons(invite, pad, y, inner, Ui.S(10), Ui.S(32)) + Ui.S(28);
 
                 _column.SetBounds(0, 0, Math.Max(inner + pad * 2, avail), Math.Max(y, _host.Height));
                 _host.SyncExtent();

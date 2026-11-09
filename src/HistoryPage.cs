@@ -22,6 +22,15 @@ namespace JoeBrowser
         private bool _layingOut, _ready;
         private int _selected = -1;
         private bool _hopsOnly;
+        private int _subtitleHeight;
+        /* Rows are real window controls, one per visit. A busy profile can hold twenty thousand
+           entries, and handing that to WinForms at once is a page that takes seconds to appear
+           and then stutters on every scroll. The list shows the newest PageSize entries and
+           offers the rest a page at a time; nothing is dropped from disk. */
+        private const int PageSize = 200;
+        private const int MaxShown = 1000;
+        private int _shown = PageSize;
+        private JBButton _more;
 
         public event EventHandler Back;
         public event EventHandler ClearRequested;
@@ -72,6 +81,17 @@ namespace JoeBrowser
             _subtitle = new JBLabel(LabelRole.Faint, "");
             _subtitle.Wrap = true;
             _column.Controls.Add(_subtitle);
+            /* Height reserved for the wrapped subtitle, recomputed in LayoutCore from the real
+               text so a second line cannot be drawn over the first history row. */
+            _subtitleHeight = Ui.S(20);
+
+            _more = Button("Show older", "clock", BtnKind.Soft);
+            _more.Click += delegate
+            {
+                _shown = Math.Min(MaxShown, _shown + PageSize);
+                Rebuild();
+            };
+            _column.Controls.Add(_more);
 
             _empty = new JBPanel();
             _empty.Paint += PaintEmpty;
@@ -102,6 +122,9 @@ namespace JoeBrowser
         {
             Profile = profile;
             _selected = -1;
+            /* A new profile starts at the first page again, so a long list seen on one profile
+               does not decide how much of the next one is shown. */
+            _shown = PageSize;
             Rebuild();
         }
 
@@ -110,15 +133,27 @@ namespace JoeBrowser
             if (!_ready) return;
             foreach (var r in _rows) { _column.Controls.Remove(r); r.Dispose(); }
             _rows.Clear();
+            /* The list under the cursor is about to change, so the old index means nothing:
+               keeping it selected a row the user never picked after switching the filter, and
+               "Open" then opened a page from a different row than the one highlighted. */
+            _selected = -1;
 
             var all = Profile == null ? new List<HistoryStore.Entry>() : HistoryStore.Read(Profile.Id);
+            int matching = 0;
             foreach (var e in all)
             {
                 if (_hopsOnly && !e.Hop) continue;
+                matching++;
+                if (_rows.Count >= _shown) continue;
                 var row = new Row(this, e, _rows.Count);
                 _rows.Add(row);
                 _column.Controls.Add(row);
             }
+            _more.Visible = matching > _rows.Count;
+            _more.Text = _rows.Count >= MaxShown
+                ? "Showing the newest " + MaxShown
+                : "Show older (" + (matching - _rows.Count) + ")";
+            _more.Enabled = _rows.Count < MaxShown;
 
             /* Which profile is showing has to be visible on the page, not only in the sidebar:
                the same page serves every profile and the last opened one is not always the one
@@ -128,12 +163,15 @@ namespace JoeBrowser
                 : Profile.Name + "  \u00b7  " + L10n.T("history.title");
             int hops = 0;
             foreach (var e in all) if (e.Hop) hops++;
+            int shown = _rows.Count;
             _subtitle.Text = all.Count == 0
                 ? L10n.T("history.empty.hint")
                 : all.Count + " " + L10n.T(all.Count == 1 ? "history.one" : "history.many") +
-                  (hops > 0 ? "  \u00b7  " + hops + " " + L10n.T("history.hops.count") : "");
+                  (hops > 0 ? "  \u00b7  " + hops + " " + L10n.T("history.hops.count") : "") +
+                  (shown < matching ? "  \u00b7  newest " + shown + " shown" : "");
             _filter.Text = _hopsOnly ? L10n.T("history.all") : L10n.T("history.hops");
             _empty.Visible = _rows.Count == 0;
+            if (_rows.Count == 0) _more.Visible = false;
             UpdateButtons();
             LayoutCore();
         }
@@ -156,11 +194,59 @@ namespace JoeBrowser
             UpdateButtons();
         }
 
+        /// <summary>
+        /// Moves the selection by keyboard and keeps the chosen row inside the scroller. The
+        /// rows were reachable only with the mouse: they are focusable, but nothing answered a
+        /// key, so a list of a few hundred pages could not be walked without the pointer.
+        /// </summary>
+        internal void MoveSelection(int delta)
+        {
+            if (_rows.Count == 0) return;
+            int next = _selected < 0 ? (delta > 0 ? 0 : _rows.Count - 1) : _selected + delta;
+            if (next < 0) next = 0;
+            if (next >= _rows.Count) next = _rows.Count - 1;
+            Select(next);
+            EnsureSelectedVisible();
+        }
+
+        internal void OpenSelected()
+        {
+            var e = SelectedEntry;
+            var h = OpenRequested;
+            if (e != null && h != null) h(this, e.Url);
+        }
+
+        private void EnsureSelectedVisible()
+        {
+            if (_selected < 0 || _selected >= _rows.Count) return;
+            var r = _rows[_selected];
+            int top = r.Top, bottom = r.Bottom;
+            if (top < _host.Offset)
+                _host.ScrollTo(top - Ui.S(8));
+            else if (bottom > _host.Offset + _host.Height)
+                _host.ScrollTo(bottom - _host.Height + Ui.S(8));
+        }
+
         private void CopySelected()
         {
             var e = SelectedEntry;
             if (e == null) return;
             try { Clipboard.SetText(e.Url); } catch { }
+        }
+
+        /// <summary>Height the wrapped text needs at the given width, in whole lines.</summary>
+        private static int MeasureLines(string text, Font font, int width)
+        {
+            int line = Math.Max(Ui.S(16), (int)Math.Ceiling(font.GetHeight()));
+            if (string.IsNullOrEmpty(text)) return line;
+            try
+            {
+                Size size = TextRenderer.MeasureText(text, font, new Size(Math.Max(Ui.S(80), width), int.MaxValue),
+                    TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
+                int lines = Math.Max(1, (int)Math.Round(size.Height / (double)line));
+                return line * Math.Min(3, lines) + Ui.S(2);
+            }
+            catch { return line; }
         }
 
         protected override void OnResize(EventArgs e) { base.OnResize(e); LayoutCore(); }
@@ -177,28 +263,43 @@ namespace JoeBrowser
                 int inner = Math.Max(Ui.S(200), w - pad * 2);
 
                 int y = pad;
-                /* One control row, actions right-aligned: Back on the left because it leaves the
-                   page, the rest gathered so the destructive one is not adjacent to a mis-click. */
                 int bh = Ui.S(33);
+                /* Back on the left because it leaves the page; the rest gathered on the right,
+                   wrapping onto a second line when the window cannot hold them all. Placing them
+                   one at a time from the right edge made them overlap, and on a narrow window the
+                   row ran off the page. */
                 _back.SetBounds(pad, y, _back.PreferredWidth(Ui.S(96)), bh);
-                int right = pad + inner;
-                int cw = _clear.PreferredWidth(Ui.S(90));
-                _clear.SetBounds(right - cw, y, cw, bh);
-                right -= cw + Ui.S(8);
-                int ow = _open.PreferredWidth(Ui.S(84));
-                _open.SetBounds(right - ow, y, ow, bh);
-                right -= ow + Ui.S(8);
-                int cpw = _copy.PreferredWidth(Ui.S(84));
-                _copy.SetBounds(right - cpw, y, cpw, bh);
-                right -= cpw + Ui.S(8);
-                int fw = _filter.PreferredWidth(Ui.S(120));
-                _filter.SetBounds(right - fw, y, fw, bh);
+                int groupW = 0;
+                JBButton[] group = { _filter, _copy, _open, _clear };
+                foreach (var b in group) groupW += b.PreferredWidth(Ui.S(84)) + Ui.S(8);
+                groupW -= Ui.S(8);
 
-                y += bh + Ui.S(20);
+                if (_back.Right + Ui.S(8) + groupW <= pad + inner)
+                {
+                    /* One line: the group is right-aligned in the space that is left. */
+                    int bx = pad + inner - groupW;
+                    foreach (var b in group)
+                    {
+                        int bw = b.PreferredWidth(Ui.S(84));
+                        b.SetBounds(bx, y, bw, bh);
+                        bx += bw + Ui.S(8);
+                    }
+                    y += bh + Ui.S(20);
+                }
+                else
+                {
+                    /* Two lines: Back, then the group flow wrapped under it. */
+                    y += bh + Ui.S(10);
+                    y = Ui.FlowButtons(group, pad, y, inner, Ui.S(8), bh) + Ui.S(14);
+                }
+
                 _title.SetBounds(pad, y, inner, Ui.S(30));
                 y += Ui.S(32);
-                _subtitle.SetBounds(pad, y, inner, Ui.S(20));
-                y += Ui.S(30);
+                /* The subtitle wraps, so its box is measured rather than assumed: a two line
+                   hint used to run into the first row of the list. */
+                _subtitleHeight = MeasureLines(_subtitle.Text, Theme.Caption, inner);
+                _subtitle.SetBounds(pad, y, inner, _subtitleHeight);
+                y += _subtitleHeight + Ui.S(10);
 
                 if (_empty.Visible)
                 {
@@ -208,8 +309,18 @@ namespace JoeBrowser
 
                 foreach (var r in _rows)
                 {
+                    /* Two px used to separate rows that are 52 px tall each with paint filling to
+                       the edge, which read as one solid block. Six is the smallest gap that still
+                       shows the rounded edge of a selected row. */
                     r.SetBounds(pad, y, inner, r.RowHeight);
-                    y += r.RowHeight + Ui.S(2);
+                    y += r.RowHeight + Ui.S(6);
+                }
+
+                if (_rows.Count > 0)
+                {
+                    y += Ui.S(8);
+                    _more.SetBounds(pad, y, _more.PreferredWidth(Ui.S(160)), Ui.S(33));
+                    y += Ui.S(33);
                 }
                 y += pad;
 
@@ -265,7 +376,21 @@ namespace JoeBrowser
             protected override void OnMouseDown(MouseEventArgs e)
             {
                 base.OnMouseDown(e);
-                if (e.Button == MouseButtons.Left) _page.Select(_index);
+                if (e.Button == MouseButtons.Left) { Focus(); _page.Select(_index); }
+            }
+
+            protected override bool IsInputKey(Keys keyData)
+            {
+                return keyData == Keys.Up || keyData == Keys.Down ||
+                       keyData == Keys.Enter || base.IsInputKey(keyData);
+            }
+
+            protected override void OnKeyDown(KeyEventArgs e)
+            {
+                if (e.KeyCode == Keys.Down) { _page.MoveSelection(1); e.Handled = true; return; }
+                if (e.KeyCode == Keys.Up) { _page.MoveSelection(-1); e.Handled = true; return; }
+                if (e.KeyCode == Keys.Enter) { _page.OpenSelected(); e.Handled = true; return; }
+                base.OnKeyDown(e);
             }
             protected override void OnMouseDoubleClick(MouseEventArgs e)
             {
@@ -294,7 +419,11 @@ namespace JoeBrowser
 
                 float left = Ui.S(34);
                 float w = Width - left - Ui.S(96);
+                /* A hop is marked by an arrow in the left margin, so the arrow's column is not
+                   taken out of the text width - the title used to start under a mark that only
+                   half the rows draw. */
                 string title = string.IsNullOrEmpty(Entry.Title) ? Host(Entry.Url) : Entry.Title;
+                if (w < Ui.S(80)) w = Math.Max(Ui.S(40), Width - left - Ui.S(8));
                 /* The mark sits on every row: the history is per profile, so the name is not the
                    interesting part of the row and a column of repeats is wasted width. */
                 float mk = Ui.S(14);

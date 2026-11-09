@@ -197,15 +197,11 @@ namespace JoeBrowser
                 int pad = Ui.S(28);
                 int inner = Math.Max(Ui.S(300), _host.Width - Ui.S(10) - pad * 2);
 
-                int b1 = _rescan.PreferredWidth(Ui.S(120));
-                int b2 = _openFolder.PreferredWidth(Ui.S(180));
-                int b3 = _kernels.PreferredWidth(Ui.S(110));
+                /* Shared flow: the three wrap on a narrow window instead of the last one
+                   running off the right edge of the page. */
                 int by = Ui.S(6);
-                _rescan.SetBounds(pad, by, b1, Ui.S(33));
-                _openFolder.SetBounds(pad + b1 + Ui.S(10), by, b2, Ui.S(33));
-                _kernels.SetBounds(pad + b1 + b2 + Ui.S(20), by, b3, Ui.S(33));
-
-                int y = by + Ui.S(33) + Ui.S(24);
+                JBButton[] actions = { _rescan, _openFolder, _kernels };
+                int y = Ui.FlowButtons(actions, pad, by, inner, Ui.S(10), Ui.S(33)) + Ui.S(24);
                 _section.SetBounds(pad, y, inner, Ui.S(18));
                 y += Ui.S(18) + Ui.S(12);
 
@@ -319,7 +315,10 @@ namespace JoeBrowser
         {
             base.OnResize(e);
             if (_action == null) return;
-            int w = _action.PreferredWidth(Ui.S(132));
+            /* The button is kept inside the row: a long translation makes a preferred width
+               wider than the row, and the old placement then put its left edge at 8 px while its
+               right edge stayed off the card. */
+            int w = Math.Min(Math.Max(Ui.S(96), Width - Ui.S(120)), _action.PreferredWidth(Ui.S(132)));
             _action.SetBounds(Math.Max(Ui.S(8), Width - Ui.S(16) - w), (Height - Ui.S(31)) / 2, w, Ui.S(31));
         }
 

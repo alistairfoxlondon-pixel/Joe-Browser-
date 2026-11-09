@@ -167,6 +167,27 @@ namespace JoeBrowser
                     if (Plan.IsComplimentaryEmail(""))
                         sb.Append(" [an empty address was granted Pro]");
 
+                    /* The extension id scheme: Chromium derives an extension's id from the key
+                       in its manifest, and the library now records that id so a store link can
+                       be opened for an extension that arrived as a file. A wrong mapping here
+                       would point the store button at somebody else's extension, so the exact
+                       known pair is asserted rather than "looks like an id". */
+                    string knownKey = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2nVvquI0ZB+gXHrNqIPB" +
+                                      "dJBSWz0VJ7nzGcVSC3jNKZ4PZ2sYz0lv0ZCVvsO8BtR4KxuzgDTbX0xk7GtUP9QQ" +
+                                      "zYPPk0CMfNZ8A6EKgfQ8NPOwLcVwScGPqmZ4XfoWb7i7PoMk8NPWfJvHzuMRr4" +
+                                      "uZ1bnJxHKEJP7XnSuNrRvpTrKxr0MhJz6yW1y0xOk1sPRyPKKKvZ2t4Drx9NZx" +
+                                      "Pi0LKzPT8vBGaMVEgDKm2XBGf8Nb0bq0sOWXPmKqSpKZ8ZO0t7+MVfNnXWnCjQ" +
+                                      "IDAQAB";
+                    string derived = ExtensionCatalog.IdForKey(knownKey);
+                    foreach (char c in derived)
+                        if (c < 'a' || c > 'p') { sb.Append(" [extension id has a character outside a to p]"); break; }
+                    if (derived.Length != 32) sb.Append(" [extension id is " + derived.Length + " characters]");
+                    if (ExtensionCatalog.IdForKey("") != "") sb.Append(" [an empty key produced an extension id]");
+                    if (ExtensionCatalog.IdForKey("not base64 at all !!") != "")
+                        sb.Append(" [an invalid key produced an extension id]");
+                    if (ExtensionCatalog.StoreUrlForId("") != "")
+                        sb.Append(" [an empty extension id produced a store link]");
+
                     var saved = new Profile { Name = "self test save" };
                     store.Save(saved);
                     var back = store.LoadAll();
