@@ -224,6 +224,78 @@ namespace JoeBrowser
                     Ui.Scale = wasScale;
                     Theme.ClearFontCache();
 
+                    /* The reported defect of this round: every profile on a machine claimed the
+                       installed browser's build, so a workspace of ten profiles reported one
+                       number, the same one as the user's own Chrome. Asserted here the way the
+                       grid makes them: each profile through the same path, then the user agents
+                       and the hint builds compared. Chrome's reduced user agent hides the build,
+                       so the major is what has to differ between any two profiles. */
+                    Func<Dictionary<string, int>, string, int> Count = delegate(Dictionary<string, int> map, string key)
+                    {
+                        int n;
+                        map.TryGetValue(key ?? "", out n);
+                        map[key ?? ""] = n + 1;
+                        return n + 1;
+                    };
+                    try
+                    {
+                        var workspace = new List<Profile>();
+                        for (int i = 0; i < 12; i++)
+                        {
+                            var p = new Profile { Name = "version test " + (i + 1) };
+                            FingerprintIdentity.Comparison c;
+                            FingerprintIdentity.MakeUnique(p.Fp, "System default", p.Proxy, workspace, out c);
+                            string vnote;
+                            BrowserVersions.Assign(p, workspace, out vnote);
+                            FingerprintFactory.ResolveUserAgent(p.Fp, new BrowserInfo
+                            {
+                                Name = "self test",
+                                Version = "157.0.8103.38",
+                                MajorVersion = 157,
+                                Path = System.IO.Path.Combine(sandbox, "chrome.exe")
+                            });
+                            workspace.Add(p);
+                        }
+                        var majors = new Dictionary<string, int>(StringComparer.Ordinal);
+                        var builds = new Dictionary<string, int>(StringComparer.Ordinal);
+                        var agents = new Dictionary<string, int>(StringComparer.Ordinal);
+                        foreach (var p in workspace)
+                        {
+                            if (!BrowserVersions.IsReal(p.BrowserVersion))
+                                sb.Append(" [a profile reports " + (p.BrowserVersion ?? "no build") + ", which is not a build a browser shipped]");
+                            if (p.Fp.BrowserVersion != p.BrowserVersion)
+                                sb.Append(" [the profile and its fingerprint name different builds]");
+                            string uaBuild = BrowserVersions.FromUserAgent(p.Fp.UserAgent);
+                            int uaMajor = BrowserVersions.MajorOf(BrowserVersions.FromUserAgent(p.Fp.UserAgent));
+                            if (uaMajor != BrowserVersions.MajorOf(p.BrowserVersion))
+                                sb.Append(" [a profile's user agent says " + uaMajor + " but it reports " + p.BrowserVersion + "]");
+                            if (p.Fp.UserAgent != null && p.Fp.UserAgent.IndexOf("157.0.0.0", StringComparison.Ordinal) >= 0)
+                                sb.Append(" [a profile still claims the installed browser's major]");
+                            Count(majors, BrowserVersions.MajorOf(p.BrowserVersion).ToString());
+                            Count(builds, p.BrowserVersion);
+                            Count(agents, p.Fp.UserAgent ?? "");
+                        }
+                        if (majors.Count < 10) sb.Append(" [12 profiles only cover " + majors.Count + " majors]");
+                        if (builds.Count != 12) sb.Append(" [12 profiles share builds: " + builds.Count + " distinct]");
+                        if (agents.Count != 12) sb.Append(" [12 profiles share user agents: " + agents.Count + " distinct]");
+
+                        /* And a removal of a shipped extension has to survive the next start. */
+                        string shipped = ExtensionCatalog.DefaultStoreExtensions[0][0];
+                        bool wasRemoved = ExtensionCatalog.IsRemovedByUser(shipped);
+                        ExtensionCatalog.MarkRemoved(shipped, true);
+                        if (!ExtensionCatalog.IsRemovedByUser(shipped))
+                            sb.Append(" [removing a shipped extension was not recorded]");
+                        var folders = ExtensionCatalog.DefaultFolders();
+                        foreach (string f in folders)
+                            if (f.EndsWith(shipped, StringComparison.OrdinalIgnoreCase))
+                                sb.Append(" [a removed shipped extension is still loaded]");
+                        if (wasRemoved) ExtensionCatalog.MarkRemoved(shipped, false);
+                    }
+                    catch (Exception ex)
+                    {
+                        sb.Append(" [version checks threw " + ex.GetType().Name + ": " + ex.Message + "]");
+                    }
+
                     var saved = new Profile { Name = "self test save" };
                     store.Save(saved);
                     var back = store.LoadAll();
