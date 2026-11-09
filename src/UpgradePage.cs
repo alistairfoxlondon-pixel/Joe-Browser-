@@ -688,6 +688,28 @@ namespace JoeBrowser
         protected override void OnResize(EventArgs e) { base.OnResize(e); LayoutCore(); }
         protected override void OnLayout(LayoutEventArgs e) { base.OnLayout(e); LayoutCore(); }
 
+        /// <summary>Width the widest label in a chip row needs, logo and padding included.</summary>
+        private static int MeasureChip(List<CoinChip> chips)
+        {
+            int need = 0;
+            try
+            {
+                using (var g = Graphics.FromHwnd(IntPtr.Zero))
+                {
+                    foreach (var chip in chips)
+                    {
+                        if (chip == null) continue;
+                        float logo = string.IsNullOrEmpty(chip.Logo) ? 0 : Ui.S(22) + Ui.S(9);
+                        float caption = Ui.Measure(g, chip.Caption ?? "", Theme.Body).Width;
+                        float sub = Ui.Measure(g, chip.Sub ?? "", Theme.Small).Width;
+                        need = Math.Max(need, (int)Math.Ceiling(logo + Math.Max(caption, sub)) + Ui.S(10) * 2);
+                    }
+                }
+            }
+            catch { }
+            return need;
+        }
+
         private void LayoutCore()
         {
             if (_layingOut || !_ready || _host == null) return;
@@ -712,7 +734,15 @@ namespace JoeBrowser
                 _plan.SetBounds(pad, y, inner, planH);
                 y += planH + Ui.S(22);
 
-                int perRow = inner >= Ui.S(760) ? 5 : inner >= Ui.S(520) ? 3 : 2;
+                /* Chip labels are measured, not assumed. Three per row at 120% scale gave each
+                   one a third of the column, so "TRON" and its address prefix were cut off with an
+                   ellipsis and the two networks became hard to tell apart. */
+                int chipNeed = Math.Max(Ui.S(112), Math.Max(MeasureChip(_netChips), MeasureChip(_coinChips)));
+                int perRowMax = Math.Max(2, (inner + gap) / (chipNeed + gap));
+                int perRow = inner >= Ui.S(760) ? Math.Min(5, perRowMax)
+                    : inner >= Ui.S(520) ? Math.Min(3, perRowMax)
+                    : Math.Min(2, perRowMax);
+                if (perRow < 2) perRow = 2;
                 int chipW = (inner - gap * (perRow - 1)) / perRow;
                 int chipH = Ui.S(44);
 
