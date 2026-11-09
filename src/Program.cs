@@ -269,6 +269,19 @@ namespace JoeBrowser
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            /* Look for the .pdb beside the executable and delete nothing: a marker Windows
+               Defender's reputation engine reads for "a program that ships a separate debug
+               database" is not the problem. What the engine does react to is a single unsigned
+               binary that decompresses another executable, so the installer's own README and the
+               release notes say plainly which of the two to run. Nothing in this block changes
+               behaviour; it records the build shape in the log so a support report carries it. */
+            try
+            {
+                Log.Info("Build " + Application.ProductVersion + " on .NET " +
+                    Environment.Version + ", " + (Environment.Is64BitProcess ? "64" : "32") + " bit process");
+            }
+            catch { }
+
             /* Registered before the first window exists. The install gate used to run with no
                handler at all, so a failure while installing showed the raw .NET crash dialog -
                the "unexpected error" users reported when the very first thing they did was
