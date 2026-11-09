@@ -221,8 +221,8 @@ namespace JoeBrowser
 
                 for (int i = 0; i < _rows.Count; i++)
                 {
-                    _rows[i].SetBounds(pad, y, inner, Ui.S(64));
-                    y += Ui.S(64) + Ui.S(8);
+                    _rows[i].SetBounds(pad, y, inner, ExtensionRow.RowH);
+                    y += ExtensionRow.RowH + Ui.S(10);
                 }
                 if (Items.Count > 0) y += Ui.S(12);
 
@@ -264,7 +264,7 @@ namespace JoeBrowser
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             Ui.Opaque(this);
-            Height = Ui.S(64);
+            Height = RowH;
             Cursor = Cursors.Hand;
         }
 
@@ -279,6 +279,18 @@ namespace JoeBrowser
         private RectangleF DeleteRect
         {
             get { return new RectangleF(SwitchRect.Left - Ui.S(10) - Ui.S(30), (Height - Ui.S(30)) / 2f, Ui.S(30), Ui.S(30)); }
+        }
+
+        /* Chip 40 plus a title and a caption line, with 12 above and below, and never less than
+           the two icon buttons need. Two lines of text in 64 px is what left the caption a pixel
+           from the bottom edge. */
+        public static int RowH
+        {
+            get
+            {
+                int text = Theme.LineHeight(Theme.H3) + Ui.S(2) + Theme.LineHeight(Theme.Caption);
+                return Math.Max(Ui.S(64), Math.Max(text, Ui.S(40)) + Ui.S(24));
+            }
         }
 
         private RectangleF StoreRect
@@ -349,15 +361,21 @@ namespace JoeBrowser
             }
 
             float x = cr.Right + Ui.S(14);
-            float mid = Height / 2f;
+            /* The two lines are measured against each other, not both pinned to the centre with
+               invented offsets: the block is centred, and the caption follows the title's own
+               height. */
+            float titleH = Theme.LineHeight(Theme.H3);
+            float capH = Theme.LineHeight(Theme.Caption);
+            float blockTop = (Height - (titleH + Ui.S(2) + capH)) / 2f;
             string name = string.IsNullOrWhiteSpace(Item.Name) ? "Extension" : Item.Name;
-            Ui.Text(g, name, Theme.H3, Theme.Text, x, mid - Ui.S(15), Math.Max(Ui.S(120), StoreRect.Left - x - Ui.S(16)));
+            Ui.Text(g, name, Theme.H3, Theme.Text, x, blockTop, Math.Max(Ui.S(120), StoreRect.Left - x - Ui.S(16)));
             string source = Item.Source == "url" ? "Chrome Web Store"
                 : Item.Source == "builtin" ? "Built in"
                 : Item.Source == "file" ? "Imported file"
                 : "Unpacked folder";
             string detail = source + (string.IsNullOrWhiteSpace(Item.Version) ? "" : "  ·  v" + Item.Version);
-            Ui.Text(g, detail, Theme.Caption, Theme.TextFaint, x, mid + Ui.S(3), Math.Max(Ui.S(120), StoreRect.Left - x - Ui.S(16)));
+            Ui.Text(g, detail, Theme.Caption, Theme.TextFaint, x, blockTop + titleH + Ui.S(2),
+                Math.Max(Ui.S(120), StoreRect.Left - x - Ui.S(16)));
 
             // quick actions
             if (_hover == 2) Ui.Fill(g, StoreRect, Ui.S(4), Theme.HoverOverlay);
