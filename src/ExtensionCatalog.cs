@@ -101,7 +101,14 @@ namespace JoeBrowser
                     string id = entry[0];
                     if (IsRemovedByUser(id)) continue;
                     string target = Path.Combine(ImportedRoot, id);
-                    if (!File.Exists(Path.Combine(target, "manifest.json"))) continue;
+                    /* A folder without a usable manifest is a half-finished download, and it is
+                       what made the pair look installed while the browser refused to load them.
+                       Remove it so the downloader can try again from a clean state. */
+                    if (!UsableManifest(Path.Combine(target, "manifest.json")))
+                    {
+                        try { if (Directory.Exists(target)) Directory.Delete(target, true); } catch { }
+                        continue;
+                    }
                     bool listed = false;
                     foreach (var e in items)
                     {
@@ -312,7 +319,7 @@ namespace JoeBrowser
             string folder = Path.Combine(ImportedRoot, id);
             try
             {
-                if (File.Exists(Path.Combine(folder, "manifest.json"))) return DefaultState.Present;
+                if (UsableManifest(Path.Combine(folder, "manifest.json"))) return DefaultState.Present;
             }
             catch { }
             string skip = Path.Combine(AppPaths.Extensions, ".store-" + id + ".skip");
@@ -372,7 +379,7 @@ namespace JoeBrowser
                     if (IsRemovedByUser(id)) continue;
                     string target = Path.Combine(ImportedRoot, id);
                     bool present = false;
-                    try { present = File.Exists(Path.Combine(target, "manifest.json")); } catch { }
+                    try { present = UsableManifest(Path.Combine(target, "manifest.json")); } catch { }
                     if (present) continue;
                     string skip = Path.Combine(AppPaths.Extensions, ".store-" + id + ".skip");
                     if (!force)
@@ -489,7 +496,7 @@ namespace JoeBrowser
                     }
                     if (listed) continue;
 
-                    if (File.Exists(Path.Combine(target, "manifest.json")))
+                    if (UsableManifest(Path.Combine(target, "manifest.json")))
                     {
                         items.Add(new ExtensionItem
                         {
@@ -549,7 +556,7 @@ namespace JoeBrowser
                 string folder = Path.Combine(ImportedRoot, entry[0]);
                 try
                 {
-                    if (Directory.Exists(folder) && File.Exists(Path.Combine(folder, "manifest.json")))
+                    if (Directory.Exists(folder) && UsableManifest(Path.Combine(folder, "manifest.json")))
                         result.Add(folder);
                 }
                 catch { }
@@ -819,6 +826,30 @@ namespace JoeBrowser
                 if (string.Equals(Path.GetFileName(dir), id, StringComparison.OrdinalIgnoreCase)) return dir;
             }
             return "";
+        }
+
+        /// <summary>
+        /// True when a folder holds a manifest Chromium will actually load: a JSON object with a
+        /// name, a version and manifest_version 3. An empty or truncated file passed the old
+        /// File.Exists test, so a download that died halfway left an extension that was listed,
+        /// loaded on the command line and silently rejected by the browser.
+        /// </summary>
+        public static bool UsableManifest(string path)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
+                var info = new FileInfo(path);
+                if (info.Length < 24) return false;
+                string text = File.ReadAllText(path, Encoding.UTF8);
+                if (text.IndexOf("\"manifest_version\"", StringComparison.Ordinal) < 0) return false;
+                if (text.IndexOf("\"name\"", StringComparison.Ordinal) < 0) return false;
+                if (text.IndexOf("\"version\"", StringComparison.Ordinal) < 0) return false;
+                try { Json.Deserialize<Dictionary<string, object>>(text); }
+                catch { return false; }
+                return true;
+            }
+            catch { return false; }
         }
 
         /// <summary>

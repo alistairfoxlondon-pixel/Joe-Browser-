@@ -546,6 +546,21 @@ namespace JoeBrowser
                    a profile launched straight from a fresh install had the folders on disk and
                    the catalog listing them as absent. Listing is cheap and idempotent. */
                 try { ExtensionCatalog.ListPresentDefaults(); } catch (Exception ex) { Log.Error("Default extensions", ex); }
+                /* And fetch whatever is not there, off the launch path. The two shipped store
+                   extensions were downloaded from the browser launch path, which meant a fifteen
+                   second timeout in front of every launch and a silent failure behind a proxy -
+                   reported, accurately, as "the two extensions are never installed". One
+                   background attempt per process, started here, with the Extensions page able to
+                   retry at once if it fails. */
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                {
+                    try
+                    {
+                        ExtensionCatalog.EnsureDefaults();
+                        ExtensionCatalog.ListPresentDefaults();
+                    }
+                    catch (Exception ex) { Log.Error("Default extension fetch", ex); }
+                });
                 /* The account gate only appears until the first account exists. After that the
                    app remembers the sign-in for this Windows user (DPAPI-protected session
                    marker), so daily use stays a double-click. */
