@@ -20,7 +20,7 @@ namespace JoeBrowser.Setup
     {
         internal const string AppId = "JoeBrowser.Browser.1.2";
         internal const string AppName = "Joe Browser";
-        internal const string Version = "1.5.12";
+        internal const string Version = "1.5.13";
         internal const string Publisher = "Joe Goldberg";
 
         [STAThread]
@@ -325,18 +325,14 @@ namespace JoeBrowser.Setup
         private static float DetectScale()
         {
             float dpi = 96f;
+            /* The desktop's device context already reports the system scale, which is the scale
+               the installer's StartPosition will centre it on. DetectScale is static because it
+               runs before the window exists, so it cannot use Control.CreateGraphics. */
             try
             {
                 using (var g = Graphics.FromHwnd(IntPtr.Zero)) dpi = g.DpiX;
             }
-            catch
-            {
-                try
-                {
-                    using (var g = CreateGraphics()) dpi = g.DpiX;
-                }
-                catch { }
-            }
+            catch { }
             float scale = dpi / 96f;
             if (scale < 1f) scale = 1f;
             if (scale > 3f) scale = 3f;
