@@ -738,6 +738,20 @@ class of fault: a width that was assumed rather than measured.
 | Store link fallback | If no browser accepted the link, nothing happened | The link goes on the clipboard, and the dialog opens on a store link already there |
 | Extension loading | A duplicated or over long `--load-extension` list made Chromium drop every extension silently | The list is unique, capped, and the log says what was left out |
 
+### The check that runs on every push
+
+`--selftest` now exercises the arithmetic this round depends on, at 100, 125, 150 and 200
+percent: a row is never shorter than the caption it carries, a field is taller than a line of
+text, the browser, kernel and extension rows can hold their two lines, the promo card can hold
+its three, and a line height actually grows when the scale does. The last one is deliberately
+blunt. It is the assertion that fails if anyone ever asks for a type size in points again, which
+is what made the text soft in the first place.
+
+The first version of that check failed on its own arithmetic, which is worth recording: it
+measured each scale without clearing the font cache between them, so every scale reported the
+previous scale's faces. CI caught it, the cache is cleared between scales now, and the numbers
+are compared in order.
+
 ### What this round proves, and what it does not
 
 `JoeBrowser.exe --selftest` runs on every push and checks the parts a machine can check. The
