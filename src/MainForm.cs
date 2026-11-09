@@ -397,10 +397,14 @@ namespace JoeBrowser
 
             _upgradePage = new UpgradePage { Visible = false };
             _upgradePage.ActionRequested += delegate(object sender, UpgradeActionEventArgs e) { PlanAction(e.Key); };
+            /* Only needed while the plan page is open, and only it has anything to tick. A one
+               second timer that runs for the life of the window, wakes the message loop and then
+               returns, is a watt and a hitch for nothing: it is started when the page opens and
+               stopped when it closes. */
             _planTimer = new Timer { Interval = 1000 };
             _planTimer.Tick += delegate
             {
-                if (_page != 7) return;
+                if (_page != 7) { _planTimer.Stop(); return; }
                 _upgradePage.TickTimer();
                 /* The chain is watched while the page is open, so a payment confirms on its own.
                    The manual button stays for someone who wants an answer immediately. */
@@ -2978,6 +2982,9 @@ namespace JoeBrowser
         private void SetPageCore(int page)
         {
             _page = page;
+            /* Only the plan page has a clock. Leaving it stops the timer here rather than on its
+               next tick, so the message loop goes quiet the moment the page does. */
+            if (page != 7 && _planTimer != null) _planTimer.Stop();
             SuspendLayout();
             /* Pages 0-7 are the long-standing destinations; 8 and 9 are History and Account.
                Selected state is per button, so the subscript mismatch between "page number" and
