@@ -1998,14 +1998,14 @@ namespace JoeBrowser
             };
         }
 
-        private bool ShowBar
-        {
-            get
-            {
-                return MaxOffset > 0 &&
-                       (_thumbHover || _dragging || (DateTime.UtcNow - _barShownAt).TotalMilliseconds < 900);
-            }
-        }
+        /// <summary>
+        /// True whenever the content is taller than the viewport - and that is all. The bar used
+        /// to appear only while the user was scrolling and fade a second later, so a page that
+        /// needed scrolling looked exactly like a page that did not, and a cut-off list read as
+        /// "the app is truncating my data" rather than "there is more below". A persistent bar is
+        /// also what makes the page feel responsive: it answers on the first frame.
+        /// </summary>
+        private bool ShowBar { get { return MaxOffset > 0; } }
 
         protected override void Dispose(bool disposing)
         {
@@ -2766,10 +2766,10 @@ namespace JoeBrowser
                         textLeft, y + rowH - Theme.Caption.GetHeight(g) - Ui.S(6), textW);
             }
 
-            // The scroll indicator is drawn over the rows, never beside them, and only while the
-            // list is being scrolled or the pointer is on the thumb.
-            bool showBar = MaxScroll > 0 &&
-                           (_thumbHover || _dragging || (DateTime.UtcNow - _barShownAt).TotalMilliseconds < 900);
+            /* Always shown when the list is longer than the box. A hint that appears only while
+               scrolling cannot tell a user that a list is long before they try to scroll it, and
+               a cut-off list with no bar is read as lost data. */
+            bool showBar = MaxScroll > 0;
             if (showBar)
             {
                 var hit = ThumbRect();

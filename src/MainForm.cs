@@ -249,8 +249,24 @@ namespace JoeBrowser
                 _maxBtn.Tip = Maximized ? "Restore" : "Maximize";
                 _maxBtn.Invalidate();
             }
-            LayoutAll();
+            /* A resize re-lays every page, and each page's own layout calls Invalidate. During a
+               drag-resize that happens dozens of times a second, so the queue is coalesced here:
+               one layout per paint, and the paint happens immediately rather than whenever the
+               message loop gets to it. That is the difference between a window that follows the
+               pointer and one that snaps a frame behind it. */
+            _pendingLayout = true;
+            BeginInvoke((Action)delegate
+            {
+                if (!_pendingLayout || IsDisposed) return;
+                _pendingLayout = false;
+                LayoutAll();
+                Invalidate(true);
+                Update();
+            });
         }
+
+        /// <summary>Set by OnSurfaceChanged, cleared by the layout that follows it.</summary>
+        private bool _pendingLayout;
 
         private JBButton Nav(string text, string icon, EventHandler click)
         {
