@@ -3481,7 +3481,7 @@ namespace JoeBrowser
                 return p.KernelFullVersion;
             try
             {
-                var k = Kernels.Find(p.KernelEngine, p.KernelVersion);
+                var k = KernelStore.Find(p.KernelEngine, p.KernelVersion);
                 if (k != null && k.Ready && BrowserVersions.IsReal(k.FileVersion)) return k.FileVersion;
             }
             catch { }

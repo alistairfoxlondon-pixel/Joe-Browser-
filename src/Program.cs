@@ -317,17 +317,17 @@ namespace JoeBrowser
 
                         /* A pinned kernel IS a different executable, so it may - and must - report a
                            different build. That is where a workspace's version diversity comes from. */
-                        var pinned = new Profile { Fp = new FingerprintConfig(), KernelFullVersion = "143.0.7499.41" };
+                        var pinnedProfile = new Profile { Fp = new FingerprintConfig(), KernelFullVersion = "143.0.7499.41" };
                         string pnote;
-                        BrowserVersions.Assign(pinned, workspace, info.Version, out pnote);
-                        if (pinned.BrowserVersion != "143.0.7499.41")
+                        BrowserVersions.Assign(pinnedProfile, workspace, info.Version, out pnote);
+                        if (pinnedProfile.BrowserVersion != "143.0.7499.41")
                             sb.Append(" [a pinned kernel does not report its own build]");
 
                         /* And with no binary known, nothing may be invented. */
-                        var unknown = new Profile { Fp = new FingerprintConfig() };
+                        var noBinary = new Profile { Fp = new FingerprintConfig() };
                         string unote;
-                        BrowserVersions.Assign(unknown, new List<Profile>(), "", out unote);
-                        if (!BrowserVersions.IsReal(unknown.BrowserVersion))
+                        BrowserVersions.Assign(noBinary, new List<Profile>(), "", out unote);
+                        if (!BrowserVersions.IsReal(noBinary.BrowserVersion))
                             sb.Append(" [a profile with no binary got an unreal build]");
 
                         /* And a removal of a shipped extension has to survive the next start. */
