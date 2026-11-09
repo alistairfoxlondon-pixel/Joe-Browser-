@@ -2735,7 +2735,7 @@ namespace JoeBrowser
             {
                 int rowsH = 0;
                 foreach (var r in card.Rows) rowsH += RowHeight(r, rowH, tallRowH);
-                int h = headH + rowsH + Ui.S(10);
+                int h = headH + rowsH + Ui.S(6);
                 card.Panel.SetBounds(0, y, colW, h);
                 var lbl = card.Panel.Tag as JBLabel;
                 if (lbl != null) lbl.SetBounds(pad, Ui.S(15), colW - pad * 2, Theme.LineHeight(Theme.H2));
@@ -2850,7 +2850,7 @@ namespace JoeBrowser
                its left edge past that edge and leave it hanging outside the card. */
             int colW = Math.Max(Ui.S(300), _aboutColumn.Width);
             int tw = Math.Min(Math.Max(Ui.S(96), colW - Ui.S(60)), _aboutTelegram.PreferredWidth(Ui.S(190)));
-            _aboutTelegram.SetBounds(Math.Max(Ui.S(8), colW - tw - Ui.S(20)), Ui.S(47), tw, Ui.S(33));
+            _aboutTelegram.SetBounds(Math.Max(Ui.S(8), colW - tw - Ui.S(20)), Ui.S(47), tw, Theme.Field);
             _aboutColumn.Invalidate();
         }
 
@@ -4262,19 +4262,29 @@ namespace JoeBrowser
             int x = 0;
             int gap = Ui.S(16);
 
-            // identity card
-            var card = new RectangleF(x, Ui.S(8), colW, Ui.S(112));
-            Ui.Fill(g, card, Ui.S(8), Theme.Panel);
-            Ui.Stroke(g, card, Ui.S(8), Theme.Line, 1f);
+            /* Identity card. Three lines at 20, 52 and 76 from the top of a 112 px card were
+               arithmetic for one font size: at 150% the installation path sat on the line above
+               it and the card's own bottom edge cut through it. The card is as tall as the block
+               it carries, and the block is centred beside the mark. */
+            float markSize = Ui.S(56);
+            float dispH = Theme.LineHeight(Theme.Display);
+            float subH = Theme.LineHeight(Theme.Small);
+            float pathH = Theme.LineHeight(Theme.Caption);
+            float idH = Math.Max(markSize, dispH + Ui.S(4) + subH + Ui.S(4) + pathH) + Ui.S(32);
+            var card = new RectangleF(x, Ui.S(8), colW, idH);
+            Ui.Fill(g, card, Ui.S(10), Theme.Panel);
+            Ui.Stroke(g, card, Ui.S(10), Theme.Line);
 
-            var mark = new RectangleF(card.X + Ui.S(20), card.Y + Ui.S(28), Ui.S(56), Ui.S(56));
+            var mark = new RectangleF(card.X + Ui.S(20), card.Y + (idH - markSize) / 2f, markSize, markSize);
             Logo.Draw(g, mark);
 
             float tx = mark.Right + Ui.S(18);
-            float textW = colW - (tx - card.X) - Ui.S(220);
-            Ui.Text(g, "Joe Browser", Theme.Display, Theme.Text, tx, card.Y + Ui.S(20), textW);
-            Ui.Text(g, L10n.T("sub.about"), Theme.Small, Theme.TextDim, tx, card.Y + Ui.S(52), textW);
-            Ui.Text(g, AppPaths.Root, Theme.Caption, Theme.TextFaint, tx, card.Y + Ui.S(76), textW);
+            float textW = Math.Max(Ui.S(120), colW - (tx - card.X) - Ui.S(28));
+            float blockH = dispH + Ui.S(4) + subH + Ui.S(4) + pathH;
+            float ty = card.Y + (idH - blockH) / 2f;
+            Ui.Text(g, "Joe Browser", Theme.Display, Theme.Text, tx, ty, textW);
+            Ui.Text(g, L10n.T("sub.about"), Theme.Small, Theme.TextDim, tx, ty + dispH + Ui.S(4), textW);
+            Ui.Text(g, AppPaths.Root, Theme.Caption, Theme.TextFaint, tx, ty + dispH + Ui.S(4) + subH + Ui.S(4), textW);
 
             // capability tiles
             float sectY = card.Bottom + Ui.S(26);
@@ -4295,7 +4305,11 @@ namespace JoeBrowser
             float tileY = sectY + Ui.S(26);
             int cols = colW >= Ui.S(1420) ? 4 : colW >= Ui.S(1060) ? 3 : colW >= Ui.S(680) ? 2 : 1;
             float tileW = (colW - gap * (cols - 1)) / cols;
-            float tileH = Ui.S(104);
+            /* A chip row and two description lines, with the same inset above and below. The 104
+               constant clipped the second description line at a large scale. */
+            float tileH = Math.Max(Ui.S(104),
+                Math.Max(Ui.S(28), Theme.LineHeight(Theme.H3)) + Ui.S(8) +
+                Theme.LineHeight(Theme.Caption) * 2 + Ui.S(24));
             for (int i = 0; i < features.Length; i++)
             {
                 var r = new RectangleF(x + (i % cols) * (tileW + gap), tileY + (i / cols) * (tileH + gap), tileW, tileH);
@@ -4331,10 +4345,10 @@ namespace JoeBrowser
             var shortcuts = ShortcutDisplay();
             int scCols = colW >= Ui.S(900) ? 2 : 1;
             int perCol = (int)Math.Ceiling(shortcuts.Count / (double)scCols);
-            float rowH = Ui.S(38);
+            float rowH = Math.Max(Ui.S(38), Theme.LineHeight(Theme.Caption) + Ui.S(14));
             var sc = new RectangleF(x, scSect + Ui.S(26), colW, perCol * rowH + Ui.S(14));
-            Ui.Fill(g, sc, Ui.S(8), Theme.Panel);
-            Ui.Stroke(g, sc, Ui.S(8), Theme.Line, 1f);
+            Ui.Fill(g, sc, Ui.S(10), Theme.Panel);
+            Ui.Stroke(g, sc, Ui.S(10), Theme.Line);
 
             float halfW = colW / scCols;
             for (int i = 0; i < shortcuts.Count; i++)
@@ -4359,7 +4373,7 @@ namespace JoeBrowser
                     }
 
                 int keyW = (int)Math.Ceiling(Ui.Measure(g, shortcuts[i][0], Theme.Caption).Width) + Ui.S(18);
-                var chipR = new RectangleF(kx, cy, keyW, Ui.S(24));
+                var chipR = new RectangleF(kx, cy, keyW, Math.Min(Ui.S(24), rowH - Ui.S(8)));
                 Ui.Fill(g, chipR, Ui.S(4), Theme.Card);
                 Ui.Stroke(g, chipR, Ui.S(4), Theme.Line, 1f);
                 Ui.Text(g, shortcuts[i][0], Theme.Caption, Theme.Text, chipR.X, chipR.Y, chipR.Width, "center");
@@ -4379,10 +4393,10 @@ namespace JoeBrowser
                 new[] { L10n.T("about.w2"), (_proxies == null ? 0 : _proxies.Count).ToString() },
                 new[] { L10n.T("about.w3"), (_extensions == null ? 0 : _extensions.Count).ToString() }
             };
-            float wsRowH = Ui.S(44);
+            float wsRowH = Math.Max(Ui.S(44), Theme.LineHeight(Theme.Body) + Ui.S(20));
             var ws = new RectangleF(x, wsSect + Ui.S(26), colW, stats.Length * wsRowH + Ui.S(12));
-            Ui.Fill(g, ws, Ui.S(8), Theme.Panel);
-            Ui.Stroke(g, ws, Ui.S(8), Theme.Line, 1f);
+            Ui.Fill(g, ws, Ui.S(10), Theme.Panel);
+            Ui.Stroke(g, ws, Ui.S(10), Theme.Line);
             for (int i = 0; i < stats.Length; i++)
             {
                 float ry = ws.Y + Ui.S(6) + i * wsRowH;

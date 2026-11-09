@@ -38,7 +38,7 @@ namespace JoeBrowser
         public static string VersionText()
         {
             try { return Application.ProductVersion; }
-            catch { return "1.5.25"; }
+            catch { return "1.5.26"; }
         }
 
         /// <summary>Everything a developer needs: build, plan, browsers found, kernels, log tail.</summary>
