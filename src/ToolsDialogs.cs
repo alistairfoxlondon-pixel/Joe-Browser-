@@ -47,7 +47,7 @@ namespace JoeBrowser
             BackColor = Theme.Bg;
             ShowInTaskbar = false;
             MinimizeBox = false;
-            MinimumSize = new Size(Ui.S(430), Ui.S(320));
+            MinimumSize = new Size(Ui.S(440), Ui.S(330));
             ClientSize = new Size(Ui.S(width), Ui.S(height));
 
             _title = new JBLabel(LabelRole.Title, title);
@@ -95,7 +95,7 @@ namespace JoeBrowser
         public JBLabel AddSection(string text)
         {
             var l = new JBLabel(LabelRole.Accent, text);
-            AddRow(null, l, Ui.S(18));
+            AddRow(null, l, Theme.Row);
             return l;
         }
 
@@ -111,7 +111,7 @@ namespace JoeBrowser
         public JBTextBox AddField(string label, string value, string placeholder, string icon,
             bool multiline, int height)
         {
-            if (!string.IsNullOrEmpty(label)) AddRow(new JBLabel(LabelRole.Accent, label), null, Ui.S(18));
+            if (!string.IsNullOrEmpty(label)) AddRow(new JBLabel(LabelRole.Accent, label), null, Theme.Row);
             var t = new JBTextBox(multiline);
             t.Value = value ?? "";
             t.Placeholder = placeholder ?? "";
@@ -123,19 +123,19 @@ namespace JoeBrowser
 
         public JBSelect AddSelect(string label, IEnumerable<string> items, int selected, string icon)
         {
-            if (!string.IsNullOrEmpty(label)) AddRow(new JBLabel(LabelRole.Accent, label), null, Ui.S(18));
+            if (!string.IsNullOrEmpty(label)) AddRow(new JBLabel(LabelRole.Accent, label), null, Theme.Row);
             var s = new JBSelect { Icon = icon };
             var list = new List<string>();
             if (items != null) list.AddRange(items);
             s.SetItems(list, selected);
-            AddRow(null, s, Ui.S(33));
+            AddRow(null, s, Theme.Field);
             return s;
         }
 
         public JBToggle AddToggle(string text, bool value)
         {
             var t = new JBToggle { Text = text, Checked = value };
-            AddRow(null, t, Ui.S(28));
+            AddRow(null, t, Ui.S(30));
             return t;
         }
 
