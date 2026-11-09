@@ -155,8 +155,38 @@ namespace JoeBrowser
                 string ua = p.Fp != null ? p.Fp.UserAgent : null;
                 string fromUa = FromUserAgent(ua);
                 if (!string.IsNullOrEmpty(fromUa)) set.Add(fromUa);
+                /* The major is what a reduced user agent shows, so a major already in use has to
+                   count as taken even when the build behind it is unknown. Recorded as a
+                   major-only marker so MajorOf reads it back. */
+                int major = MajorFromUserAgent(ua);
+                if (major > 0) set.Add(major + ".0.1.1");
             }
             return set;
+        }
+
+        /// <summary>
+        /// The major a user agent names, whether or not the build is complete.
+        ///
+        /// Chrome's reduced user agent says "Chrome/157.0.0.0", which is not a build any browser
+        /// shipped - so it is not a version to compare, but the major in it is the number a
+        /// checker prints, and it is the number that has to differ between two profiles.
+        /// </summary>
+        public static int MajorFromUserAgent(string ua)
+        {
+            if (string.IsNullOrEmpty(ua)) return 0;
+            int i = ua.IndexOf("Chrome/", StringComparison.Ordinal);
+            int len = 7;
+            if (i < 0)
+            {
+                i = ua.IndexOf("Firefox/", StringComparison.Ordinal);
+                len = 8;
+            }
+            if (i < 0) return 0;
+            int start = i + len;
+            int end = start;
+            while (end < ua.Length && ua[end] >= '0' && ua[end] <= '9') end++;
+            int major;
+            return end > start && int.TryParse(ua.Substring(start, end - start), out major) ? major : 0;
         }
 
         /// <summary>The build a user agent string names, if it names a real one.</summary>
@@ -176,6 +206,30 @@ namespace JoeBrowser
             if (end < 0) end = ua.Length;
             string v = ua.Substring(start, end - start).Trim();
             return IsReal(v) ? v : "";
+        }
+
+        /// <summary>
+        /// The major a profile should report, given the builds the workspace already reports.
+        ///
+        /// The search runs from the profile's own major downwards, because that is what a fleet
+        /// of real machines looks like: a few on this month's build, plenty a few versions
+        /// behind, almost nobody a year behind. The window is the last two dozen releases, which
+        /// is wider than any realistic workspace and narrow enough that nothing it returns is a
+        /// version a checker would call ancient.
+        /// </summary>
+        public static int FreeMajor(ICollection<string> takenVersions, int start)
+        {
+            int top = Math.Min(Newest, Math.Max(start, Oldest));
+            int bottom = Math.Max(Oldest, top - 28);
+            for (int candidate = top; candidate >= bottom; candidate--)
+            {
+                bool used = false;
+                foreach (string v in takenVersions)
+                    if (MajorOf(v) == candidate) { used = true; break; }
+                if (!used) return candidate;
+            }
+            /* Every major in the window is already reported: stay where the profile is. */
+            return top;
         }
 
         /// <summary>
@@ -201,35 +255,26 @@ namespace JoeBrowser
             }
 
             /* Which major this profile reports.
-            
+
                Chrome has shipped a reduced user agent since M113: the string says
-               "Chrome/157.0.0.0" and nothing else. So a build number alone is invisible in the
-               user agent, and a workspace whose profiles all report 157 is still a workspace
-               whose profiles are indistinguishable in the one line a checker prints first. The
-               major therefore has to vary too, which is what this loop does: it keeps the
-               profile's own major when it has one and nobody else has claimed it, and otherwise
-               steps back through the last dozen supported releases until it finds a major this
-               workspace is not already reporting. */
+               "Chrome/157.0.0.0" and nothing else. A build number alone is therefore invisible in
+               the user agent, and a workspace whose profiles all report 157 is still a workspace
+               whose profiles are indistinguishable in the one line a checker prints first. So the
+               major varies too: this keeps the profile's own major when the workspace has not
+               claimed it, and otherwise steps back through the last two dozen releases. */
             int wanted = MajorOf(target.BrowserVersion);
-            if (wanted <= 0) wanted = MajorOf(FromUserAgent(target.Fp.UserAgent));
+            if (wanted <= 0) wanted = MajorFromUserAgent(target.Fp.UserAgent);
             if (wanted <= 0 && !string.IsNullOrEmpty(target.KernelVersion)) wanted = MajorOf(target.KernelVersion);
-            if (wanted <= 0) wanted = Math.Min(Newest, 131);
+            if (wanted <= 0) wanted = 131;
 
             var avoid = Taken(workspace);
             if (!string.IsNullOrEmpty(target.BrowserVersion)) avoid.Remove(target.BrowserVersion);
 
-            int major = wanted;
-            for (int step = 0; step < 14; step++)
-            {
-                int candidate = wanted - step;
-                if (candidate < Oldest + 4) break;
-                /* A major is free when no build already here names it and no user agent here
-                   names it either. */
-                bool used = false;
-                foreach (string v in avoid)
-                    if (MajorOf(v) == candidate) { used = true; break; }
-                if (!used) { major = candidate; break; }
-            }
+            int major = FreeMajor(avoid, wanted);
+            if (!string.IsNullOrEmpty(target.BrowserVersion) && MajorOf(target.BrowserVersion) == major)
+                note = "";
+            else if (avoid.Count >= 12)
+                note = "This workspace reports a wide range of builds, so some profiles share a major.";
 
             string version = Pick(major, avoid);
             target.BrowserVersion = version;

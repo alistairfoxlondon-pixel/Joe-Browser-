@@ -266,7 +266,9 @@ namespace JoeBrowser
                             if (p.Fp.BrowserVersion != p.BrowserVersion)
                                 sb.Append(" [the profile and its fingerprint name different builds]");
                             string uaBuild = BrowserVersions.FromUserAgent(p.Fp.UserAgent);
-                            int uaMajor = BrowserVersions.MajorOf(BrowserVersions.FromUserAgent(p.Fp.UserAgent));
+                            /* The reduced user agent carries the major and nothing else, which
+                               is exactly what a checker prints. */
+                            int uaMajor = BrowserVersions.MajorFromUserAgent(p.Fp.UserAgent);
                             if (uaMajor != BrowserVersions.MajorOf(p.BrowserVersion))
                                 sb.Append(" [a profile's user agent says " + uaMajor + " but it reports " + p.BrowserVersion + "]");
                             if (p.Fp.UserAgent != null && p.Fp.UserAgent.IndexOf("157.0.0.0", StringComparison.Ordinal) >= 0)

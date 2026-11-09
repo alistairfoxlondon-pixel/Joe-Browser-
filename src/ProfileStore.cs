@@ -175,16 +175,7 @@ namespace JoeBrowser
                     int major = BrowserVersions.MajorOf(p.BrowserVersion);
                     if (major <= 0) major = BrowserVersions.MajorOf(BrowserVersions.FromUserAgent(p.Fp != null ? p.Fp.UserAgent : null));
                     if (major <= 0) major = 131;
-                    int start = major;
-                    for (int step = 0; step < 14; step++)
-                    {
-                        int candidate = start - step;
-                        if (candidate < BrowserVersions.Oldest + 4) break;
-                        bool used = false;
-                        foreach (string v in claimed)
-                            if (BrowserVersions.MajorOf(v) == candidate) { used = true; break; }
-                        if (!used) { major = candidate; break; }
-                    }
+                    major = BrowserVersions.FreeMajor(taken, major);
                     p.BrowserVersion = BrowserVersions.Pick(major, taken);
                     /* The fingerprint carries the same string, because the client hints and the
                        in-page probes read it from there. */
