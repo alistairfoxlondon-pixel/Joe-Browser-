@@ -38,7 +38,7 @@ namespace JoeBrowser
         public static string VersionText()
         {
             try { return Application.ProductVersion; }
-            catch { return "1.4.8"; }
+            catch { return "1.4.9"; }
         }
 
         /// <summary>Everything a developer needs: build, plan, browsers found, kernels, log tail.</summary>
@@ -237,8 +237,11 @@ namespace JoeBrowser
             _status.SetBounds(pad, h - Ui.S(56), Math.Max(Ui.S(100), w - pad * 2 - Ui.S(200)), Ui.S(20));
 
             int sw = _send.PreferredWidth(Ui.S(150));
-            _send.SetBounds(w - pad - sw, h - Ui.S(16) - Ui.S(33), sw, Ui.S(33));
             int cw = _copy.PreferredWidth(Ui.S(120));
+            /* The pair is measured before either is placed: at a large scale they were wider
+               than the window and the left button was pushed under the window edge. */
+            Ui.FitPair(ref cw, ref sw, Ui.S(8), Math.Max(Ui.S(200), w - pad * 2), Ui.S(72), Ui.S(72));
+            _send.SetBounds(w - pad - sw, h - Ui.S(16) - Ui.S(33), sw, Ui.S(33));
             _copy.SetBounds(w - pad - sw - Ui.S(8) - cw, h - Ui.S(16) - Ui.S(33), cw, Ui.S(33));
         }
 

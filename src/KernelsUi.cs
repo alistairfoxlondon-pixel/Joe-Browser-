@@ -138,6 +138,7 @@ namespace JoeBrowser
 
             int rw = _refresh.PreferredWidth(Ui.S(110));
             int cwid = _close.PreferredWidth(Ui.S(84));
+            Ui.FitPair(ref rw, ref cwid, Ui.S(8), Math.Max(Ui.S(160), w - pad * 2), Ui.S(72), Ui.S(64));
             _refresh.SetBounds(pad, h - Ui.S(16) - Ui.S(33), rw, Ui.S(33));
             _close.SetBounds(pad + rw + Ui.S(8), h - Ui.S(16) - Ui.S(33), cwid, Ui.S(33));
             /* The note shares the footer row with two buttons whose widths depend on the

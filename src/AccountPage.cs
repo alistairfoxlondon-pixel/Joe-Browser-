@@ -285,8 +285,10 @@ namespace JoeBrowser
                 float left = Ui.S(14);
                 /* The remove button is measured, not assumed: a fixed 120 px reserve is narrower
                    than the button on a large font, and the address then ran underneath it. */
-                int removeW = _remove.PreferredWidth(Ui.S(96)) + Ui.S(12);
-                float w = Math.Max(Ui.S(60), Width - left - removeW);
+                /* Measured with the same clamp the button itself was placed with, so the two
+                   never disagree about where the button starts. */
+                int removeW = Math.Min(_remove.PreferredWidth(Ui.S(96)), Math.Max(Ui.S(40), Width - Ui.S(28))) + Ui.S(12);
+                float w = Math.Max(Ui.S(20), Width - left - removeW - Ui.S(4));
                 Ui.Text(g, string.IsNullOrEmpty(_account.DisplayName) ? _account.Email : _account.DisplayName,
                     Theme.Body, Theme.Text, left, Ui.S(9), w);
                 Ui.Text(g, _account.Email, Theme.Caption, Theme.TextFaint, left, Ui.S(30), w);

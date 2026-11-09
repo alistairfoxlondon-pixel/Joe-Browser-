@@ -765,6 +765,24 @@ namespace JoeBrowser
         /// button could be placed on top of the one before it, and a narrow window pushed the
         /// group past the edge of the page. One implementation means one fix.
         /// </summary>
+        /// <summary>
+        /// Two measured widths that have to share one row. When the pair is wider than the room
+        /// it gets, both shrink in proportion instead of one being pushed off the edge - which is
+        /// what happened to the left hand button of every footer built this way, at a large text
+        /// scale or in a window someone had narrowed.
+        /// </summary>
+        public static void FitPair(ref int left, ref int right, int gap, int room, int minLeft, int minRight)
+        {
+            if (left < 0) left = 0;
+            if (right < 0) right = 0;
+            if (left + gap + right <= room) return;
+            int spare = Math.Max(minLeft + minRight, room - gap);
+            int total = Math.Max(1, left + right);
+            int a = spare * left / total;
+            left = Math.Max(Math.Min(minLeft, spare), a);
+            right = Math.Max(Math.Min(minRight, spare - left), spare - left);
+        }
+
         public static int FlowButtons(JBButton[] buttons, int left, int top, int width, int gap, int rowHeight)
         {
             if (buttons == null || buttons.Length == 0) return top;

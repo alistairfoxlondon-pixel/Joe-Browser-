@@ -1351,8 +1351,13 @@ namespace JoeBrowser
             _lblGpu.SetBounds(0, y, cw, lh); y += lh + lg;
             _gpu.SetBounds(0, y, cw, fh); y += fh + rg;
 
-            _regen.SetBounds(0, y, _regen.PreferredWidth(Ui.S(160)), Ui.S(33));
-            _random.SetBounds(_regen.Right + Ui.S(8), y, _random.PreferredWidth(Ui.S(160)), Ui.S(33));
+            /* The pair shares the column: two long labels at a large scale were wider than the
+               page, so the second button hung outside the content and its last word was cut. */
+            int regenW = _regen.PreferredWidth(Ui.S(160));
+            int randomW = _random.PreferredWidth(Ui.S(160));
+            Ui.FitPair(ref regenW, ref randomW, Ui.S(8), Math.Max(Ui.S(200), cw), Ui.S(96), Ui.S(96));
+            _regen.SetBounds(0, y, regenW, Ui.S(33));
+            _random.SetBounds(_regen.Right + Ui.S(8), y, randomW, Ui.S(33));
             y += Ui.S(33) + Ui.S(10);
             UpdateFirefoxWarn(0, y, cw);
             if (_fpWarn.Visible) y += Ui.S(26) + Ui.S(6);
@@ -1426,7 +1431,8 @@ namespace JoeBrowser
             y = Row(_lblHost, _host, _lblPort, _port, y, cw, two, lh, lg, rg, cg, fh, fh);
             y = Row(_lblUser, _user, _lblPass, _pass, y, cw, two, lh, lg, rg, cg, fh, fh);
 
-            _testBtn.SetBounds(0, y, _testBtn.PreferredWidth(Ui.S(150)), fh);
+            int testW = _testBtn.PreferredWidth(Ui.S(150));
+            _testBtn.SetBounds(0, y, Math.Min(cw, testW), fh);
             y += fh + Ui.S(12);
 
             _proxyCard.SetBounds(0, y, cw, Ui.S(52));
@@ -1467,7 +1473,7 @@ namespace JoeBrowser
             _lblCustomExt.SetBounds(0, y, cw, lh); y += lh + lg;
             _customExt.SetBounds(0, y, cw, Ui.S(76)); y += Ui.S(76) + Ui.S(6);
             _lblExtHint.SetBounds(0, y, cw, Ui.S(34)); y += Ui.S(34) + Ui.S(10);
-            int bw = _openExtFolder.PreferredWidth(Ui.S(200));
+            int bw = Math.Min(cw, _openExtFolder.PreferredWidth(Ui.S(200)));
             _openExtFolder.SetBounds(0, y, bw, fh); y += fh + Ui.S(12);
 
             FinishPage(page, host, cw, y);
