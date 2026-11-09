@@ -78,6 +78,20 @@ namespace JoeBrowser
 
         public List<string> UnreadableFiles { get { return new List<string>(_unreadable); } }
 
+        /// <summary>
+        /// How many profiles this account holds. Asked by the account page, which must state the
+        /// number without depending on a page having rendered.
+        /// </summary>
+        public static int CountMine()
+        {
+            try
+            {
+                if (!Directory.Exists(ActiveProfiles)) return 0;
+                return Directory.GetFiles(ActiveProfiles, "*.json").Length;
+            }
+            catch { return 0; }
+        }
+
         public List<Profile> LoadAll()
         {
             var list = new List<Profile>();
