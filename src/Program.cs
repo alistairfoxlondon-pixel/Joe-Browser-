@@ -204,10 +204,10 @@ namespace JoeBrowser
                         int h3 = Theme.LineHeight(Theme.H3);
                         if (Theme.Row < cap + Ui.S(2)) sb.Append(" [row is shorter than a caption at " + scale + "]");
                         if (Theme.Field < body + Ui.S(8)) sb.Append(" [field is shorter than a line of text at " + scale + "]");
-                        if (BrowsersPage.RowH < h3 + cap + Ui.S(8)) sb.Append(" [browser row cannot hold its two lines at " + scale + "]");
-                        if (KernelsUi.KernelRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [kernel row cannot hold its two lines at " + scale + "]");
-                        if (ExtensionPage.ExtensionRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [extension row cannot hold its two lines at " + scale + "]");
-                        if (ProxyPage.PromoCard.CardH < Theme.LineHeight(Theme.H2) + Theme.LineHeight(Theme.Small) + cap) sb.Append(" [promo card cannot hold its three lines at " + scale + "]");
+                        if (EngineRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [browser row cannot hold its two lines at " + scale + "]");
+                        if (KernelRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [kernel row cannot hold its two lines at " + scale + "]");
+                        if (ExtensionRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [extension row cannot hold its two lines at " + scale + "]");
+                        if (PromoCard.CardH < Theme.LineHeight(Theme.H2) + Theme.LineHeight(Theme.Small) + cap) sb.Append(" [promo card cannot hold its three lines at " + scale + "]");
                         /* The line height itself must grow with the scale, or a measured row
                            would not follow the text it is measuring. */
                         if (scale > 1f && Theme.LineHeight(Theme.Body) <= body && body > 0)
