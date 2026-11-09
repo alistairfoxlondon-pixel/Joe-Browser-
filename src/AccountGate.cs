@@ -235,40 +235,49 @@ namespace JoeBrowser
 
         private void DoEmail()
         {
-            _error.Visible = false;
-            if (_registering)
+            /* Same guard the Google path has always had: a double Enter, or a double click on
+               Sign up, ran Register twice - the second attempt failed with "already exists"
+               just as the window closed, which read as a broken first sign-up. */
+            if (_busy) return;
+            _busy = true;
+            try
             {
-                string err = Accounts.Register(_email.Box.Text, _password.Box.Text, _name.Box.Text);
-                if (err != null) { Fail(err); return; }
-                SignedIn = Accounts.FindByEmail(_email.Box.Text);
-            }
-            else
-            {
-                if (!Accounts.Verify(_email.Box.Text, _password.Box.Text)) { Fail("Wrong email or password."); return; }
-                /* Second factor, when the account has one. The code is checked against the
-                   stored TOTP secret with a one-step window for clock drift. */
-                string secret = Accounts.GetTotpSecret(_email.Box.Text);
-                if (!string.IsNullOrEmpty(secret))
+                _error.Visible = false;
+                if (_registering)
                 {
-                    bool ok = false;
-                    for (int attempt = 0; attempt < 3 && !ok; attempt++)
-                    {
-                        using (var ask = new AskDialog("Two-factor authentication",
-                                   "Enter the 6-digit code from your authenticator app.", "6-digit code", false))
-                        {
-                            if (ask.ShowDialog(this) != DialogResult.OK) { Fail("Two-factor authentication cancelled."); return; }
-                            ok = Totp.Verify(secret, ask.Value);
-                        }
-                    }
-                    if (!ok) { Fail("That code did not match."); return; }
+                    string err = Accounts.Register(_email.Box.Text, _password.Box.Text, _name.Box.Text);
+                    if (err != null) { Fail(err); return; }
+                    SignedIn = Accounts.FindByEmail(_email.Box.Text);
                 }
-                Accounts.TouchLogin(_email.Box.Text);
-                SignedIn = Accounts.FindByEmail(_email.Box.Text);
+                else
+                {
+                    if (!Accounts.Verify(_email.Box.Text, _password.Box.Text)) { Fail("Wrong email or password."); return; }
+                    /* Second factor, when the account has one. The code is checked against the
+                       stored TOTP secret with a one-step window for clock drift. */
+                    string secret = Accounts.GetTotpSecret(_email.Box.Text);
+                    if (!string.IsNullOrEmpty(secret))
+                    {
+                        bool ok = false;
+                        for (int attempt = 0; attempt < 3 && !ok; attempt++)
+                        {
+                            using (var ask = new AskDialog("Two-factor authentication",
+                                       "Enter the 6-digit code from your authenticator app.", "6-digit code", false))
+                            {
+                                if (ask.ShowDialog(this) != DialogResult.OK) { Fail("Two-factor authentication cancelled."); return; }
+                                ok = Totp.Verify(secret, ask.Value);
+                            }
+                        }
+                        if (!ok) { Fail("That code did not match."); return; }
+                    }
+                    Accounts.TouchLogin(_email.Box.Text);
+                    SignedIn = Accounts.FindByEmail(_email.Box.Text);
+                }
+                /* A modal form returns Cancel unless DialogResult is set explicitly, so the caller
+                   would treat a successful sign-in as a dismissal and quit. */
+                DialogResult = DialogResult.OK;
+                Close();
             }
-            /* A modal form returns Cancel unless DialogResult is set explicitly, so the caller
-               would treat a successful sign-in as a dismissal and quit. */
-            DialogResult = DialogResult.OK;
-            Close();
+            finally { _busy = false; }
         }
 
         private bool _busy;

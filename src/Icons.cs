@@ -168,12 +168,14 @@ namespace JoeBrowser
                 if (!Glyph.TryGetValue("circle", out glyph)) return;
 
             /* Material glyphs sit inside a 24 dp box with 2 dp of padding, so an em equal to the
-               box always reads two steps smaller than the control around it. Scaling by 1.2
-               makes an 18 px box hold an 18 px icon.
+               box always reads two steps smaller than the control around it. Scaling by 1.3
+               makes an 18 px box hold an 18 px icon with a little air around it - and the whole
+               interface reads as icon-forward, which is what the product wants: icons were
+               repeatedly reported as too small next to the text they sit beside.
                The size is rounded to a whole pixel and the origin snapped to the pixel grid:
                a glyph drawn at 21.6 px on a half-pixel boundary is resampled and turns soft,
                which is what "the icons look low quality" actually is. */
-            float want = Math.Min(box.Width, box.Height) * 1.2f;
+            float want = Math.Min(box.Width, box.Height) * 1.3f;
             int px = Math.Max(6, (int)Math.Round(want));
 
             /* Material ships two faces and they do not scale the same way. At 16-25 px the solid

@@ -122,7 +122,7 @@ namespace JoeBrowser
         public static Color ActiveBg { get { return Dark ? C(0x26, 0x26, 0x26) : C(0xD8, 0xD8, 0xD8); } }
 
         // windows-ui control metrics
-        public const int ControlHeight = 36;
+        public const int ControlHeight = 40;
         /// <summary>
         /// The app draws square corners. Every surface used to be a rounded rectangle - 6 px on
         /// a control, 8 px on a card - and asking for "no border radius" cannot be honoured by
@@ -140,8 +140,8 @@ namespace JoeBrowser
         public static int RLarge { get { return Ui.S(CardRadius); } }
         public static int RXLarge { get { return Ui.S(CardRadius); } }
 
-        // ---- typography: Segoe UI, 15px base, exactly like windows-ui ----
-        public static string FamilyName = "Segoe UI";
+        // ---- typography: Telenor (the app's requested brand face), Segoe UI fallback ----
+        public static string FamilyName = "Telenor";
 
         private static FontFamily _family;
         private static FontFamily _familySemiBold;
@@ -185,12 +185,15 @@ namespace JoeBrowser
 
             LoadIconFont();
 
-            /* DevToys (and every WinUI 3 app) sets its type in Segoe UI Variable, the optical
-               -size family that replaced plain Segoe UI in Windows 11: text sizes get a wider
-               spacing, display sizes a tighter one, so headings stop looking like scaled-up
-               body copy. It does not exist on Windows 10, where Segoe UI is the same face
-               DevToys itself falls back to, so the stack is identical to the reference app on
-               both systems. Inter/Open Sans ship as the last resort for stripped installs. */
+            /* The app is set in Telenor, the brand face the product is named for. The three
+               faces ship inside the executable (Telenor Regular/Bold/Light, extracted to the
+               data folder on first run), so the app looks the same on a stripped Windows
+             install as on a fully stocked one. Segoe UI Variable, then plain Segoe UI, then
+               Open Sans/Inter remain the fallback chain for a machine where the bundled
+               faces cannot be registered - and for the non-Latin interface languages the
+               Telenor face has no glyphs for (see FamilyForText). */
+            if (LoadTelenor()) return;
+
             FontFamily system = TryFamily("Segoe UI Variable Text");
             if (system != null)
             {
@@ -264,6 +267,55 @@ namespace JoeBrowser
                 if (f != null) { _family = f; FamilyName = n; return; }
             }
         }
+
+        /// <summary>
+        /// Binds the bundled Telenor faces. Telenor Regular and Telenor Bold share one family
+        /// name, so GDI+ hands back a single FontFamily carrying both styles: asking for Bold
+        /// selects the real bold outlines instead of smearing the regular ones. Telenor has no
+        /// Semibold or Display instance, so those slots stay null - F() already falls back to
+        /// the family's own Bold for Semi, which is how the brand uses emphasis anyway.
+        /// Returns false when the faces are not on disk, so the Segoe chain takes over.
+        /// </summary>
+        private static bool LoadTelenor()
+        {
+            var files = new List<string>();
+            bool regular = false;
+            foreach (string name in new[] { "Telenor-Regular.ttf", "Telenor-Bold.ttf", "Telenor-Light.ttf" })
+            {
+                string path = FontFile(name);
+                if (path == null) continue;
+                if (name == "Telenor-Regular.ttf") regular = true;
+                files.Add(Cached(path));
+            }
+            if (!regular) return false;
+
+            try
+            {
+                var pfc = new PrivateFontCollection();
+                foreach (string file in files)
+                {
+                    try { AddFontResourceEx(file, FR_PRIVATE | FR_NOT_ENUM, IntPtr.Zero); _privateInstalled.Add(file); } catch { }
+                    pfc.AddFontFile(file);
+                }
+                _fontCollections.Add(pfc);
+                FontFamily fam = Pick(pfc, "Telenor");
+                if (fam == null) return false;
+                _family = fam;
+                _familySemiBold = null;
+                _familyDisplay = null;
+                _familyDisplaySemiBold = null;
+                FamilyName = "Telenor";
+                _telenorFamily = fam;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Could not load the bundled Telenor faces", ex);
+                return false;
+            }
+        }
+
+        private static FontFamily _telenorFamily;
 
         private static bool BindFamily(string baseName)
         {
@@ -377,7 +429,7 @@ namespace JoeBrowser
             var list = new List<string>();
             string folder = FontsDir();
             if (folder == null) return list;
-            foreach (string prefix in new[] { "OpenSans", "Inter" })
+            foreach (string prefix in new[] { "Telenor", "OpenSans", "Inter" })
             {
                 foreach (string weight in new[] { "Regular", "SemiBold", "Bold" })
                 {
@@ -435,6 +487,7 @@ namespace JoeBrowser
                 return File.Exists(Path.Combine(folder, "MaterialIcons-Regular.ttf"))
                     || File.Exists(Path.Combine(folder, "MaterialIconsOutlined-Regular.otf"))
                     || File.Exists(Path.Combine(folder, "MaterialIconsOutlined-Regular.ttf"))
+                    || File.Exists(Path.Combine(folder, "Telenor-Regular.ttf"))
                     || File.Exists(Path.Combine(folder, "OpenSans-Regular.ttf"));
             }
             catch { return false; }
@@ -623,9 +676,13 @@ namespace JoeBrowser
             Font f;
             if (FontCache.TryGetValue(key, out f)) return f;
 
-            /* Device pixels: the size asked for is the size drawn at every scale. */
-            float pt = (float)(px * 0.75 * Ui.Scale);
-            FontFamily fam = _family;
+            /* Device pixels: the size asked for is the size drawn at every scale. The old
+               code multiplied by 0.75 - the pixel-to-point factor - and then handed the
+               number to a GraphicsUnit.Pixel constructor, so every "16 px" face was actually
+               drawn as a 12 px em and the whole interface read as one size too small. The
+               constant is gone: what a row asks for is what the glass shows. */
+            float pt = (float)(px * Ui.Scale);
+            FontFamily fam = FamilyForText();
 
             try
             {
@@ -658,6 +715,74 @@ namespace JoeBrowser
             }
             FontCache[key] = f;
             return f;
+        }
+
+        /// <summary>
+        /// The family the interface text is drawn in right now. Telenor when it loaded and the
+        /// interface language is one the face can actually render; the system stack otherwise.
+        /// The check runs on the first font request (by then the language has been set) and is
+        /// re-run when the language changes, because switching to Russian or Chinese halfway
+        /// through a session must not leave the new strings in a face that has no glyphs.
+        /// </summary>
+        private static FontFamily FamilyForText()
+        {
+            if (!_coverageChecked)
+            {
+                _coverageChecked = true;
+                _latinOk = LanguageCovered();
+            }
+            if (!_latinOk)
+            {
+                /* Same chain LoadFonts uses, minus the bundled fallback: a language outside
+                   Telenor's coverage is by definition not Latin, and Open Sans cannot fill it
+                   either. The system face does, via GDI's own font linking. */
+                if (_systemFamily == null)
+                    _systemFamily = TryFamily("Segoe UI") ?? TryFamily("Tahoma") ?? _family;
+                if (_systemFamily != null) return _systemFamily;
+            }
+            return _family;
+        }
+
+        private static FontFamily _systemFamily;
+        private static bool _coverageChecked, _latinOk = true;
+
+        /// <summary>True when the active interface language fits inside the bundled face.</summary>
+        public static bool LanguageCovered()
+        {
+            try
+            {
+                string sample = L10n.CoverageSample();
+                if (string.IsNullOrEmpty(sample)) return true;
+                foreach (char c in sample)
+                {
+                    if (c <= '\u024F') continue;                      // Latin, Latin-1, Extended-A/B
+                    if (c >= '\u2000' && c <= '\u2122') continue;     // punctuation, currency, marks
+                    if (char.IsWhiteSpace(c) || char.IsDigit(c)) continue;
+                    if (char.IsPunctuation(c) || char.IsSymbol(c)) continue;
+                    return false;
+                }
+            }
+            catch { }
+            return true;
+        }
+
+        /// <summary>
+        /// Called when the interface language changes at runtime: the coverage decision is
+        /// re-made, and the font cache - whose entries were built for the previous family -
+        /// is dropped together with every window's styled controls, so nothing keeps painting
+        /// with a face the new language cannot show.
+        /// </summary>
+        public static void OnLanguageChanged()
+        {
+            _coverageChecked = true;
+            bool ok = LanguageCovered();
+            if (ok == _latinOk) return;
+            _latinOk = ok;
+            ClearFontCache();
+            foreach (Form f in Application.OpenForms)
+            {
+                try { Restyle(f); f.Invalidate(true); } catch { }
+            }
         }
 
         /* The type scale.
@@ -721,7 +846,7 @@ namespace JoeBrowser
            that hard codes 18 for a label row and 33 for a field gets 1 px of clipping the day
            the font gets a pixel taller; these are derived from the fonts instead. */
         public static int Row { get { return LineHeight(Small) + Ui.S(4); } }
-        public static int Field { get { return Ui.S(36); } }
+        public static int Field { get { return Ui.S(40); } }
         public static int Gap { get { return Ui.S(8); } }
 
         /// <summary>
@@ -737,7 +862,7 @@ namespace JoeBrowser
             Font f;
             if (FontCache.TryGetValue(key, out f)) return f;
 
-            float pt = (float)(px * 0.75 * Ui.Scale);
+            float pt = (float)(px * Ui.Scale);
             FontFamily fam = TryFamily("Consolas") ?? TryFamily("Cascadia Mono") ?? TryFamily("Courier New");
             try { f = fam != null ? new Font(fam, pt, FontStyle.Regular, GraphicsUnit.Pixel) : F(px); }
             catch { f = F(px); }
@@ -1069,6 +1194,11 @@ namespace JoeBrowser
             else if (align == "right") f |= TextFormatFlags.Right;
 
             int w = width <= 0 ? 4000 : (int)Math.Round(width) + S(2);
+            /* A caller that measured a negative budget - a chip wider than its card - used to
+               get a 4000 px line that ran over everything beside it. A negative budget means
+               "there is no room": drawing nothing is the honest answer, and the tooltip that
+               carries the full value is the way to read it. */
+            if (width <= 0) return;
             int lineH = (int)Math.Ceiling(font.GetHeight(g));
             int h = maxLines <= 1 ? lineH : maxLines * lineH + S(2);
             TextRenderer.DrawText(g, text, font,

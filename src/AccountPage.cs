@@ -6,19 +6,15 @@ using System.Windows.Forms;
 namespace JoeBrowser
 {
     /// <summary>
-    /// Account page: who is signed in, what the plan covers, and whether the account is
-    /// protected - the three things a person opens an account page to see, in that order.
+    /// Account page: who is signed in, what the plan covers, how the workspace is using it, and
+    /// whether the account is protected - the four things a person opens an account page to see.
     ///
-    /// The previous page was five buttons and a plan sentence. Every button looked the same,
-    /// nothing on the page said which of them mattered, and the one fact that decides whether an
-    /// account can be recovered safely - is there a second factor and is there a PIN - was
-    /// encoded in the button label instead of shown. That is what "the design is bad" meant.
-    ///
-    /// The page is now an identity header, a plan card with the one number that matters, a
-    /// security card whose two rows each state their own status, and a short account list. It is
-    /// built from measured cards rather than a clipped column of labels, and it says nothing
-    /// twice: every line either identifies the account, states the plan, states the protection or
-    /// offers the action that changes it.
+    /// The previous page answered three of the four, repeated its security answers twice, showed
+    /// a plan card to a signed-out visitor, printed a raw ISO-8601 timestamp as "member since",
+    /// and stretched a narrow column across a wide window. This version: an identity header with
+    /// a readable date, a plan card, a security card that says each protection once, a workspace
+    /// card with the counts the rest of the app is already tracking, and the account list - all
+    /// inside a centred column that stops growing at the width good text columns stop at.
     /// </summary>
     internal sealed class AccountPage : Panel, IReStyle, ISyncLayout
     {
@@ -28,6 +24,7 @@ namespace JoeBrowser
         private readonly IdentityCard _identity;
         private readonly InfoCard _plan;
         private readonly InfoCard _security;
+        private readonly InfoCard _workspace;
         private readonly JBLabel _accountsHeading;
         private readonly JBPanel _accountsBox;
         private readonly List<AccountRow> _rows = new List<AccountRow>();
@@ -42,6 +39,18 @@ namespace JoeBrowser
         public event EventHandler TwoFactorRequested;
         public event EventHandler ManagePlanRequested;
         public event EventHandler<string> DeleteAccountRequested;
+
+        /// <summary>
+        /// The numbers the workspace card shows. The window owns the live lists, so the page asks
+        /// instead of keeping its own copies; when no provider is bound the card hides rather
+        /// than showing zeros that would read as broken.
+        /// </summary>
+        public static Func<WorkspaceStats> StatsProvider;
+
+        internal sealed class WorkspaceStats
+        {
+            public int Profiles, Running, Proxies, Extensions, HistoryPages;
+        }
 
         internal static JBButton MakeButton(string text, string icon, BtnKind kind)
         {
@@ -70,6 +79,10 @@ namespace JoeBrowser
             _security.Primary.Click += delegate { var h = PinRequested; if (h != null) h(this, EventArgs.Empty); };
             _security.Secondary.Click += delegate { var h = TwoFactorRequested; if (h != null) h(this, EventArgs.Empty); };
 
+            _workspace = new InfoCard("WORKSPACE", "layers");
+            _workspace.Secondary.Visible = false;
+            _column.Controls.Add(_workspace);
+
             _accountsHeading = new JBLabel(LabelRole.Strong, L10n.T("acct.others"));
             _column.Controls.Add(_accountsHeading);
 
@@ -94,33 +107,69 @@ namespace JoeBrowser
 
             _identity.Bind(me);
 
-            bool pro = Plan.IsPro;
-            _plan.Title = L10n.T("acct.planhead");
-            _plan.Primary.Text = pro ? L10n.T("acct.manageplan") : L10n.T("acct.upgrade");
-            _plan.Primary.Icon = pro ? "settings" : "crown";
-            _plan.Primary.Kind = pro ? BtnKind.Soft : BtnKind.Primary;
-            _plan.SetRows(new[]
-            {
-                new InfoCard.Row(L10n.T("acct.plannow"), Plan.Summary(), true),
-                new InfoCard.Row(L10n.T("acct.planprofiles"), Plan.IsPro
-                    ? L10n.T("acct.planunlimited")
-                    : UsedProfiles() + " / " + Entitlements.FreeProfiles, false),
-                new InfoCard.Row(L10n.T("acct.planrenew"), PlanNote(), false)
-            });
+            /* A signed-out visitor (a session marker that expired, say) gets an identity card
+               and the workspace numbers - not a PLAN card offering an upgrade to somebody who
+               has not signed in, and not a SECURITY card about an account that is not open. */
+            bool signedIn = me != null;
+            _plan.Visible = signedIn;
+            _security.Visible = signedIn;
 
-            bool pin = me != null && !string.IsNullOrEmpty(me.PinHash);
-            bool two = me != null && !string.IsNullOrEmpty(me.TotpSecret);
-            _security.Primary.Text = pin ? L10n.T("acct.pin.on") : L10n.T("acct.pin");
-            _security.Primary.Icon = "lock";
-            _security.Secondary.Text = two ? L10n.T("acct.2fa.on") : L10n.T("acct.2fa");
-            _security.Secondary.Icon = "shield";
-            _security.SetRows(new[]
+            if (signedIn)
             {
-                new InfoCard.Row(L10n.T("acct.pinhead"),
-                    pin ? L10n.T("acct.pin.on.state") : L10n.T("acct.pin.off.state"), false, pin),
-                new InfoCard.Row(L10n.T("acct.2fahead"),
-                    two ? L10n.T("acct.2fa.on.state") : L10n.T("acct.2fa.off.state"), false, two)
-            });
+                bool pro = Plan.IsPro;
+                _plan.Title = L10n.T("acct.planhead");
+                _plan.Primary.Text = pro ? L10n.T("acct.manageplan") : L10n.T("acct.upgrade");
+                _plan.Primary.Icon = pro ? "settings" : "crown";
+                _plan.Primary.Kind = pro ? BtnKind.Soft : BtnKind.Primary;
+                /* The filler "Renews: upgrade for unlimited profiles" row is gone - it restated
+                   the button underneath it. Free accounts see what the plan covers, Pro accounts
+                   see when it renews. */
+                var planRows = new List<InfoCard.Row>
+                {
+                    new InfoCard.Row(L10n.T("acct.plannow"), Plan.Summary(), true),
+                    new InfoCard.Row(L10n.T("acct.planprofiles"), Plan.IsPro
+                        ? L10n.T("acct.planunlimited")
+                        : UsedProfiles() + " / " + Entitlements.FreeProfiles, false)
+                };
+                if (Plan.IsLifetime || (Plan.IsPro && Plan.Until != null))
+                {
+                    string note = PlanNote();
+                    if (!string.IsNullOrWhiteSpace(note)) planRows.Add(new InfoCard.Row(L10n.T("acct.planrenew"), note, false));
+                }
+                _plan.SetRows(planRows.ToArray());
+
+                bool pin = !string.IsNullOrEmpty(me.PinHash);
+                bool two = !string.IsNullOrEmpty(me.TotpSecret);
+                _security.Primary.Text = pin ? L10n.T("acct.pin.on") : L10n.T("acct.pin");
+                _security.Primary.Icon = "lock";
+                _security.Secondary.Text = two ? L10n.T("acct.2fa.on") : L10n.T("acct.2fa");
+                _security.Secondary.Icon = "shield";
+                _security.SetRows(new[]
+                {
+                    new InfoCard.Row(L10n.T("acct.pinhead"),
+                        pin ? L10n.T("acct.pin.on.state") : L10n.T("acct.pin.off.state"), false, pin),
+                    new InfoCard.Row(L10n.T("acct.2fahead"),
+                        two ? L10n.T("acct.2fa.on.state") : L10n.T("acct.2fa.off.state"), false, two)
+                });
+            }
+
+            /* Workspace: the four counts the rest of the app is already holding. When no window
+               has bound a provider there is nothing honest to show, so the card hides. */
+            var stats = StatsProvider != null ? StatsProvider() : null;
+            _workspace.Visible = stats != null;
+            if (stats != null)
+            {
+                _workspace.Title = "Workspace";
+                _workspace.Primary.Visible = false;
+                _workspace.SetRows(new[]
+                {
+                    new InfoCard.Row("Profiles", stats.Profiles + (stats.Running > 0
+                        ? "  ·  " + stats.Running + " running now" : ""), true),
+                    new InfoCard.Row("Proxies saved", stats.Proxies.ToString(), false),
+                    new InfoCard.Row("Extensions", stats.Extensions.ToString(), false),
+                    new InfoCard.Row("Pages in history", stats.HistoryPages.ToString("N0"), false)
+                });
+            }
 
             _identity.Switch.Visible = me != null;
             _identity.SignOut.Visible = me != null;
@@ -156,7 +205,7 @@ namespace JoeBrowser
             var until = Plan.Until;
             if (Plan.IsLifetime) return L10n.T("acct.plan.unlimited");
             if (Plan.IsPro && until != null) return L10n.T("acct.plan.renews") + " " + until.Value.ToLocalTime().ToString("d MMMM yyyy");
-            return L10n.T("acct.free.note");
+            return "";
         }
 
         public void ReStyle()
@@ -166,6 +215,7 @@ namespace JoeBrowser
             _identity.Invalidate();
             _plan.Invalidate();
             _security.Invalidate();
+            _workspace.Invalidate();
             foreach (var r in _rows) r.Invalidate();
             Invalidate();
         }
@@ -182,40 +232,53 @@ namespace JoeBrowser
             {
                 _host.SetBounds(0, 0, Math.Max(1, Width), Math.Max(1, Height));
                 int w = Math.Max(Ui.S(320), _host.Width - Ui.S(10));
+                /* A text column does not get better past a certain width: every extra hundred
+                   px is dead right margin or a card row that reads like a shelf. The column now
+                   centres at up to 980 logical px, the same cap the plan page uses. */
+                int maxInner = Ui.S(980);
                 int pad = Ui.S(30);
-                int inner = Math.Max(Ui.S(240), w - pad * 2);
+                int inner = Math.Max(Ui.S(240), Math.Min(maxInner, w - pad * 2));
+                int left = Math.Max(pad, (w - inner) / 2);
                 int gap = Ui.S(14);
                 int y = pad;
 
-                _identity.SetBounds(pad, y, inner, _identity.NeededHeight(inner));
+                _identity.SetBounds(left, y, inner, _identity.NeededHeight(inner));
                 y += _identity.Height + gap;
 
                 /* Two cards side by side when there is room for two readable columns, stacked
                    otherwise. The break point is the width at which a "label   value" row stops
                    being one line, not a device class. */
-                bool two = inner >= Ui.S(760);
-                if (two)
+                bool two = inner >= Ui.S(700);
+                if (_plan.Visible || _security.Visible)
                 {
-                    int colW = (inner - gap) / 2;
-                    int h = Math.Max(_plan.NeededHeight(colW), _security.NeededHeight(colW));
-                    _plan.SetBounds(pad, y, colW, h);
-                    _security.SetBounds(pad + colW + gap, y, colW, h);
-                    y += h + gap;
+                    if (two && _plan.Visible && _security.Visible)
+                    {
+                        int colW = (inner - gap) / 2;
+                        int h = Math.Max(_plan.NeededHeight(colW), _security.NeededHeight(colW));
+                        _plan.SetBounds(left, y, colW, h);
+                        _security.SetBounds(left + colW + gap, y, colW, h);
+                        y += h + gap;
+                    }
+                    else
+                    {
+                        int h = _plan.Visible ? _plan.NeededHeight(inner) : 0;
+                        if (h > 0) { _plan.SetBounds(left, y, inner, h); y += h + gap; }
+                        h = _security.Visible ? _security.NeededHeight(inner) : 0;
+                        if (h > 0) { _security.SetBounds(left, y, inner, h); y += h + gap; }
+                    }
                 }
-                else
+
+                if (_workspace.Visible)
                 {
-                    int h = _plan.NeededHeight(inner);
-                    _plan.SetBounds(pad, y, inner, h);
-                    y += h + gap;
-                    h = _security.NeededHeight(inner);
-                    _security.SetBounds(pad, y, inner, h);
+                    int h = _workspace.NeededHeight(inner);
+                    _workspace.SetBounds(left, y, inner, h);
                     y += h + gap;
                 }
 
                 if (_accountsHeading.Visible)
                 {
                     int headH = Theme.LineHeight(Theme.Small);
-                    _accountsHeading.SetBounds(pad, y, inner, headH);
+                    _accountsHeading.SetBounds(left, y, inner, headH);
                     y += headH + Ui.S(8);
                 }
                 if (_accountsBox.Visible)
@@ -226,18 +289,18 @@ namespace JoeBrowser
                         r.SetBounds(0, yy, inner, r.RowHeight);
                         yy += r.RowHeight + Ui.S(8);
                     }
-                    _accountsBox.SetBounds(pad, y, inner, Math.Max(0, yy - Ui.S(8)));
+                    _accountsBox.SetBounds(left, y, inner, Math.Max(0, yy - Ui.S(8)));
                     y += _accountsBox.Height + gap;
                 }
                 if (_emptyNote.Visible)
                 {
                     int h = Measure(_emptyNote.Text, Theme.Caption, inner);
-                    _emptyNote.SetBounds(pad, y, inner, h);
+                    _emptyNote.SetBounds(left, y, inner, h);
                     y += h + gap;
                 }
 
                 y += Ui.S(6);
-                _column.SetBounds(0, 0, w, Math.Max(y, _host.Height));
+                _column.SetBounds(0, 0, Math.Max(inner + left + pad, w), Math.Max(y, _host.Height));
                 _host.SyncExtent();
             }
             finally { _layingOut = false; }
@@ -284,7 +347,23 @@ namespace JoeBrowser
                 _signedIn = me != null;
                 _title = me == null ? L10n.T("acct.signedout") : (string.IsNullOrEmpty(me.DisplayName) ? me.Email : me.DisplayName);
                 if (me != null && !string.IsNullOrEmpty(me.DisplayName))
-                    _line = me.Email + (me.Created == null ? "" : "  ·  " + L10n.T("acct.since") + " " + me.Created);
+                {
+                    /* The stored timestamp is ISO-8601 UTC - "2025-05-01T09:12:33.1234567Z" -
+                       which is a fact for a log file, not a sentence for a person. The local
+                       date, spelled out, is what a member page shows. */
+                    string since = "";
+                    try
+                    {
+                        DateTime created;
+                        if (!string.IsNullOrEmpty(me.Created) &&
+                            DateTime.TryParse(me.Created, null, System.Globalization.DateTimeStyles.RoundtripKind, out created))
+                            since = L10n.T("acct.since") + " " + created.ToLocalTime().ToString("d MMMM yyyy");
+                        else if (!string.IsNullOrEmpty(me.Created))
+                            since = L10n.T("acct.since") + " " + me.Created;
+                    }
+                    catch { }
+                    _line = me.Email + (since.Length == 0 ? "" : "  ·  " + since);
+                }
                 else if (me != null) _line = "";
                 else _line = L10n.T("acct.signedout.note");
                 ToolTips.Attach(this, me == null ? _line : me.Email);

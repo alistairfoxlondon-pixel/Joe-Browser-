@@ -211,7 +211,11 @@ namespace JoeBrowser
                 foreach (var r in _rows)
                 {
                     r.SetBounds(pad, y, inner, EngineRow.RowH);
-                    y += Ui.S(84) + Ui.S(10);
+                    /* Advance by the row's own height. The fixed 84 was the height at the OLD
+                       type scale: RowH is measured from the fonts and grows past 84 at 150%,
+                       so the rows were placed 84 apart but drawn taller - every engine row
+                       after the first overlapped the one before it. */
+                    y += EngineRow.RowH + Ui.S(10);
                 }
 
                 y += Ui.S(10);

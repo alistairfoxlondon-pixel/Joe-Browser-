@@ -180,24 +180,51 @@ jobs:
 
             ### In this build
 
-            The interface is rebuilt on a real type scale, so nothing is set in a fractional
-            point size any more: every string is measured in device pixels for the display scale
-            in use, and text is rasterised with ClearType at the size it is drawn at. That is the
-            end of the soft text and the smeared hairlines.
+            **The type is Telenor.** The whole interface is now set in the Telenor brand face,
+            bundled inside the executable so every install shows it, and the long-standing
+            "everything is one size too small" defect is fixed at the root: a conversion error
+            in the font builder shrank every requested size to 75% of itself, so a "16 px" body
+            really drew 12 px. Every size is now the size it says it is, fields and buttons are
+            taller to match, and icons are scaled up across the interface.
 
-            A page now settles on the width it actually has. The scroll host used to size its
-            content and then let the page lay out from the previous width, which is why a resize
-            or a page switch could show the old geometry for a frame, and why a narrow window
-            could keep a row measured for a wide one.
+            **Section switching no longer flashes.** A page switch composed its first frame a
+            few messages late, so the previous header band could be seen over the new page for
+            one frame - the "broken CSS" effect. The frame is now composed on the spot, and the
+            language coverage check means non-Latin interface languages fall back to the system
+            face instead of drawing boxes.
 
-            Rows, fields and buttons share one rhythm taken from the fonts instead of hard coded
-            numbers, so a field is a field and a dropdown is not drawn like a different kind of
-            control. Cards are cards, selections have an edge, and the feedback bar is a raised
-            panel with a status chip rather than a tinted strip.
+            **The interface moves.** Buttons, icon buttons and switches tween between their
+            states on a shared animation clock, toasts arrive with a small slide, and the page
+            scrollbar fades to a quiet line when the page stops moving and comes back the
+            moment it scrolls.
 
-            Measuring no longer allocates a device context per label and per button, and line
-            heights are looked up beside the fonts they came from: opening a page and resizing the
-            window are both cheaper.
+            **The included Chrome Web Store pair is fixed end to end.** The background
+            download now reports to the window the moment it lands (no more "waiting for
+            download" that never changes), a half-written download retries on the next start,
+            the pair loads only for Chrome, Brave and Chromium - never Edge or Firefox - and
+            removing one from its own row keeps it removed.
+
+            **Paste as human is visible again.** On builds where the unpacked extension cannot
+            load, the page draws its own "Paste as human" entry above the native menu when
+            you right-click a field - and every Ctrl+V was already typing like a person.
+
+            **Proxies.** Adding one accepts IPv6, keeps credentials typed in a masked field,
+            and tells you when the write failed instead of claiming "saved". Proxy rows have a
+            right-click menu that copies the full address, the host, the username, the password
+            or the last checked IP. A proxy test can no longer pass through a dead proxy to
+            your real connection and report it as Working, and a running profile without a
+            relay is no longer told its proxy changed live.
+
+            **The Account page is rebuilt**: a readable member-since date, a plan card without
+            the filler line, a security card that says each protection once, a new workspace
+            card with the live profile, proxy, extension and history counts, and a centred
+            column that stops growing at a readable width.
+
+            Also in this build: browsers rows no longer overlap at 150% scaling, profile cards
+            no longer push their tags under the action bar, the free plan cannot be coaxed
+            into opening several browsers at once by fast clicking, the plan page no longer
+            freezes on its first exchange-rate fetch, and turning off two-step code asks
+            before it removes a protection.
 
             ### Notes
 

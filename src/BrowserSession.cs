@@ -36,6 +36,13 @@ namespace JoeBrowser
         private string _browserFullVersion;
         private bool _browserIsBrave;
         private bool _browserIsEdge;
+        /// <summary>False on the engines that refuse extensions (Edge branded builds, Firefox):
+        /// the CDP tool injection is skipped too, so the app never pretends a tool is running
+        /// where the engine will not carry one.</summary>
+        private bool _toolsAllowed = true;
+        /// <summary>The Settings master switch for extensions. The command line used to honour
+        /// it while the injected tool script ignored it, which made the switch a half-truth.</summary>
+        private bool _masterExtensions = true;
         private string _primarySession;
         private int _navCount;
         private readonly object _scriptState = new object();
@@ -346,10 +353,22 @@ namespace JoeBrowser
 
             /* Original unpacked extensions. Chrome 137+ hides --load-extension behind a
                feature flag on branded builds, so disable that flag and always inject the
-               same first-party tools through CDP as a guaranteed fallback. */
-            bool masterExtensions = settings == null || settings.EnableExtensions;
+               same first-party tools through CDP as a guaranteed fallback.
+
+               Store extensions only behave on Chrome, Brave and Chromium: Microsoft Edge and
+               branded Chrome both drop the switch, Firefox is a different engine entirely,
+               and the owner's requirement is explicit - the shipped pair and the tools are
+               a Chrome/Brave/Chromium feature. On Edge and Firefox the folders are skipped
+               here and the CDP tool script is skipped below, so the app never claims a
+               capability the engine will not honour. */
+            bool engineTakesExtensions = string.Equals(browser.EngineKey, "chrome", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(browser.EngineKey, "brave", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(browser.EngineKey, "chromium", StringComparison.OrdinalIgnoreCase);
+            s._toolsAllowed = engineTakesExtensions;
+            s._masterExtensions = settings == null || settings.EnableExtensions;
+            bool masterExtensions = s._masterExtensions && engineTakesExtensions;
             bool customExtensions = settings == null || settings.EnableCustomExtensions;
-            var folders = DiagnosticNoExtensions
+            var folders = !engineTakesExtensions || DiagnosticNoExtensions
                 ? new List<string>()
                 : ExtensionManager.EnabledFolders(profile.Tools, masterExtensions, customExtensions, proxyOn);
             if (folders.Count > 0)
@@ -1013,20 +1032,29 @@ namespace JoeBrowser
             string fpId = fpRes != null ? Str(fpRes, "identifier") : "";
 
             /* First-party tools: human paste, proxy rotation guard and right-click guard.
-               Injected through CDP so they work even on builds that ignore --load-extension. */
+               Injected through CDP so they work even on builds that ignore --load-extension.
+               Skipped on the engines the tools do not ship for, and when the master switch
+               turned extensions off - the Settings row used to promise a switch-off that the
+               injection silently ignored. */
             var tools = Profile != null ? Profile.Tools : null;
             if (tools == null) tools = new ToolConfig();
             var liveProxy = Profile != null ? Profile.Proxy : null;
-            string toolScript = ExtensionManager.BuildToolScript(tools, Profile != null ? Profile.Name : "",
-                liveProxy != null && liveProxy.Enabled);
-            var toolParams = new Dictionary<string, object>
+            string toolScript = _toolsAllowed && _masterExtensions
+                ? ExtensionManager.BuildToolScript(tools, Profile != null ? Profile.Name : "",
+                    liveProxy != null && liveProxy.Enabled)
+                : null;
+            string toolId = "";
+            if (!string.IsNullOrEmpty(toolScript))
             {
-                { "source", toolScript },
-                { "runImmediately", true }
-            };
-            try { toolParams["persistAcrossRestarts"] = true; } catch { }
-            var toolRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", toolParams, session);
-            string toolId = toolRes != null ? Str(toolRes, "identifier") : "";
+                var toolParams = new Dictionary<string, object>
+                {
+                    { "source", toolScript },
+                    { "runImmediately", true }
+                };
+                try { toolParams["persistAcrossRestarts"] = true; } catch { }
+                var toolRes = await TrySendResult("Page.addScriptToEvaluateOnNewDocument", toolParams, session);
+                toolId = toolRes != null ? Str(toolRes, "identifier") : "";
+            }
 
             lock (_scriptState)
             {

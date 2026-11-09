@@ -63,6 +63,23 @@ namespace JoeBrowser
     internal static class ExtensionCatalog
     {
         private static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
+        /// <summary>
+        /// Guards every Load/Save of extensions.json. The shipped pair is downloaded on a
+        /// background thread while the UI thread reads and writes the same file: an unsynchronised
+        /// read that landed inside the writer's File.Replace window used to be treated as a
+        /// corrupt file, renamed to .broken, and the freshly downloaded entries were then wiped
+        /// by the next save of the stale in-memory list. One lock closes the whole class of race.
+        /// </summary>
+        private static readonly object StoreGate = new object();
+
+        /// <summary>
+        /// Raised on the worker thread after the background fetch of the shipped pair finishes,
+        /// successfully or not. The UI subscribes and marshals itself onto its own thread; before
+        /// this existed, a fresh install showed "Waiting for download" forever - the rows only
+        /// appeared after the user navigated away and back, and a profile launched inside the
+        /// download window started without the pair.
+        /// </summary>
+        public static event Action DefaultsChanged;
 
         public static string FilePath { get { return Path.Combine(AppPaths.Root, "extensions.json"); } }
         public static string ImportedRoot { get { return Path.Combine(AppPaths.Extensions, "imported"); } }
@@ -483,13 +500,19 @@ namespace JoeBrowser
                        removed". */
                     if (IsRemovedByUser(id)) continue;
                     string target = Path.Combine(ImportedRoot, id);
+                    /* "Listed" only counts when the folder the entry points at still holds a
+                       manifest Chromium will load. The old check accepted any entry whose folder
+                       path happened to end in the id - including one Load() had already disabled
+                       because its folder was broken - so a half-written download stayed listed
+                       and never downloaded again. */
                     bool listed = false;
                     foreach (var e in items)
                     {
                         if (e == null || string.IsNullOrEmpty(e.Folder)) continue;
                         try
                         {
-                            if (e.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase))
+                            if (e.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase) &&
+                                UsableManifest(Path.Combine(e.Folder, "manifest.json")))
                             { listed = true; break; }
                         }
                         catch { }
@@ -544,15 +567,35 @@ namespace JoeBrowser
                 if (changed) Save(items);
             }
             catch (Exception ex) { Log.Error("Default extension setup failed", ex); }
+            finally
+            {
+                var h = DefaultsChanged;
+                if (h != null) { try { h(); } catch { } }
+            }
         }
 
         /// <summary>Folders of the shipped store extensions that are actually present.</summary>
         public static List<string> DefaultFolders()
         {
             var result = new List<string>();
+            /* The library's Enabled flag is the user's word: a shipped extension whose row was
+               switched off must not load, exactly like any other row. The old version read only
+               the disk, so the row's own toast - "takes effect at the next launch" - was false. */
+            var states = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (var e in Load())
+                {
+                    string id = DefaultIdOf(e);
+                    if (id.Length > 0) states[id] = e.Enabled;
+                }
+            }
+            catch { }
             foreach (var entry in DefaultStoreExtensions)
             {
                 if (IsRemovedByUser(entry[0])) continue;
+                bool enabled;
+                if (states.TryGetValue(entry[0], out enabled) && !enabled) continue;
                 string folder = Path.Combine(ImportedRoot, entry[0]);
                 try
                 {
@@ -572,18 +615,21 @@ namespace JoeBrowser
                 Directory.CreateDirectory(AppPaths.Root);
                 if (!File.Exists(FilePath)) return list;
                 List<ExtensionItem> items;
-                try
+                lock (StoreGate)
                 {
-                    items = Json.Deserialize<List<ExtensionItem>>(File.ReadAllText(FilePath, Encoding.UTF8));
-                }
-                catch (Exception ex)
-                {
-                    /* A truncated or hand-edited library file threw here and the page showed an
-                       empty list, as if every extension had been removed. Keep the file under a
-                       name the user can send, and start the list again. */
-                    Log.Error("Extension library is unreadable; setting it aside", ex);
-                    try { File.Move(FilePath, FilePath + ".broken"); } catch { }
-                    return list;
+                    try
+                    {
+                        items = Json.Deserialize<List<ExtensionItem>>(File.ReadAllText(FilePath, Encoding.UTF8));
+                    }
+                    catch (Exception ex)
+                    {
+                        /* A truncated or hand-edited library file threw here and the page showed an
+                           empty list, as if every extension had been removed. Keep the file under a
+                           name the user can send, and start the list again. */
+                        Log.Error("Extension library is unreadable; setting it aside", ex);
+                        try { File.Move(FilePath, FilePath + ".broken"); } catch { }
+                        return list;
+                    }
                 }
                 if (items == null) return list;
                 foreach (var e in items)
@@ -622,13 +668,16 @@ namespace JoeBrowser
             {
                 Directory.CreateDirectory(AppPaths.Root);
                 string tmp = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                File.WriteAllText(tmp, Json.Serialize(items ?? new List<ExtensionItem>()), new UTF8Encoding(true));
-                if (File.Exists(FilePath))
+                lock (StoreGate)
                 {
-                    try { File.Replace(tmp, FilePath, null); }
-                    catch { File.Copy(tmp, FilePath, true); File.Delete(tmp); }
+                    File.WriteAllText(tmp, Json.Serialize(items ?? new List<ExtensionItem>()), new UTF8Encoding(true));
+                    if (File.Exists(FilePath))
+                    {
+                        try { File.Replace(tmp, FilePath, null); }
+                        catch { File.Copy(tmp, FilePath, true); File.Delete(tmp); }
+                    }
+                    else File.Move(tmp, FilePath);
                 }
-                else File.Move(tmp, FilePath);
             }
             catch (Exception ex) { Log.Error("Cannot save extension library", ex); }
         }
@@ -754,8 +803,10 @@ namespace JoeBrowser
                 /* A package the store serves is a zip with a CRX3 header in front. Chrome used
                    to accept a CRX2 header as well; the store no longer serves one, and a body
                    that is neither is an error page that happens to start with something other
-                   than plain text. Saying so is better than failing inside the zip reader. */
-                if (raw.Length > 4 && raw[0] == 0x43 && raw[1] == 0x72 && raw[2] == 0x32 && raw[3] == 0x33)
+                   than plain text. Saying so is better than failing inside the zip reader.
+                   The magic is the four bytes "Cr24" - 0x34, not 0x33: the version lives in
+                   the header's version field, not in the magic string. */
+                if (raw.Length > 4 && raw[0] == 0x43 && raw[1] == 0x72 && raw[2] == 0x32 && raw[3] == 0x34)
                 {
                     /* CRX3: fine, the zip starts after the header and FindZipStart already
                        handled it. Nothing to do, this branch is documentation. */

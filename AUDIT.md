@@ -980,3 +980,55 @@ visual claims are argued from measured geometry, and the extension download is r
 app's own state rather than observed end to end. Both of those are exactly why the app now says
 what it thinks is true - the shipped pair's state on the page, the running build on the card -
 instead of assuming it.
+
+---
+
+## Round 20 - v1.8.0: the font was 75% of itself, and the shipped pair learned to report
+
+The reports this round started with the same two words that have opened every round -
+"too small" - and moved through flash-on-section-switch, missing paste-as-human, dead
+proxy alerts, an Account page that looked unfinished, and the shipped pair that still
+would not show up. Every one had a mechanical cause.
+
+### The font was three quarters of the size it promised
+
+`Theme.F` multiplied the requested pixel size by 0.75 - the pixel-to-point conversion -
+and then handed the result to a `GraphicsUnit.Pixel` constructor. A "16 px" body was a
+12 px em, everywhere, at every scale, since the type scale was introduced. The promise
+assertion in the self test checked the constant, not the drawn size, so it passed while
+every user saw a small interface. The constant is gone; the drawn em is the asked-for
+size; fields, control height and the cards whose bands were sized for the old line
+heights moved with it. The type is Telenor (Regular/Bold/Light bundled in the exe and
+extracted on first run), with the Segoe chain as fallback - and a coverage check that
+moves non-Latin interface languages onto the system face instead of drawing boxes.
+
+### What else was found and fixed
+
+| Reported | Cause | Change |
+|---|---|---|
+| Flash when switching sections | the first frame after WM_SETREDRAW was composed a few messages late, so the old header band showed over the new page | the frame is composed on the spot (`Update()` after the unfreeze) |
+| Everything snaps, feels unresponsive | hover, press and toggle states were instant colour flips | one shared tween clock drives buttons, icon buttons, switches, toasts and the scrollbar |
+| Shipped pair never appears | the background fetch finished on a worker thread with no way to tell the window; a half-written folder counted as listed and never retried | a `DefaultsChanged` event marshals to the UI thread, "listed" now means a usable manifest, and the catalog store is locked against the read/write race that could rename it `.broken` |
+| Store extensions must not load on Edge/Firefox | no engine check anywhere in the chain | extensions and the injected tools are gated to chrome/brave/chromium at the launch path and at the injection point |
+| Paste as human not in the right-click menu | the unpacked extension cannot load on branded Chrome 137+, and nothing else drew an entry | when the extension's mark is absent, the page draws its own "Paste as human" item above the native menu |
+| Offline/rotation alerts died | the banner listener lived inside the `cfg.human` block; the main-world extension probe always read false and double-polled; the alarm ignored the per-profile interval | banners stand on their own, the extension marks its presence, the worker receives the interval |
+| Add proxy refused / saved silently | the parser shredded IPv6; credentials keyed off the username alone; a failed write still toasted "Proxy saved" | bracketed IPv6 parses, credentials merge typed-over-link, `Save` reports, the corrupt vault is set aside instead of overwritten |
+| Copy proxy IP impossible | proxy rows had no right-click at all | a row menu copies the full address, host:port, username, password, last checked IP - plus check / apply live / edit / delete |
+| Dead proxy tested as Working | the test relay inherited `FallbackDirect` and used the machine's real connection | tests and diagnostics run strict; a 502 from the relay reads as "proxy is unreachable" |
+| "Applied to the running browser" was a lie | `ApplyLiveAsync` answered yes for any Chromium window, relay or not | the claim now requires `HasRelay` |
+| Account page looked unfinished | raw ISO-8601 member-since, plan card for signed-out visitors, security said twice, filler renew row, one long column | readable date, per-state cards, a workspace card with live counts from the window, centred column capped at a readable width |
+| Browsers rows overlapped at 150% | rows were placed 84 apart but drawn taller | rows advance by their own measured height |
+| Profile tags ran into the action bar | the card was sized for the old line heights | the card grew, the wrapped-chip shift was recomputed, and the bands clear each other again |
+| Free plan opened several browsers | the concurrency gate counted only registered sessions, and registration happens after launch | mid-launch profiles count too |
+| Plan page froze ~12 s | the first invoice fetched exchange rates synchronously on the UI thread | the rate cache is warmed off the thread when the page opens |
+| 2FA removable in one click | no confirmation | removing a protection asks first |
+| History re-read 25k lines per navigation | the trim check read the whole file before checking its size | file length gates the read |
+
+### What is still not proven here
+
+The interface work was verified by measurement and compilation on the reference
+assemblies; the shipped-pair download was verified against the live store endpoint for
+both ids (HTTP 200, CRX3, valid manifests), and every claim the interface makes now has
+a state behind it. The Windows-rendered result is what the build's own smoke test,
+install test and self test prove on the runner - which is why none of the numbers in
+this round are asserted only by eye.

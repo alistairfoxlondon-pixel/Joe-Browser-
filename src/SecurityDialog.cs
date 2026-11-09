@@ -135,6 +135,12 @@ namespace JoeBrowser
         private void DisableTotp()
         {
             _error.Visible = false;
+            /* Turning the second factor off is the single most valuable thing a thief at an
+               unlocked desk can do, and it used to be one unconfirmed click away. The app asks,
+               plainly, before removing a protection. */
+            if (!ConfirmForm.Ask(this, "Turn off two-step code?",
+                "Sign-in will no longer ask for the 6-digit code from your authenticator.",
+                "You can turn it back on here at any time.", "Turn off", BtnKind.Danger)) return;
             Accounts.SetTotpSecret(_email, null);
             RefreshState();
         }

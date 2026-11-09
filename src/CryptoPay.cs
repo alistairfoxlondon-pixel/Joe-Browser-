@@ -189,6 +189,20 @@ namespace JoeBrowser
 
         public static void Refresh() { lock (Gate) RefreshLocked(); }
 
+        /// <summary>
+        /// Warms the rate cache off the UI thread. The first invoice used to make a
+        /// twelve-second CoinGecko call synchronously while the plan page froze on the click
+        /// that opened it - on a slow network the app looked hung, which reads as broken rather
+        /// than as "fetching a price". Callers fire this when the page opens.
+        /// </summary>
+        public static void Warm()
+        {
+            System.Threading.Tasks.Task.Run(new Action(delegate
+            {
+                try { Refresh(); } catch { }
+            }));
+        }
+
         public static DateTime FetchedUtc { get { lock (Gate) return _fetchedUtc; } }
 
         private static void RefreshLocked()

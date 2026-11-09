@@ -69,7 +69,13 @@ namespace JoeBrowser
             IWebProxy proxy = null;
             if (viaProxy)
             {
-                relay = new ProxyRelay(cfg);
+                /* A diagnostic that silently degrades to the real connection when the proxy is
+                   dead reports the machine's own IP as if it were the proxy's - the one result
+                   the user must never be shown by mistake. FallbackDirect stays what it is for
+                   live sessions; a diagnostic runs strict. */
+                var strict = cfg.Copy();
+                strict.FallbackDirect = false;
+                relay = new ProxyRelay(strict);
                 proxy = new WebProxy("http://127.0.0.1:" + relay.Port);
             }
             try

@@ -126,16 +126,18 @@ namespace JoeBrowser
             Ui.Quality(g);
             /* The empty panel is 96 tall and put its two lines at 28 and 52 from the top, which
                is arithmetic for one font size; the pair is measured and centred with the chip
-               now. */
+               now. Centred against THIS panel's height - the old code read the page's height,
+               which is hundreds of pixels, and pushed the tile and the text out of the box. */
             float w = _empty.Width;
+            float boxH = _empty.Height;
             float chip = Ui.S(44);
-            var cr = new RectangleF(Ui.S(22), (Height - chip) / 2f, chip, chip);
+            var cr = new RectangleF(Ui.S(22), (boxH - chip) / 2f, chip, chip);
             Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
             float ic = Ui.S(22);
             Icons.Draw(g, "proxy", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
             float h3 = Theme.LineHeight(Theme.H3);
             float sm = Theme.LineHeight(Theme.Small);
-            float top = Math.Max(Ui.S(6), (Height - (h3 + Ui.S(2) + sm)) / 2f);
+            float top = Math.Max(Ui.S(6), (boxH - (h3 + Ui.S(2) + sm)) / 2f);
             Ui.Text(g, "No proxies saved yet", Theme.H3, Theme.Text, cr.Right + Ui.S(16), top, w - cr.Right - Ui.S(30));
             Ui.Text(g, "Add one to use it in profiles.",
                 Theme.Small, Theme.TextDim, cr.Right + Ui.S(16), top + h3 + Ui.S(2), w - cr.Right - Ui.S(30), "left", 1);
@@ -222,10 +224,42 @@ namespace JoeBrowser
         /// <summary>Shows the tip for the action under the pointer, or for the row itself.</summary>
         private void SyncTip(int hit)
         {
-            string key = hit >= 0 && hit < ActionTips.Length ? ActionTips[hit] : "Click to apply this proxy live";
+            /* The address is the value people ellipsize by accident: a long host in a narrow
+               column is cut with no way to read the whole thing. Hovering the row now tells
+               you exactly what is saved - and the right-click menu copies any part of it. */
+            string key = hit >= 0 && hit < ActionTips.Length ? ActionTips[hit] : RowTip();
             if (key == _tipKey) return;
             _tipKey = key;
             try { Tips.SetToolTip(this, key); } catch { }
+        }
+
+        /// <summary>The row tooltip: everything the row knows, including credentials.</summary>
+        private string RowTip()
+        {
+            if (Item == null || Item.Config == null || !Item.Config.Enabled) return "Click to apply this proxy live";
+            var c = Item.Config;
+            string addr = (c.Type == "socks5" ? "socks5://" : c.Type == "https" ? "https://" : "http://")
+                + (string.IsNullOrEmpty(c.User) ? "" : c.User + (string.IsNullOrEmpty(c.Password) ? "" : ":" + c.Password) + "@")
+                + c.Host + ":" + c.Port;
+            string tip = addr + "\nClick to apply this proxy live · right-click to copy";
+            if (!string.IsNullOrEmpty(Item.LastIp)) tip += "\nLast check: " + Item.LastIp + (Item.LastLatencyMs > 0 ? " · " + Item.LastLatencyMs + " ms" : "");
+            return tip;
+        }
+
+        /// <summary>The full proxy link, ready to paste into any tool that takes one.</summary>
+        private string FullAddress()
+        {
+            if (Item == null || Item.Config == null) return "";
+            var c = Item.Config;
+            if (!c.Enabled) return "";
+            return (c.Type == "socks5" ? "socks5://" : c.Type == "https" ? "https://" : "http://")
+                + (string.IsNullOrEmpty(c.User) ? "" : c.User + (string.IsNullOrEmpty(c.Password) ? "" : ":" + c.Password) + "@")
+                + c.Host + ":" + c.Port;
+        }
+
+        private static void CopyTo(string text, string what)
+        {
+            try { Clipboard.SetText(text ?? ""); } catch { }
         }
 
         public ProxyRow()
@@ -270,6 +304,15 @@ namespace JoeBrowser
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
+            /* Right click is the inspect gesture on a list row: copy the address, the host, the
+               credentials - the things a proxy manager exists to carry - plus the actions the
+               icons already offer. Nothing here touched the right button before, which is why
+               "copy the proxy IP" was reported as impossible. */
+            if (e.Button == MouseButtons.Right)
+            {
+                ShowRowMenu(e.Location);
+                return;
+            }
             if (e.Button != MouseButtons.Left) return;
             var a = Actions();
             for (int i = 0; i < a.Length; i++)
@@ -282,6 +325,29 @@ namespace JoeBrowser
             // Clicking the row body offers the live re-point action.
             var live = LiveRequested;
             if (live != null) live(this, EventArgs.Empty);
+        }
+
+        private void ShowRowMenu(Point at)
+        {
+            if (Item == null || Item.Config == null || !Item.Config.Enabled) return;
+            var c = Item.Config;
+            var menu = JBMenu.Create();
+            string full = FullAddress();
+            string hostPort = c.Host + ":" + c.Port;
+            JBMenu.Add(menu, "Copy full address", "copy", delegate { CopyTo(full, "address"); });
+            JBMenu.Add(menu, "Copy IP / host and port", "globe", delegate { CopyTo(hostPort, "host"); });
+            if (!string.IsNullOrEmpty(c.User))
+                JBMenu.Add(menu, "Copy username", "user", delegate { CopyTo(c.User ?? "", "user"); });
+            if (!string.IsNullOrEmpty(c.Password))
+                JBMenu.Add(menu, "Copy password", "key", delegate { CopyTo(c.Password ?? "", "password"); });
+            if (!string.IsNullOrEmpty(Item.LastIp))
+                JBMenu.Add(menu, "Copy last checked IP", "check-circle", delegate { CopyTo(Item.LastIp ?? "", "ip"); });
+            menu.Items.Add(new ToolStripSeparator { Font = Theme.Body });
+            JBMenu.Add(menu, "Check now", "bolt", delegate { var h = TestRequested; if (h != null) h(this, EventArgs.Empty); });
+            JBMenu.Add(menu, "Apply live", "sync", delegate { var h = LiveRequested; if (h != null) h(this, EventArgs.Empty); });
+            JBMenu.Add(menu, "Edit", "pencil", delegate { var h = EditRequested; if (h != null) h(this, EventArgs.Empty); });
+            JBMenu.Add(menu, "Delete", "trash", delegate { var h = DeleteRequested; if (h != null) h(this, EventArgs.Empty); });
+            JBMenu.ShowNear(menu, this, at);
         }
 
         protected override void OnPaint(PaintEventArgs e)

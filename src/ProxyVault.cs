@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -74,7 +75,26 @@ namespace JoeBrowser
             {
                 Directory.CreateDirectory(AppPaths.Root);
                 if (!File.Exists(FilePath)) return list;
-                var items = Json.Deserialize<List<ProxyEntry>>(File.ReadAllText(FilePath, Encoding.UTF8));
+                string text;
+                try { text = File.ReadAllText(FilePath, Encoding.UTF8); }
+                catch (Exception ex)
+                {
+                    Log.Error("Cannot read proxy library", ex);
+                    return list;
+                }
+                List<ProxyEntry> items;
+                try { items = Json.Deserialize<List<ProxyEntry>>(text); }
+                catch (Exception ex)
+                {
+                    /* A corrupt or half-written vault used to come back as an empty list, the
+                       page then said "No proxies saved yet", and the next Save overwrote the
+                       file with that emptiness - the user's whole proxy library gone, quietly.
+                       The unreadable file is set aside under a name the user can send instead,
+                       exactly like the extension library does. */
+                    Log.Error("Proxy library is unreadable; setting it aside", ex);
+                    try { File.Move(FilePath, FilePath + ".broken"); } catch { }
+                    return list;
+                }
                 if (items == null) return list;
                 foreach (var e in items)
                 {
@@ -88,7 +108,9 @@ namespace JoeBrowser
             return list;
         }
 
-        public static void Save(List<ProxyEntry> items)
+        /// <summary>True when the vault reached the disk. Callers surface a failed write
+        /// instead of toasting "saved" and losing the row on the next visit.</summary>
+        public static bool Save(List<ProxyEntry> items)
         {
             try
             {
@@ -116,8 +138,13 @@ namespace JoeBrowser
                     catch { File.Copy(tmp, FilePath, true); File.Delete(tmp); }
                 }
                 else File.Move(tmp, FilePath);
+                return true;
             }
-            catch (Exception ex) { Log.Error("Cannot save proxy library", ex); }
+            catch (Exception ex)
+            {
+                Log.Error("Cannot save proxy library", ex);
+                return false;
+            }
         }
 
         public static ProxyConfig Copy(ProxyConfig c)
@@ -125,7 +152,11 @@ namespace JoeBrowser
             return c == null ? new ProxyConfig() : c.Copy();
         }
 
-        /// <summary>Accepts scheme://user:pass@host:port, host:port and host:port:user:pass.</summary>
+        /// <summary>
+        /// Accepts scheme://user:pass@host:port, host:port and host:port:user:pass - with IPv6
+        /// in its bracketed form, [2001:db8::1]:8080, which the colon splitter used to shred
+        /// into six parts and then reject as "not a proxy".
+        /// </summary>
         public static ProxyConfig ParseLine(string line)
         {
             var p = new ProxyConfig();
@@ -139,6 +170,7 @@ namespace JoeBrowser
                 string head = s.Substring(0, scheme).ToLowerInvariant();
                 if (head == "socks5" || head == "socks5h") type = "socks5";
                 else if (head == "https") type = "https";
+                else if (head == "socks4" || head == "socks4a") type = "socks5";   // best effort: Chrome speaks socks5
                 s = s.Substring(scheme + 3);
             }
             int slash = s.IndexOf('/');
@@ -155,14 +187,32 @@ namespace JoeBrowser
                 else user = cred;
             }
 
-            string[] bits = s.Split(':');
-            if (bits.Length < 2 || string.IsNullOrWhiteSpace(bits[0])) return p;
+            /* IPv6 arrives bracketed. Everything up to ']' is the host, whatever colons it
+               holds; the port is the digits after the closing bracket. */
+            string host;
             int port;
-            if (!int.TryParse(bits[1], out port) || port <= 0 || port > 65535) return p;
-            if (bits.Length >= 4) { user = bits[2]; pass = bits[3]; }
+            if (s.Length > 0 && s[0] == '[')
+            {
+                int close = s.IndexOf(']');
+                if (close < 0) return p;
+                host = s.Substring(1, close - 1);
+                string rest = s.Substring(close + 1);
+                if (!rest.StartsWith(":") ||
+                    !int.TryParse(rest.Substring(1), NumberStyles.Integer, CultureInfo.InvariantCulture, out port) ||
+                    port <= 0 || port > 65535) return p;
+            }
+            else
+            {
+                string[] bits = s.Split(':');
+                if (bits.Length < 2 || string.IsNullOrWhiteSpace(bits[0])) return p;
+                if (!int.TryParse(bits[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out port) ||
+                    port <= 0 || port > 65535) return p;
+                host = bits[0].Trim();
+                if (bits.Length >= 4) { user = bits[2]; pass = bits[3]; }
+            }
 
             p.Type = type;
-            p.Host = bits[0].Trim();
+            p.Host = host.Trim();
             p.Port = port;
             p.User = user;
             p.Password = pass;

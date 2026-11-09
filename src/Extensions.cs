@@ -48,30 +48,43 @@ namespace JoeBrowser
                 try
                 {
                     Directory.CreateDirectory(AppPaths.Extensions);
-                    Write(HumanPaste, "manifest.json", Manifest("Joe Human Paste", "1.1.0",
-                        "Types clipboard text one character at a time with human-like timing.",
-                        new[] { "activeTab", "clipboardRead", "storage", "scripting", "contextMenus", "tabs" },
-                        NoHosts, "service-worker.js", "content.js", false));
-                    Write(HumanPaste, "service-worker.js", HumanPasteWorker);
-                    Write(HumanPaste, "content.js", HumanPasteContent);
-                    WriteIcon(HumanPaste);
+                    /* Per-tool, not all-or-nothing: one locked file (a running browser holds
+                       the folder of the tool it loaded at launch) used to abort the whole
+                       block, leaving the remaining tools unwritten and every later launch
+                       re-logging the same failure. A failure now costs only its own tool. */
+                    WriteTool(HumanPaste, delegate
+                    {
+                        Write(HumanPaste, "manifest.json", Manifest("Joe Human Paste", "1.1.0",
+                            "Types clipboard text one character at a time with human-like timing.",
+                            new[] { "activeTab", "clipboardRead", "storage", "scripting", "contextMenus", "tabs" },
+                            NoHosts, "service-worker.js", "content.js", false));
+                        Write(HumanPaste, "service-worker.js", HumanPasteWorker);
+                        Write(HumanPaste, "content.js", HumanPasteContent);
+                        WriteIcon(HumanPaste);
+                    });
 
-                    Write(ProxyWatch, "manifest.json", Manifest("Joe Proxy Watch", "1.1.0",
-                        "Warns when the connection IP rotates or the proxy goes offline.",
-                        new[] { "alarms", "notifications", "storage", "tabs", "scripting" },
-                        IpHosts, "service-worker.js", "content.js", true));
-                    Write(ProxyWatch, "service-worker.js", ProxyWatchWorker);
-                    Write(ProxyWatch, "content.js", ProxyWatchContent);
-                    Write(ProxyWatch, "banner.css", ProxyWatchCss);
-                    WriteIcon(ProxyWatch);
+                    WriteTool(ProxyWatch, delegate
+                    {
+                        Write(ProxyWatch, "manifest.json", Manifest("Joe Proxy Watch", "1.1.0",
+                            "Warns when the connection IP rotates or the proxy goes offline.",
+                            new[] { "alarms", "notifications", "storage", "tabs", "scripting" },
+                            IpHosts, "service-worker.js", "content.js", true));
+                        Write(ProxyWatch, "service-worker.js", ProxyWatchWorker);
+                        Write(ProxyWatch, "content.js", ProxyWatchContent);
+                        Write(ProxyWatch, "banner.css", ProxyWatchCss);
+                        WriteIcon(ProxyWatch);
+                    });
 
-                    Write(RightClickEnable, "manifest.json", Manifest("Joe Right Click Enable", "1.2.0",
-                        "Restores the right-click menu and copy on sites that block them.",
-                        new[] { "storage", "activeTab", "scripting", "tabs" },
-                        NoHosts, "service-worker.js", "content.js", false));
-                    Write(RightClickEnable, "service-worker.js", RightClickWorker);
-                    Write(RightClickEnable, "content.js", RightClickContent);
-                    WriteIcon(RightClickEnable);
+                    WriteTool(RightClickEnable, delegate
+                    {
+                        Write(RightClickEnable, "manifest.json", Manifest("Joe Right Click Enable", "1.2.0",
+                            "Restores the right-click menu and copy on sites that block them.",
+                            new[] { "storage", "activeTab", "scripting", "tabs" },
+                            NoHosts, "service-worker.js", "content.js", false));
+                        Write(RightClickEnable, "service-worker.js", RightClickWorker);
+                        Write(RightClickEnable, "content.js", RightClickContent);
+                        WriteIcon(RightClickEnable);
+                    });
 
                     // Retire the old guard folder so a stale copy is never loaded alongside
                     // the new enable-right-click extension.
@@ -85,6 +98,12 @@ namespace JoeBrowser
                     Log.Error("Could not write built-in extensions", ex);
                 }
             }
+        }
+
+        private static bool WriteTool(string id, Action build)
+        {
+            try { build(); return true; }
+            catch (Exception ex) { Log.Error("Could not write built-in extension " + id, ex); return false; }
         }
 
         private static string Manifest(string name, string version, string desc, string[] perms,
@@ -282,12 +301,15 @@ namespace JoeBrowser
             var result = new List<string>();
             if (!masterSwitch || tools == null) return result;
             EnsureAll();
-            /* The two store extensions requested for Chrome and Brave load for every Chromium
-               profile regardless of the "custom extensions" switch, because they are shipped
-               defaults rather than user imports. They are NOT downloaded from here: this is the
-               launch path, and a fifteen second HTTP timeout in front of every launch is why the
-               pair often looked missing. The download runs off the launch path from Start(), and
-               the Extensions page offers an immediate retry. */
+            /* The two store extensions requested for Chrome and Brave load for every supported
+               Chromium profile regardless of the "custom extensions" switch, because they are
+               shipped defaults rather than user imports. They are NOT downloaded from here:
+               this is the launch path, and a fifteen second HTTP timeout in front of every
+               launch is why the pair often looked missing. The download runs off the launch
+               path from Start(), and the Extensions page offers an immediate retry.
+               Every folder this method emits goes through the comma guard: Chromium splits the
+               switch on commas, and a Windows account named "Smith, J" once silently corrupted
+               the whole list, so the browser loaded NO extensions at all. */
             foreach (string folder in ExtensionCatalog.DefaultFolders()) Add(result, folder);
             if (tools.HumanPaste) Add(result, Dir(HumanPaste));
             /* The proxy watcher extension is always loaded so that adding a proxy to a running
@@ -321,6 +343,10 @@ namespace JoeBrowser
 
         private static void Add(List<string> list, string path)
         {
+            if (string.IsNullOrEmpty(path)) return;
+            /* Chromium splits --load-extension on commas; a path it cannot express is a path
+               that would take the whole switch down with it. */
+            if (path.IndexOf(',') >= 0) { Log.Info("Extension skipped, path contains a comma: " + path); return; }
             if (!list.Contains(path)) list.Add(path);
         }
 
@@ -681,36 +707,90 @@ if (cfg.human) {
     armed = false;
     humanType(text);
   }, true);
-  window.addEventListener('message', function(e){
-    var m = e.data;
-    if (!m || !m.__jb || e.source !== window) return;
-    if (m.__jb === 'armPaste') armPaste();
-    else if (m.__jb === 'rightClick') cfg.rightClick = !!m.enabled;
-    else if (m.__jb === 'checkProxy' && JB.checkProxy) JB.checkProxy();
-    else if (m.__jb === 'proxyState') {
-      if (m.state === 'rotated') {
-        var from = m.from || 'unknown', to = m.to || 'unknown';
-        var where = m.country ? ' \u00b7 ' + m.country : '';
-        banner('IP address rotated', from + ' \u2192 ' + to + where +
-          '. Re-check any open session before you sign in.', 'warn', true, {
-            label: 'Copy new IP',
-            onClick: function(){ copyText(m.to || ''); }
-          });
-      }
-      else if (m.state === 'offline') {
-        /* Only meaningful for a profile that actually routes through a proxy; on a direct
-           connection a failed lookup is not something the user needs to be told about. */
-        if (cfg.hasProxy) banner('Proxy appears offline', 'The connection check failed twice. Check it before logging in.', 'bad', true);
-      }
-      else if (m.state === 'online') banner('Proxy is back online', m.ip || '', 'info', false);
-    }
-  });
+  /* The extension's own right-click entry (Paste as human) is the visible way in when the
+     unpacked extension loads. When it does not - Chrome 137+ branded builds refuse
+     --load-extension - there is no menu entry anywhere, and the feature looked missing even
+     though every Ctrl+V was already typing like a person. This fallback draws its own small
+     entry at the cursor when the extension's content script has not marked the document.
+     It never suppresses the native menu; it adds one item above it. */
+  var extMenu = function(){
+    try { return !!(document.documentElement && document.documentElement.getAttribute('data-jb-human-paste')); }
+    catch(e) { return false; }
+  };
+  document.addEventListener('contextmenu', function(e){
+    try {
+      if (armed || typing) return;
+      var t = e.target;
+      var editable = t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' ||
+        (t.isContentEditable && t.getAttribute && t.getAttribute('contenteditable') !== 'false'));
+      if (!editable || extMenu()) return;
+      showJoePasteMenu(e);
+    } catch(x) {}
+  }, true);
+  function showJoePasteMenu(e){
+    if (document.getElementById('jb-paste-menu')) return;
+    var m = document.createElement('div');
+    m.id = 'jb-paste-menu';
+    m.setAttribute('style', 'position:fixed;z-index:2147483647;min-width:190px;box-sizing:border-box;' +
+      'font:13px/1.4 ""Segoe UI"",system-ui,sans-serif;color:#1b1b1b;background:#ffffff;' +
+      'border:1px solid rgba(0,0,0,.14);box-shadow:0 10px 28px rgba(0,0,0,.24);overflow:hidden;');
+    var item = document.createElement('div');
+    item.textContent = 'Paste as human';
+    item.setAttribute('style', 'padding:8px 14px;cursor:pointer;white-space:nowrap;');
+    item.onmouseenter = function(){ item.style.background = '#f0f4ff'; };
+    item.onmouseleave = function(){ item.style.background = 'transparent'; };
+    item.onclick = function(){ close(); armPaste(); };
+    m.appendChild(item);
+    var close = function(){ try { if (m && m.parentNode) m.parentNode.removeChild(m); } catch(x){}
+      document.removeEventListener('mousedown', onDoc, true); document.removeEventListener('keydown', onKey, true); };
+    var onDoc = function(ev){ try { if (m && !m.contains(ev.target)) close(); } catch(x){} };
+    var onKey = function(ev){ if (ev.key === 'Escape') close(); };
+    setTimeout(function(){
+      document.addEventListener('mousedown', onDoc, true);
+      document.addEventListener('keydown', onKey, true);
+    }, 0);
+    document.documentElement.appendChild(m);
+    var x = Math.min(e.clientX, window.innerWidth - m.offsetWidth - 8);
+    var y = Math.min(e.clientY - m.offsetHeight - 6, window.innerHeight - m.offsetHeight - 8);
+    if (y < 4) y = Math.min(e.clientY + 14, window.innerHeight - m.offsetHeight - 8);
+    m.style.left = Math.max(4, x) + 'px';
+    m.style.top = Math.max(4, y) + 'px';
+  }
   if (window.chrome && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener(function(m){
       if (m && m.__jb === 'armPaste') armPaste();
     });
   }
 }
+
+/* Proxy state banners: rotation, offline, back online. These used to live inside the
+   cfg.human block, so turning OFF paste-as-human also silently turned OFF every offline
+   and rotation banner - the alert that was reported as not working anymore. They are the
+   watcher's output, not the paste tool's: they stand on their own here. */
+window.addEventListener('message', function(e){
+  var m = e.data;
+  if (!m || !m.__jb || e.source !== window) return;
+  if (m.__jb === 'armPaste' && cfg.human) armPaste();
+  else if (m.__jb === 'rightClick' && cfg.rightClick !== undefined) cfg.rightClick = !!m.enabled;
+  else if (m.__jb === 'checkProxy' && JB.checkProxy) JB.checkProxy();
+  else if (m.__jb === 'proxyState') {
+    if (m.state === 'rotated') {
+      var from = m.from || 'unknown', to = m.to || 'unknown';
+      var where = m.country ? ' \u00b7 ' + m.country : '';
+      banner('IP address rotated', from + ' \u2192 ' + to + where +
+        '. Re-check any open session before you sign in.', 'warn', true, {
+          label: 'Copy new IP',
+          onClick: function(){ copyText(m.to || ''); }
+        });
+    }
+    else if (m.state === 'offline') {
+      /* Only meaningful for a profile that actually routes through a proxy; on a direct
+         connection a failed lookup is not something the user needs to be told about. */
+      if (cfg.hasProxy) banner('Proxy appears offline', 'The connection check failed twice. Check it before logging in.', 'bad', true);
+    }
+    else if (m.state === 'online') banner('Proxy is back online', m.ip || '', 'info', false);
+  }
+});
 
 /* ---------- Enable right click & copy ----------
    Many sites install handlers that call preventDefault() on contextmenu / copy /
@@ -820,21 +900,27 @@ async function probe(){
    runtime, and a single fire-and-forget message would then be lost, leaving the watcher
    disarmed on the profiles that need it most. */
 try {
-  window.postMessage({ __jb: 'proxyConfig', hasProxy: !!cfg.hasProxy }, '*');
+  window.postMessage({ __jb: 'proxyConfig', hasProxy: !!cfg.hasProxy, intervalMinutes: Math.max(0.5, Math.round(cfg.interval / 60)) }, '*');
 } catch (e) {}
 try {
   window.addEventListener('message', function(e){
     if (!e.data || e.data.__jb !== 'proxyConfigQuery') return;
-    try { window.postMessage({ __jb: 'proxyConfigAnswer', hasProxy: !!cfg.hasProxy }, '*'); } catch(x){}
+    try { window.postMessage({ __jb: 'proxyConfigAnswer', hasProxy: !!cfg.hasProxy, intervalMinutes: Math.max(0.5, Math.round(cfg.interval / 60)) }, '*'); } catch(x){}
   });
 } catch (e) {}
 
 if (cfg.watch) {
   /* When the Proxy Watch extension is loaded it owns the polling and the desktop
      notification, and it broadcasts the state back to the page. Polling from both places
-     would double the requests to the IP services for no gain, so the in-page fallback
-     only runs when the extension is not present. */
-  var extPolling = !!(window.chrome && chrome.runtime && chrome.runtime.id);
+     would double the requests to the IP services for no gain - and on a site whose CSP
+     blocks the probe, the doubled failure produced a false proxy-offline banner on a
+     perfectly working proxy. The main world cannot see chrome.runtime, so the extension's
+     content script marks the document instead, and the fallback stands down when the mark
+     is there. The mark is written at document_start, well before the first check fires. */
+  var extPolling = function(){
+    try { return !!(document.documentElement && document.documentElement.getAttribute('data-jb-proxy-watch')); }
+    catch(e) { return false; }
+  };
   var KEY = 'jb.proxy.baseline';
   var FAIL = 'jb.proxy.fails';
   var SEEN = 'jb.proxy.event';
@@ -874,9 +960,15 @@ if (cfg.watch) {
       banner('Proxy is back online', now.ip + (now.country ? ' \u00b7 ' + now.country : ''), 'info', false);
     }
   }
-  if (!extPolling) {
-    setTimeout(check, 3500);
-    setInterval(check, Math.max(30000, cfg.interval * 1000));
+  if (!extPolling()) {
+    /* The decision is made once, 900 ms in: by then an extension content script running at
+       document_start has placed its mark, so a session with the extension never double-polls
+       and a session without it never waits for nothing. */
+    setTimeout(function(){
+      if (extPolling()) return;
+      setTimeout(check, 3000);
+      setInterval(check, Math.max(30000, cfg.interval * 1000));
+    }, 900);
   }
   JB.checkProxy = check;
 }
@@ -918,8 +1010,11 @@ chrome.runtime.onMessage.addListener(function(msg, sender, send){
         private const string HumanPasteContent = @"
 /* Pure message bridge. Content scripts live in an isolated world, so this file never
    installs a paste handler of its own: the first-party CDP runtime in the main world
-   owns the typing and there is exactly one handler per document. */
+   owns the typing and there is exactly one handler per document. The mark tells the main
+   world the extension's own context-menu entry is present, so the fallback menu that
+   appears when the extension is NOT loaded stays out of the way when it is. */
 (function(){
+  try { document.documentElement.setAttribute('data-jb-human-paste', '1'); } catch(e) {}
   if (!chrome.runtime || !chrome.runtime.onMessage) return;
   chrome.runtime.onMessage.addListener(function(m){
     if (m && m.__jb === 'armPaste') window.postMessage({ __jb: 'armPaste' }, '*');
@@ -987,12 +1082,19 @@ function broadcast(msg){
   });
 }
 /* The watcher is only meaningful when the profile routes through a proxy. The page runtime
-   tells the worker whether one is configured; without that signal the worker stays quiet
-   rather than polling public IP services on every profile and warning about a proxy that
-   does not exist. */
+   tells the worker whether one is configured and how often to check; without that signal
+   the worker stays quiet rather than polling public IP services on every profile and
+   warning about a proxy that does not exist. */
 let HAS_PROXY = false;
+let PERIOD_MIN = 1;
 function armed(){
   return HAS_PROXY;
+}
+function rearm(minutes){
+  /* The editor offers 30 s to 600 s; alarms clamp below 0.5 min, so anything faster still
+     lands at 30 s. The old worker hardcoded one minute and ignored the profile entirely. */
+  PERIOD_MIN = Math.max(0.5, Math.min(10, minutes || 1));
+  try { chrome.alarms.create('jb-proxy-check', { periodInMinutes: PERIOD_MIN }); } catch(e) {}
 }
 /* A service worker is unloaded whenever Chrome feels like it, so the flag and the alarm
    both have to be re-established on start rather than only in onInstalled. Without the
@@ -1000,10 +1102,11 @@ function armed(){
    before the worker woke saw armed() === false: the watcher was silent for exactly the
    profiles it exists for. */
 function start(){
-  try { chrome.alarms.create('jb-proxy-check', { periodInMinutes: 1 }); } catch(e) {}
   try {
-    chrome.storage.local.get(['hasProxy']).then(function(st){
+    chrome.storage.local.get(['hasProxy', 'periodMin']).then(function(st){
       HAS_PROXY = !!st.hasProxy;
+      if (st.periodMin) rearm(st.periodMin);
+      else rearm(1);
       if (HAS_PROXY) check();
     });
   } catch(e) {}
@@ -1016,7 +1119,8 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
   if (!s || s.id !== chrome.runtime.id) return false; /* another extension talking to us */
   if (m && m.__jb === 'proxyConfig') {
     HAS_PROXY = !!m.hasProxy;
-    chrome.storage.local.set({ hasProxy: HAS_PROXY });
+    rearm(m.intervalMinutes || 1);
+    chrome.storage.local.set({ hasProxy: HAS_PROXY, periodMin: PERIOD_MIN });
     if (HAS_PROXY) check();
     if (send) send({ ok: true });
     return true;
@@ -1031,8 +1135,11 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
 
         private const string ProxyWatchContent = @"
 /* Bridge: the service worker owns polling and desktop notifications; the main-world
-   runtime owns the in-page banner. This relay keeps the two in sync. */
+   runtime owns the in-page banner. This relay keeps the two in sync. The mark on the
+   document tells the main-world runtime an extension is present, so its fallback poller
+   stands down and the IP services are asked from exactly one place per page. */
 (function(){
+  try { document.documentElement.setAttribute('data-jb-proxy-watch', '1'); } catch(e) {}
   if (!chrome.runtime || !chrome.runtime.onMessage) return;
   chrome.runtime.onMessage.addListener(function(m){
     if (m && m.__jb === 'proxyState') window.postMessage(m, '*');

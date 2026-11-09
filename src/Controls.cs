@@ -11,6 +11,135 @@ namespace JoeBrowser
     internal enum ToastKind { Success, Info, Warn, Error }
     internal enum LabelRole { Title, Body, Dim, Faint, Accent, Strong, Mono, Section, Caption }
 
+    /// <summary>
+    /// A tiny shared tween engine. The interface used to answer every interaction with an
+    /// instant colour swap - technically responsive, but it reads as a flip chart, not as an
+    /// app: nothing moves, so nothing feels alive. Every hover, toggle, toast and scrollbar
+    /// now eases between its states through this one clock: one Timer drives all the running
+    /// animations, each target gets a 0-1 progress with an ease-out curve, and an animation
+    /// that finishes removes itself, so the idle app costs literally nothing.
+    /// </summary>
+    internal static class UiAnim
+    {
+        private sealed class Item
+        {
+            public object Key;
+            public Action<float> Step;
+            public float T;
+            public float Speed;
+        }
+
+        private static readonly List<Item> _items = new List<Item>();
+        private static Timer _timer;
+        private static readonly object _gate = new object();
+
+        private static Timer Clock
+        {
+            get
+            {
+                if (_timer == null)
+                {
+                    _timer = new Timer { Interval = 16 };
+                    _timer.Tick += Tick;
+                }
+                return _timer;
+            }
+        }
+
+        /// <summary>
+        /// Runs <paramref name="step"/> once per frame with an eased 0-1 progress. Re-animating
+        /// the same <paramref name="key"/> replaces the running animation instead of stacking
+        /// two; the key is whatever the caller owns (a control, an AnimValue instance).
+        /// </summary>
+        public static void Animate(object key, Action<float> step, float speed)
+        {
+            if (key == null) key = new object();
+            lock (_gate)
+            {
+                for (int i = 0; i < _items.Count; i++)
+                    if (_items[i].Key == key) { _items.RemoveAt(i); break; }
+                _items.Add(new Item { Key = key, Step = step, T = 0f, Speed = Math.Max(0.02f, speed) });
+                Clock.Start();
+            }
+        }
+
+        /// <summary>Cancels every animation registered under <paramref name="key"/>.</summary>
+        public static void Cancel(object key)
+        {
+            if (key == null) return;
+            lock (_gate)
+            {
+                for (int i = 0; i < _items.Count; i++)
+                    if (_items[i].Key == key) { _items.RemoveAt(i); break; }
+            }
+        }
+
+        private static void Tick(object sender, EventArgs e)
+        {
+            List<Item> run;
+            lock (_gate)
+            {
+                if (_items.Count == 0) { _timer.Stop(); return; }
+                run = new List<Item>(_items);
+            }
+            bool alive = false;
+            foreach (var it in run)
+            {
+                it.T += it.Speed;
+                float t = Math.Min(1f, it.T);
+                /* Ease-out cubic: fast at the start where the eye wants the answer, gentle at
+                   the end where it reads as "settled" rather than "slammed". */
+                float eased = 1f - (1f - t) * (1f - t) * (1f - t);
+                try { it.Step(eased); } catch { continue; }
+                if (t < 1f) alive = true;
+                else lock (_gate) { _items.Remove(it); }
+            }
+            if (!alive)
+            {
+                lock (_gate)
+                {
+                    if (_items.Count == 0 && _timer != null) _timer.Stop();
+                }
+            }
+        }
+    }
+
+    /// <summary>A 0-1 animated value a control can blend its colours against.</summary>
+    internal sealed class AnimValue
+    {
+        private readonly Control _owner;
+        private float _value;
+        private readonly object _key;
+
+        public float Value { get { return _value; } }
+
+        public AnimValue(Control owner)
+        {
+            _owner = owner;
+            _value = 0f;
+            _key = new object();
+        }
+
+        /// <summary>Drives the value toward 1 (shown) or 0 (hidden) with an ease-out.</summary>
+        public void Toward(bool shown, float speed)
+        {
+            if (_owner == null || _owner.IsDisposed) { _value = shown ? 1f : 0f; return; }
+            if (shown && _value >= 1f) { _value = 1f; return; }
+            if (!shown && _value <= 0f) { _value = 0f; return; }
+            float from = _value;
+            var owner = _owner;
+            var key = _key;
+            UiAnim.Animate(key, t =>
+            {
+                _value = from + (shown ? 1f - from : -from) * t;
+                try { owner.Invalidate(); } catch { }
+            }, speed);
+        }
+
+        /// <summary>Sets the value instantly, no animation. Used when a control is rebuilt.</summary>
+        public void Set(float v) { _value = Math.Max(0f, Math.Min(1f, v)); }
+    }
+
     /// <summary>Label that remembers its role so a theme flip restores the right contrast.</summary>
     internal sealed class JBLabel : Label, IReStyle
     {
@@ -842,6 +971,11 @@ namespace JoeBrowser
             return Math.Max(minimum, (int)Math.Ceiling(w) + Ui.S(24));
         }
 
+        /// <summary>Hover and press are tweens, not flips: the fill eases into its new colour
+        /// over about 120 ms, which is the difference between an interface that reacts and one
+        /// that flicks. The booleans stay the source of truth; the values are what is painted.</summary>
+        private readonly AnimValue _hoverT, _downT;
+
         public JBButton()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.Selectable, true);
@@ -851,14 +985,16 @@ namespace JoeBrowser
             Ui.Opaque(this);
             TabStop = true;
             Height = Ui.S(36);
+            _hoverT = new AnimValue(this);
+            _downT = new AnimValue(this);
         }
 
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
         protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; _down = false; Invalidate(); base.OnMouseLeave(e); }
-        protected override void OnMouseDown(MouseEventArgs e) { if (e.Button == MouseButtons.Left) { Focus(); _down = true; Invalidate(); } base.OnMouseDown(e); }
-        protected override void OnMouseUp(MouseEventArgs e) { _down = false; Invalidate(); base.OnMouseUp(e); }
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; _hoverT.Toward(true, 0.28f); Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; _down = false; _hoverT.Toward(false, 0.18f); _downT.Toward(false, 0.25f); Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseDown(MouseEventArgs e) { if (e.Button == MouseButtons.Left) { Focus(); _down = true; _downT.Toward(true, 0.4f); Invalidate(); } base.OnMouseDown(e); }
+        protected override void OnMouseUp(MouseEventArgs e) { _down = false; _downT.Toward(false, 0.3f); Invalidate(); base.OnMouseUp(e); }
         protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
         protected override void OnTextChanged(EventArgs e) { Invalidate(); base.OnTextChanged(e); }
 
@@ -888,30 +1024,37 @@ namespace JoeBrowser
             switch (Kind)
             {
                 case BtnKind.Primary:
-                    bg = !Enabled ? Theme.Panel2 : _down ? Theme.Accent2 : _hover ? Theme.AccentHi : Theme.Accent;
+                    bg = !Enabled ? Theme.Panel2 : Theme.Accent;
+                    bg = Ui.Blend(bg, Theme.AccentHi, _hoverT.Value);
+                    bg = Ui.Blend(bg, Theme.Accent2, _downT.Value);
                     border = Ui.Blend(bg, Color.Black, 0.2f); showBorder = true;
                     fg = Enabled ? Theme.OnAccent : Theme.TextFaint;
                     break;
 
                 case BtnKind.Soft:
-                    bg = !Enabled ? Theme.Panel2 : _down ? Theme.ActiveBg : _hover ? Theme.PanelHover : Theme.ButtonBg;
+                    bg = !Enabled ? Theme.Panel2 : Theme.ButtonBg;
+                    bg = Ui.Blend(bg, Theme.PanelHover, _hoverT.Value);
+                    bg = Ui.Blend(bg, Theme.ActiveBg, _downT.Value);
                     border = Theme.ButtonBorder; showBorder = true;
                     fg = Enabled ? Theme.Text : Theme.TextFaint;
                     break;
 
                 case BtnKind.Danger:
-                    bg = _down ? Ui.Blend(Theme.Danger, Color.Black, 0.16f) : _hover ? Ui.Blend(Theme.Danger, Color.White, 0.10f) : Theme.Danger;
+                    bg = Ui.Blend(Theme.Danger, Color.White, 0.10f * _hoverT.Value);
+                    bg = Ui.Blend(bg, Color.Black, 0.16f * _downT.Value);
                     border = Ui.Blend(Theme.Danger, Color.Black, 0.2f); showBorder = true;
                     fg = Theme.InkText;
                     break;
 
                 case BtnKind.Nav:
-                    bg = Selected ? Theme.AccentOnBg : _hover ? Theme.HoverOverlay : Color.Transparent;
-                    fg = Selected ? Theme.Text : Theme.TextDim;
+                    bg = Selected ? Theme.AccentOnBg : Ui.Blend(Color.Transparent, Theme.HoverOverlay, _hoverT.Value);
+                    bg = Ui.Blend(bg, Theme.ActiveBg, _downT.Value * 0.6f);
+                    fg = Selected ? Theme.Text : _hover ? Theme.Text : Theme.TextDim;
                     break;
 
                 default:
-                    bg = _down ? Theme.SelOverlay : _hover ? Theme.HoverOverlay : Color.Transparent;
+                    bg = Ui.Blend(Color.Transparent, Theme.SelOverlay, _downT.Value);
+                    bg = Ui.Blend(bg, Theme.HoverOverlay, Math.Max(_hoverT.Value, _downT.Value) * (1f - _downT.Value * 0.5f));
                     fg = Enabled ? Theme.Text : Theme.TextFaint;
                     break;
             }
@@ -928,7 +1071,7 @@ namespace JoeBrowser
                    selected one carries a soft accent fill plus a short accent bar on the left.
                    Drawn as a bare text line on the rail it read as a link in a list rather than
                    the page you are on, which is the one piece of state a shell must show. */
-                float navIcon = Ui.S(20);
+                float navIcon = Ui.S(22);
                 float iconX = Ui.S(14);
                 if (hasIcon)
                 {
@@ -949,7 +1092,7 @@ namespace JoeBrowser
             }
             else
             {
-                float iconSize = Ui.S(16);
+                float iconSize = Ui.S(18);
                 float gap = Ui.S(8);
                 float textW = hasText ? Ui.Measure(g, Text, Font).Width : 0;
                 float total = (hasIcon ? iconSize + (hasText ? gap : 0) : 0) + textW;
@@ -1007,6 +1150,7 @@ namespace JoeBrowser
         /// <summary>Caption buttons use the flat Windows 11 title-bar treatment.</summary>
         public bool Caption;
         private bool _hover, _down;
+        private readonly AnimValue _hoverT, _downT;
 
         public JBIconButton()
         {
@@ -1015,14 +1159,16 @@ namespace JoeBrowser
             Ui.Opaque(this);
             TabStop = true;
             Size = new Size(Ui.S(32), Ui.S(32));
+            _hoverT = new AnimValue(this);
+            _downT = new AnimValue(this);
         }
 
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
         protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; _down = false; Invalidate(); base.OnMouseLeave(e); }
-        protected override void OnMouseDown(MouseEventArgs e) { _down = true; Focus(); Invalidate(); base.OnMouseDown(e); }
-        protected override void OnMouseUp(MouseEventArgs e) { _down = false; Invalidate(); base.OnMouseUp(e); }
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; _hoverT.Toward(true, 0.3f); Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; _down = false; _hoverT.Toward(false, 0.2f); _downT.Toward(false, 0.3f); Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseDown(MouseEventArgs e) { _down = true; Focus(); _downT.Toward(true, 0.4f); Invalidate(); base.OnMouseDown(e); }
+        protected override void OnMouseUp(MouseEventArgs e) { _down = false; _downT.Toward(false, 0.3f); Invalidate(); base.OnMouseUp(e); }
 
         protected override bool IsInputKey(Keys keyData) { return keyData == Keys.Space || base.IsInputKey(keyData); }
 
@@ -1046,13 +1192,14 @@ namespace JoeBrowser
             {
                 bool hotClose = Danger && (_hover || _down);
                 if (hotClose) Ui.Fill(g, r, 0f, Ui.Blend(Color.FromArgb(0xC4, 0x2B, 0x1C), Color.Black, _down ? 0.12f : 0f));
-                else if (_hover || _down) Ui.Fill(g, r, 0f, Theme.HoverStrong);
+                else if (_hoverT.Value > 0.01f) Ui.Fill(g, r, 0f, Ui.Blend(Color.Transparent, Theme.HoverStrong, _hoverT.Value));
                 ic = hotClose ? Color.White : Theme.Text;
             }
             else
             {
-                if (_down) Ui.Fill(g, r, rad, Theme.SelOverlay);
-                else if (_hover) Ui.Fill(g, r, rad, Theme.HoverOverlay);
+                Color fill = Ui.Blend(Color.Transparent, Theme.HoverOverlay, Math.Max(_hoverT.Value, _downT.Value));
+                fill = Ui.Blend(fill, Theme.SelOverlay, _downT.Value);
+                if (fill.A > 0) Ui.Fill(g, r, rad, fill);
                 ic = _hover || Focused ? Theme.Text : Theme.TextDim;
             }
 
@@ -1720,6 +1867,10 @@ namespace JoeBrowser
     internal class JBToggle : Control, IReStyle
     {
         private bool _checked, _hover;
+        private readonly AnimValue _hoverT;
+        /// <summary>0 = off, 1 = on. The knob slides between the two instead of teleporting,
+        /// which is the one motion a switch is supposed to have.</summary>
+        private readonly AnimValue _knobT;
 
         public event EventHandler CheckedChanged;
 
@@ -1733,6 +1884,8 @@ namespace JoeBrowser
             Height = Ui.S(26);
             Width = Ui.S(210);
             TabStop = true;
+            _hoverT = new AnimValue(this);
+            _knobT = new AnimValue(this);
         }
 
         public bool Checked
@@ -1742,6 +1895,7 @@ namespace JoeBrowser
             {
                 if (_checked == value) return;
                 _checked = value;
+                _knobT.Toward(value, 0.22f);
                 Invalidate();
                 var h = CheckedChanged;
                 if (h != null) h(this, EventArgs.Empty);
@@ -1749,8 +1903,8 @@ namespace JoeBrowser
         }
 
         protected override void OnClick(EventArgs e) { Checked = !Checked; base.OnClick(e); }
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; _hoverT.Toward(true, 0.3f); Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; _hoverT.Toward(false, 0.2f); Invalidate(); base.OnMouseLeave(e); }
         protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
 
@@ -1779,19 +1933,24 @@ namespace JoeBrowser
                left on a page of square cards, which is exactly the inconsistency the radius
                sweep is for. */
             float rad = Ui.S(Theme.ButtonRadius);
-            if (_checked) Ui.Fill(g, track, rad, Theme.Accent);
-            else
+            /* The track and the knob both read their tween: the fill eases between the empty
+               and the accent track, and the knob travels the distance the switch covers. */
+            float onT = _knobT.Value;
+            if (onT > 0.01f)
+                Ui.Fill(g, track, rad, Ui.Blend(_hover ? Theme.HoverOverlay : Color.FromArgb(0, 0, 0, 0), Theme.Accent, onT));
+            if (!_checked)
             {
-                if (_hover) Ui.Fill(g, track, rad, Theme.HoverOverlay);
+                if (_hoverT.Value > 0.01f && onT <= 0.01f) Ui.Fill(g, track, rad, Ui.Blend(Color.Transparent, Theme.HoverOverlay, _hoverT.Value));
                 // Only the off state needs an outline; over the filled track a darker hairline
                 // read as a dirty edge rather than a border.
-                Ui.Stroke(g, track, rad, Theme.TextDim, 1f);
+                Ui.Stroke(g, track, rad, Ui.Blend(Theme.TextDim, Theme.Accent, onT), 1f);
             }
 
             float knobD = Ui.S(15);
             float ky = track.Y + (trackH - knobD) / 2f;
-            float kx = _checked ? track.Right - knobD - Ui.S(3) : track.X + Ui.S(3);
-            using (var b = new SolidBrush(_checked ? Theme.OnAccent : Theme.TextDim))
+            float kxOff = track.X + Ui.S(3), kxOn = track.Right - knobD - Ui.S(3);
+            float kx = kxOff + (kxOn - kxOff) * onT;
+            using (var b = new SolidBrush(onT > 0.5f ? Theme.OnAccent : Theme.TextDim))
                 g.FillRectangle(b, kx, ky, knobD, knobD);
 
             if (!string.IsNullOrEmpty(Text))
@@ -1966,6 +2125,11 @@ namespace JoeBrowser
         private int _dragOffsetStart;
         private DateTime _barShownAt = DateTime.MinValue;
         private readonly Timer _fade;
+        /// <summary>0 = hidden, 1 = fully shown. The bar eases in on a scroll and eases back
+        /// to a quiet line when the page stops moving, so the rail never shouts over the
+        /// content it is measuring - which is what "avoid the vertical scrollbar" means in
+        /// practice: it is there when needed, and out of the way when not.</summary>
+        private readonly AnimValue _barT;
 
         public JBScrollHost(Control content)
         {
@@ -1995,12 +2159,15 @@ namespace JoeBrowser
             content.SizeChanged += delegate { SyncExtent(); };
             content.Layout += delegate { SyncExtent(); };
 
+            _barT = new AnimValue(this);
+            _barT.Set(0.45f);
             _fade = new Timer { Interval = 350 };
             _fade.Tick += delegate
             {
                 if (_thumbHover || _dragging) return;
                 if ((DateTime.UtcNow - _barShownAt).TotalMilliseconds < 900) return;
                 _fade.Stop();
+                _barT.Toward(false, 0.06f);
                 Invalidate();
             };
         }
@@ -2085,6 +2252,7 @@ namespace JoeBrowser
             if (reveal)
             {
                 _barShownAt = DateTime.UtcNow;
+                _barT.Toward(true, 0.3f);
                 if (!_fade.Enabled) _fade.Start();
             }
             Invalidate();
@@ -2117,7 +2285,16 @@ namespace JoeBrowser
             if (hit.IsEmpty) return;
             // The visible bar is inset inside the grab zone so the two never disagree.
             var bar = new RectangleF(Width - Ui.S(9), hit.Y, Ui.S(5), hit.Height);
-            Ui.Fill(e.Graphics, bar, Ui.S(Theme.ButtonRadius), _dragging || _thumbHover ? Theme.Accent : Theme.Line);
+            /* Quiet while idle, loud while moving: the resting bar is a low-contrast rail so a
+               page that scrolls still answers the first frame without a grey stripe down the
+               window, and the moment it moves - or the pointer reaches for it - it eases into
+               the accent colour that says "this is being dragged". */
+            float t = Math.Max(_barT.Value, _thumbHover ? 1f : 0f);
+            Color c = _dragging || _thumbHover ? Theme.Accent : Ui.Blend(Theme.LineSoft, Theme.Accent, t);
+            int alpha = _dragging || _thumbHover ? 255 : (int)(150 + 105 * t);
+            if (alpha > 255) alpha = 255;
+            using (var b = new SolidBrush(Color.FromArgb(alpha, c)))
+                e.Graphics.FillRectangle(b, bar);
         }
 
         /// <summary>Thumb geometry, shared by painting and hit-testing so the grab zone matches the bar.</summary>
@@ -2159,7 +2336,7 @@ namespace JoeBrowser
                 return;
             }
             bool h = ThumbRect().Contains(e.Location);
-            if (h != _thumbHover) { _thumbHover = h; Invalidate(); }
+            if (h != _thumbHover) { _thumbHover = h; if (h) { _barShownAt = DateTime.UtcNow; _barT.Toward(true, 0.3f); } Invalidate(); }
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
@@ -2399,6 +2576,15 @@ namespace JoeBrowser
             // Warnings and errors carry instructions the user has to read; keep them up longer.
             _timer.Interval = (kind == ToastKind.Warn || kind == ToastKind.Error) ? 6500 : 3400;
             _timer.Start();
+            /* Enter like something arriving, not like something appearing: the bar rises a few
+               pixels and eases into place. Exiting stays immediate - dismissing feedback
+               quickly is as much a part of the feel as showing it smoothly. */
+            int finalTop = Top;
+            UiAnim.Animate(this, t =>
+            {
+                try { Top = finalTop + (int)Math.Round(Ui.S(14) * (1f - t)); } catch { }
+            }, 0.28f);
+            Top = finalTop + Ui.S(14);
         }
 
         private void FitHeight()

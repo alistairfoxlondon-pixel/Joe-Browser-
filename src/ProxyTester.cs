@@ -68,7 +68,13 @@ namespace JoeBrowser
             var sw = Stopwatch.StartNew();
             try
             {
-                using (var relay = new ProxyRelay(cfg))
+                /* The test relay must NOT fall back to a direct connection. With fallback on -
+                   the default a live session wants - a dead proxy silently used the machine's
+                   own internet, the check answered with the user's REAL public IP, and a
+                   broken proxy reported "Working". A test that cannot fail is not a test. */
+                var strict = cfg.Copy();
+                strict.FallbackDirect = false;
+                using (var relay = new ProxyRelay(strict))
                     return Fetch(new WebProxy("http://127.0.0.1:" + relay.Port), sw);
             }
             catch (Exception ex)
@@ -120,6 +126,15 @@ namespace JoeBrowser
                 catch (Exception ex)
                 {
                     lastError = Friendly(ex);
+                    /* The test relay answers a failed upstream with 502. Through the friendly
+                       mapping that arrived as "Proxy returned HTTP 502", which reads like the
+                       site's problem; say what it actually means - the proxy is unreachable. */
+                    if (ex is WebException)
+                    {
+                        var we2 = (WebException)ex;
+                        if (we2.Response is HttpWebResponse && (int)((HttpWebResponse)we2.Response).StatusCode == 502)
+                            lastError = "Proxy is unreachable - it did not answer the connection";
+                    }
                 }
             }
             return new ProxyCheckResult { Ok = false, Error = lastError, LatencyMs = (int)sw.ElapsedMilliseconds };

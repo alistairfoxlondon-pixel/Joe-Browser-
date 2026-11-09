@@ -161,7 +161,14 @@ namespace JoeBrowser
             /* The cap used to be applied only when reading, so the file itself grew without
                limit and every read parsed a year of rows to show the newest page of them. The
                file is rewritten only once it is 25% over, so the cost is amortised, and only
-               the newest cap rows survive. */
+               the newest cap rows survive.
+               The size is checked BEFORE the read: Append runs on every navigation in every
+               running profile, and the old code re-read a file that could hold 25,000 JSON
+               lines just to learn it was still under the cap. A FileInfo.Length call answers
+               in microseconds; a 25k-line read on every page load is the "history makes
+               browsing feel slow" report. */
+            long limit = (long)(MaxEntriesPerProfile + MaxEntriesPerProfile / 4) * 150; // smallest realistic JSON row
+            try { if (new FileInfo(file).Length <= limit) return; } catch { return; }
             string[] lines = File.ReadAllLines(file);
             if (lines.Length <= MaxEntriesPerProfile + MaxEntriesPerProfile / 4) return;
             int keep = MaxEntriesPerProfile;

@@ -129,6 +129,32 @@ namespace JoeBrowser
             _extensions = ExtensionCatalog.Load();
             Build();
             L10n.Changed += OnLanguageChanged;
+            /* The shipped pair downloads on a worker thread started before this window existed.
+               Without this hook the page kept saying "Waiting for download" after the download
+               had actually finished, and a profile launched in that window started without the
+               pair. The event arrives on the worker, so everything below marshals first. */
+            ExtensionCatalog.DefaultsChanged += OnDefaultsChanged;
+        }
+
+        private void OnDefaultsChanged()
+        {
+            try
+            {
+                if (IsDisposed || Disposing) return;
+                if (InvokeRequired) { BeginInvoke(new Action(OnDefaultsChanged)); return; }
+                _extensions = ExtensionCatalog.Load();
+                _extensionPage.SetItems(VisibleExtensions(_extensions));
+                _extensionPage.RefreshShipped();
+                /* A new install typically lands both files at once; tell the user their two
+                   extensions are ready instead of leaving the state change silent. */
+                int present = 0;
+                foreach (var row in ExtensionCatalog.DefaultStatuses()) if (row[2] == "Installed") present++;
+                if (present > 0)
+                    Toast(present + " of " + ExtensionCatalog.DefaultStoreExtensions.Length +
+                        " included extensions are installed and will load with the next profile",
+                        ToastKind.Success);
+            }
+            catch (Exception ex) { Log.Error("Refresh after shipped extension fetch failed", ex); }
         }
 
         private void OnLanguageChanged()
@@ -394,7 +420,8 @@ namespace JoeBrowser
 
             _extensionPage = new ExtensionPage { Visible = false };
             _extensionPage.ActionRequested += delegate(object sender, ExtensionActionEventArgs e) { ExtensionAction(e.Key, e.Index); };
-            _extensionPage.SetItems(_extensions);
+            _extensionPage.RemoveShippedRequested += delegate(object sender, ExtensionActionEventArgs e) { RemoveShipped(e.Index); };
+            _extensionPage.SetItems(VisibleExtensions(_extensions));
 
             _browsersPage = new BrowsersPage { Visible = false };
             _browsersPage.ActionRequested += delegate(object sender, BrowserActionEventArgs e) { BrowserAction(e.Key, e.Engine); };
@@ -402,6 +429,28 @@ namespace JoeBrowser
             /* History opens on the last profile that was opened, which is the one a user is
                most likely to have forgotten a URL in. */
             _accountPage = new AccountPage { Visible = false };
+            /* The workspace card reads the live counts from the window that owns the lists -
+               one delegate, evaluated on every Reload, so the numbers can never disagree with
+               the pages they come from. */
+            AccountPage.StatsProvider = delegate
+            {
+                int running = 0;
+                foreach (var s in _sessions.Values) if (s != null && s.IsRunning) running++;
+                int pages = 0;
+                try
+                {
+                    foreach (var p in _profiles) pages += HistoryStore.Count(p.Id);
+                }
+                catch { }
+                return new AccountPage.WorkspaceStats
+                {
+                    Profiles = _profiles != null ? _profiles.Count : 0,
+                    Running = running,
+                    Proxies = _proxies != null ? _proxies.Count : 0,
+                    Extensions = _extensions != null ? _extensions.Count : 0,
+                    HistoryPages = pages
+                };
+            };
             _accountPage.SignOutRequested += delegate { SignOut(); };
             _accountPage.SwitchRequested += delegate { SwitchAccount(); };
             _accountPage.PinRequested += delegate { ShowSecurity(); };
@@ -863,48 +912,14 @@ namespace JoeBrowser
                 Toast(made + " profiles created", ToastKind.Success);
         }
 
-        /// <summary>Accepts scheme://user:pass@host:port, host:port and host:port:user:pass.</summary>
+        /// <summary>
+        /// One parser, not two. This used to be a verbatim copy of ProxyVault.ParseLine, and
+        /// the two had already drifted once - the vault learned a fix the batch creator did not
+        /// have. Every parse goes through the vault now.
+        /// </summary>
         private static ProxyConfig ParseProxyLine(string line)
         {
-            var p = new ProxyConfig();
-            string s = (line ?? "").Trim();
-            if (s.Length == 0) return p;
-
-            string type = "http";
-            int scheme = s.IndexOf("://", StringComparison.Ordinal);
-            if (scheme > 0)
-            {
-                string head = s.Substring(0, scheme).ToLowerInvariant();
-                if (head == "socks5" || head == "socks5h") type = "socks5";
-                else if (head == "https") type = "https";
-                s = s.Substring(scheme + 3);
-            }
-            int slash = s.IndexOf('/');
-            if (slash > 0) s = s.Substring(0, slash);
-
-            string user = "", pass = "";
-            int at = s.LastIndexOf('@');
-            if (at > 0)
-            {
-                string cred = s.Substring(0, at);
-                s = s.Substring(at + 1);
-                int colon = cred.IndexOf(':');
-                if (colon >= 0) { user = cred.Substring(0, colon); pass = cred.Substring(colon + 1); }
-                else user = cred;
-            }
-
-            string[] bits = s.Split(':');
-            if (bits.Length < 2 || string.IsNullOrWhiteSpace(bits[0])) return p;
-            int port;
-            if (!int.TryParse(bits[1], out port) || port <= 0 || port > 65535) return p;
-            if (bits.Length >= 4) { user = bits[2]; pass = bits[3]; }
-
-            p.Type = type;
-            p.Host = bits[0].Trim();
-            p.Port = port;
-            p.User = user;
-            p.Password = pass;
-            return p;
+            return ProxyVault.ParseLine(line);
         }
 
         private void ImportProfiles()
@@ -1285,10 +1300,11 @@ namespace JoeBrowser
             return index >= 0 && index < _proxies.Count ? _proxies[index] : null;
         }
 
-        private void SaveProxies()
+        private bool SaveProxies()
         {
-            ProxyVault.Save(_proxies);
+            bool ok = ProxyVault.Save(_proxies);
             _proxyPage.SetItems(_proxies);
+            return ok;
         }
 
         private void EditProxy(int index)
@@ -1311,6 +1327,9 @@ namespace JoeBrowser
                     isNew || !cfg.Enabled ? "" : cfg.Host + ":" + cfg.Port, "proxy.example.com:8080", "globe", false, 33);
                 var userBox = dlg.AddField("USERNAME (OPTIONAL)", cfg.User, "Optional", "user", false, 33);
                 var passBox = dlg.AddField("PASSWORD (OPTIONAL)", cfg.Password, "Optional", "key", false, 33);
+                /* The one secret on this dialog was the one field drawn in plain text; the
+                   profile editor masks the same value. Ask for it the way every other app does. */
+                passBox.UsePasswordChar = true;
                 var noteBox = dlg.AddField("NOTE (OPTIONAL)", isNew ? "" : entry.Note, "Optional", "file", false, 33);
                 dlg.AddNote("Passwords are encrypted on this device.");
 
@@ -1324,7 +1343,7 @@ namespace JoeBrowser
                     var parsed = ProxyVault.ParseLine(lineBox.Value ?? "");
                     if (string.IsNullOrWhiteSpace(parsed.Host) || parsed.Port <= 0)
                     {
-                        Toast("Enter the proxy as host:port, or paste the full proxy link", ToastKind.Info);
+                        Toast("Enter the proxy as host:port, or paste the full link - for example socks5://user:pass@host:1080", ToastKind.Warn);
                         return false;
                     }
                     return true;
@@ -1342,8 +1361,15 @@ namespace JoeBrowser
                 cfg.Port = entered.Port;
                 string typedUser = (userBox.Value ?? "").Trim();
                 string typedPass = passBox.Value ?? "";
-                cfg.User = typedUser.Length > 0 ? typedUser : (entered.User ?? "");
-                cfg.Password = typedUser.Length > 0 ? typedPass : (entered.Password ?? "");
+                /* Credentials: a typed value wins, the link's own user:pass fills what the form
+                   left empty. The old rule keyed everything off the username alone, so a typed
+                   password with an empty username field was silently thrown away - and the proxy
+                   then failed with 407s that looked like a broken proxy rather than a broken
+                   form. (Editing an existing proxy keeps this correct too: its address field
+                   carries no credentials, so clearing the password really clears it.) */
+                string linkUser = entered.User ?? "", linkPass = entered.Password ?? "";
+                cfg.User = typedUser.Length > 0 ? typedUser : linkUser;
+                cfg.Password = typedPass.Length > 0 ? typedPass : linkPass;
                 /* An explicit type on the form is a decision; otherwise take the scheme in the
                    link, which the address field carries when the whole link was pasted. */
                 string scheme = ProxyVault.ParseLine(lineBox.Value ?? "").Type;
@@ -1364,8 +1390,13 @@ namespace JoeBrowser
                 entry.Config = cfg;
                 entry.LastStatus = 0;
             }
-            SaveProxies();
-            Toast(isNew ? "Proxy saved" : "Proxy updated", ToastKind.Success);
+            /* "Proxy saved" over a disk that refused the write is how a proxy disappears on the
+               next visit and the user concludes the form is broken. SaveProxies now reports, and
+               so does this toast. */
+            if (SaveProxies())
+                Toast(isNew ? "Proxy saved" : "Proxy updated", ToastKind.Success);
+            else
+                Toast("The proxy could not be written to disk. Check the folder is writable and try again.", ToastKind.Error);
         }
 
         private void DeleteProxy(int index)
@@ -1692,7 +1723,7 @@ namespace JoeBrowser
         private void SaveExtensions()
         {
             ExtensionCatalog.Save(_extensions);
-            _extensionPage.SetItems(_extensions);
+            _extensionPage.SetItems(VisibleExtensions(_extensions));
             /* A running browser fixes its extension list at launch, so a change here can only
                take effect on the next launch unless the tools are also re-injected. The injected
                script is per document, so it applies to every new page in the sessions that are
@@ -1789,18 +1820,38 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>
+        /// The rows the library list shows: everything except the shipped pair. The pair already
+        /// has its own section above with its state and its remove affordance - listing it twice
+        /// made the page show the same extension twice with two different sets of controls, and
+        /// toggling one copy had no effect on what actually loaded. Index arithmetic everywhere
+        /// below runs against THIS list.
+        /// </summary>
+        private static List<ExtensionItem> VisibleExtensions(List<ExtensionItem> items)
+        {
+            var result = new List<ExtensionItem>();
+            foreach (var i in items ?? new List<ExtensionItem>())
+                if (i != null && ExtensionCatalog.DefaultIdOf(i).Length == 0) result.Add(i);
+            return result;
+        }
+
         private void ToggleExtension(int index)
         {
-            if (index < 0 || index >= _extensions.Count) return;
-            _extensions[index].Enabled = !_extensions[index].Enabled;
+            var item = VisibleExtensions(_extensions);
+            if (index < 0 || index >= item.Count) return;
+            var target = item[index];
+            int real = _extensions.IndexOf(target);
+            if (real < 0) return;
+            _extensions[real].Enabled = !_extensions[real].Enabled;
             SaveExtensions();
-            Toast(_extensions[index].Enabled ? "Enabled. Takes effect at the next launch." : "Disabled. Takes effect at the next launch.", ToastKind.Success);
+            Toast(_extensions[real].Enabled ? "Enabled. Takes effect at the next launch." : "Disabled. Takes effect at the next launch.", ToastKind.Success);
         }
 
         private void DeleteExtension(int index)
         {
-            if (index < 0 || index >= _extensions.Count) return;
-            var item = _extensions[index];
+            var visible = VisibleExtensions(_extensions);
+            if (index < 0 || index >= visible.Count) return;
+            var item = visible[index];
             if (!ConfirmForm.Ask(this, "Remove extension", "Remove \"" + item.Name + "\" from Joe Browser?",
                 "Its files are deleted from Joe Browser's extensions folder.", "Remove", BtnKind.Danger)) return;
 
@@ -1815,12 +1866,42 @@ namespace JoeBrowser
                start. The mark is what makes the user's decision stick. */
             string shippedId = ExtensionCatalog.DefaultIdOf(item);
             if (!string.IsNullOrEmpty(shippedId)) ExtensionCatalog.MarkRemoved(shippedId, true);
-            _extensions.RemoveAt(index);
+            _extensions.Remove(item);
             SaveExtensions();
             _extensionPage.RefreshShipped();
             bool removed = ExtensionCatalog.DeleteFiles(item);
             Toast(ExtensionNote(removed ? "Extension removed" : "Extension removed. Close the browsers it was open in to free its files"),
                 removed ? ToastKind.Success : ToastKind.Info);
+        }
+
+        /// <summary>
+        /// Removes one of the shipped pair from its own row. The decision is recorded with the
+        /// same mark the library delete uses, so nothing downloads it again until the user asks
+        /// for it back - which is the exact promise "removable and it stays removed".
+        /// </summary>
+        private void RemoveShipped(int statusIndex)
+        {
+            var statuses = ExtensionCatalog.DefaultStatuses();
+            if (statusIndex < 0 || statusIndex >= statuses.Count) return;
+            string id = statuses[statusIndex][0];
+            string name = statuses[statusIndex][1];
+            if (!ConfirmForm.Ask(this, "Remove included extension",
+                "Remove \"" + name + "\" from Joe Browser?",
+                "It will not be downloaded again or loaded into new profiles until you add it back.",
+                "Remove", BtnKind.Danger)) return;
+            ExtensionCatalog.MarkRemoved(id, true);
+            ExtensionItem found = null;
+            foreach (var e in _extensions)
+                if (e != null && e.Folder != null && e.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase))
+                { found = e; break; }
+            if (found != null)
+            {
+                _extensions.Remove(found);
+                SaveExtensions();
+                ExtensionCatalog.DeleteFiles(found);
+            }
+            _extensionPage.RefreshShipped();
+            Toast("\"" + name + "\" removed. It stays removed until you add it back.", ToastKind.Success);
         }
 
         /// <summary>
@@ -1836,7 +1917,7 @@ namespace JoeBrowser
                 int added = await Task.Run(new Func<int>(delegate { return ExtensionCatalog.FetchMissing(true); }));
                 var items = ExtensionCatalog.Load();
                 _extensions = items;
-                _extensionPage.SetItems(items);
+                _extensionPage.SetItems(VisibleExtensions(items));
                 _extensionPage.RefreshShipped();
                 int present = 0;
                 foreach (var row in ExtensionCatalog.DefaultStatuses()) if (row[2] == "Installed") present++;
@@ -1852,8 +1933,9 @@ namespace JoeBrowser
 
         private void OpenExtensionStore(int index)
         {
-            if (index < 0 || index >= _extensions.Count) return;
-            var item = _extensions[index];
+            var visible = VisibleExtensions(_extensions);
+            if (index < 0 || index >= visible.Count) return;
+            var item = visible[index];
             string url = item.StoreUrl;
             /* An extension imported from a file or a folder has no store link stored, but the
                key inside its manifest names its store id, so the listing can still be opened. */
@@ -2193,12 +2275,16 @@ namespace JoeBrowser
             return left;
         }
 
-        /// <summary>Free plan runs one browser at a time.</summary>
+        /// <summary>Free plan runs one browser at a time. The count includes the profiles that
+        /// are mid-launch: the session is only registered in _sessions when the browser window
+        /// is up, so a fast "Open all" used to pass this gate once per click before the first
+        /// session existed - and the free plan started five browsers instead of one.</summary>
         private bool AllowAnotherBrowser()
         {
             int running = 0;
             foreach (var s in _sessions.Values) if (s.IsRunning) running++;
-            if (Entitlements.ConcurrentSlotsLeft(running) >= 1) return true;
+            int starting = _launching.Count;
+            if (Entitlements.ConcurrentSlotsLeft(running + starting) >= 1) return true;
             OfferUpgrade(Entitlements.ConcurrentReason());
             return false;
         }
@@ -2577,6 +2663,8 @@ namespace JoeBrowser
                 case 4: title = L10n.T("header.settings"); sub = L10n.T("sub.settings"); break;
                 case 5: title = L10n.T("header.tools"); sub = L10n.T("sub.tools"); break;
                 case 7: title = L10n.T("header.plan"); sub = L10n.T("sub.plan"); break;
+                case 8: title = L10n.T("header.history"); sub = L10n.T("sub.history"); break;
+                case 9: title = L10n.T("header.account"); sub = L10n.T("sub.account"); break;
                 default: title = L10n.T("header.about"); sub = L10n.T("sub.about"); break;
             }
 
@@ -2993,6 +3081,13 @@ namespace JoeBrowser
                 {
                     SendMessage(Handle, 0x000B, (IntPtr)1, IntPtr.Zero);
                     Invalidate(true);
+                    /* Compose the first frame NOW, on this call, instead of a few messages
+                       later. Without Update() the unfroze window stayed stale for one message
+                       loop turn - child pages whose WM_PAINT had been queued during the freeze
+                       drew themselves first, so the user could see the old header band over
+                       the new page for a frame. That mixed frame is the "flash when switching
+                       sections" that was reported over and over. */
+                    Update();
                 }
             }
         }
@@ -3161,7 +3256,7 @@ namespace JoeBrowser
             else if (page == 2)
             {
                 _extensions = ExtensionCatalog.Load();
-                _extensionPage.SetItems(_extensions);
+                _extensionPage.SetItems(VisibleExtensions(_extensions));
                 _extensionPage.RefreshShipped();
             }
             else if (page == 3)
@@ -3174,6 +3269,9 @@ namespace JoeBrowser
                 /* Re-open the session that was live when the app last closed, so a payment made
                    just before closing is still watched instead of being treated as too old. */
                 _upgradePage.RestorePending();
+                /* The exchange rate is a web request; warming it here, off the UI thread, is
+                   what keeps the first invoice click from feeling like a hang. */
+                Rates.Warm();
                 _payTicks = 0;
                 if (!_planTimer.Enabled) _planTimer.Start();
             }
@@ -3591,8 +3689,15 @@ namespace JoeBrowser
                     s.UpdateProfile(updated);
                     bool live = false;
                     try { live = await s.ApplyLiveAsync(); } catch (Exception ex) { Log.Error("Live apply failed", ex); }
-                    Toast(live ? "Applied to the running browser" : "Saved. Reopen the browser to apply",
-                        live ? ToastKind.Success : ToastKind.Info);
+                    /* ApplyLiveAsync answers "yes" for any running Chromium session, including
+                       one that opened with no proxy - and Chrome reads its proxy from the
+                       command line once, so nothing actually changed there. Tying the claim to
+                       the relay (HasRelay) is the honest version: the same words the proxy
+                       page's own live-apply uses. */
+                    bool honest = live && s.HasRelay;
+                    Toast(honest ? "Applied to the running browser"
+                        : "Saved. Reopen the browser to apply",
+                        honest ? ToastKind.Success : ToastKind.Info);
                 }
                 else Toast("Profile updated", ToastKind.Success);
             }

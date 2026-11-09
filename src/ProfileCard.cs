@@ -38,8 +38,11 @@ namespace JoeBrowser
            with the action bar 14 px from the bottom edge and a 28 px chip row that started at
            y=72: at the raised type scale the name, its subtitle and the status pill no longer
            fitted between the top edge and the first chip, which is the overcrowding that reads
-           as a broken layout. Each band below is a line of type plus its padding. */
-        public const double CardH = 224;
+           as a broken layout. Each band below is a line of type plus its padding.
+           248 is the height at which a wrapped proxy chip, the tag row and the action bar all
+           clear each other: tags land at 154 and end by 180, the actions start at 196, and the
+           old 224 left the tag row ten pixels inside the action divider. */
+        public const double CardH = 248;
         public const double CardMinW = 320;
         private const double Pad = 20;
         private const double CheckSize = 20;
@@ -278,7 +281,7 @@ namespace JoeBrowser
                narrow card silently lost the profile's timezone, language and tags to make room
                for one chip. The row moves down a line instead; the card is tall enough for it and
                the action bar is anchored to the bottom edge. */
-            PaintTags(g, proxyWrapped ? Ui.S(30) : 0);
+            PaintTags(g, proxyWrapped ? Ui.S(34) : 0);
             PaintActions(g);
 
             if (Ui.FocusCues(this)) Ui.FocusRing(g, r, rad);

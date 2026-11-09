@@ -61,6 +61,29 @@ namespace JoeBrowser
             Current = key;
             var h = Changed;
             if (h != null) { try { h(); } catch { } }
+            /* A language outside the bundled face's coverage has to move the whole interface
+               onto the system stack - a Cyrillic or CJK string in Telenor draws .notdef boxes.
+               Theme re-checks, clears its cache and restyles the open windows. */
+            try { Theme.OnLanguageChanged(); } catch { }
+        }
+
+        /// <summary>
+        /// A sample of the active language's own text, used to decide whether the bundled
+        /// Telenor face can render the interface. Longer than one string on purpose: a single
+        /// label can be Latin in a language that mostly is not.
+        /// </summary>
+        public static string CoverageSample()
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (string k in new[] { "nav.profiles", "nav.proxies", "nav.extensions", "nav.browsers",
+                "nav.settings", "nav.tools", "nav.about", "nav.plan", "nav.history", "acct.signout",
+                "header.profiles", "sub.proxies", "acct.pin.off.state", "set.clearhistory",
+                "acct.plannow", "acct.planunlimited", "history.confirmall.body" })
+            {
+                string v = T(k);
+                if (!string.IsNullOrEmpty(v) && v != k) sb.Append(v).Append(' ');
+            }
+            return sb.ToString();
         }
 
         /// <summary>
@@ -159,6 +182,10 @@ nav.proxies=Proxies
 nav.extensions=Extensions
 nav.browsers=Browsers
 nav.plan=Plan
+header.history=History
+sub.history=What each profile visited, per account
+header.account=Account
+sub.account=Who is signed in, the plan, and how this PC is protected
 history.back=All profiles
 history.clear=Clear history
 history.copy=Copy link

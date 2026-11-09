@@ -59,6 +59,8 @@ namespace JoeBrowser
         private bool _ready;
 
         public event EventHandler<ExtensionActionEventArgs> ActionRequested;
+        /// <summary>Remove one of the shipped pair, by its position in DefaultStatuses().</summary>
+        public event EventHandler<ExtensionActionEventArgs> RemoveShippedRequested;
 
         public List<ExtensionItem> Items { get; private set; } = new List<ExtensionItem>();
 
@@ -104,9 +106,16 @@ namespace JoeBrowser
 
             _shippedHead = new JBLabel(LabelRole.Accent, "INCLUDED WITH JOE BROWSER");
             _column.Controls.Add(_shippedHead);
+            int shippedIndex = 0;
             foreach (var row in ExtensionCatalog.DefaultStatuses())
             {
-                var card = new ShippedRow(row[1], row[3]);
+                int idx = shippedIndex++;
+                var card = new ShippedRow(row[1], row[0], row[3]);
+                card.RemoveRequested += delegate
+                {
+                    var h = RemoveShippedRequested;
+                    if (h != null) h(this, new ExtensionActionEventArgs("shippedRemove", idx));
+                };
                 _column.Controls.Add(card);
                 _shipped.Add(card);
             }
@@ -459,16 +468,24 @@ namespace JoeBrowser
     internal sealed class ShippedRow : Control, IReStyle
     {
         private readonly string _name;
+        private readonly string _id;
         private string _state = "", _detail = "";
         private bool _present;
+        private int _hover = -1; // 0 = remove
 
-        public ShippedRow(string name, string detail)
+        public event EventHandler RemoveRequested;
+
+        public string Id { get { return _id; } }
+
+        public ShippedRow(string name, string id, string detail)
         {
             _name = name ?? "";
+            _id = id ?? "";
             _detail = detail ?? "";
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                      ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             Ui.Opaque(this);
+            Cursor = Cursors.Hand;
         }
 
         public string State { get { return _state; } }
@@ -491,14 +508,39 @@ namespace JoeBrowser
             }
         }
 
-        public void ReStyle() { Invalidate(); }
-        protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(Ui.SurfaceColor(this)); }
+        private RectangleF RemoveRect
+        {
+            get { return new RectangleF(Width - Ui.S(16) - Ui.S(30), (Height - Ui.S(30)) / 2f, Ui.S(30), Ui.S(30)); }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            int hit = _present && RemoveRect.Contains(e.Location) ? 0 : -1;
+            if (hit != _hover) { _hover = hit; Invalidate(); }
+            Cursor = hit >= 0 ? Cursors.Hand : Cursors.Default;
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e) { _hover = -1; Invalidate(); base.OnMouseLeave(e); }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            /* The one action the shipped rows lacked: removing one. It existed only on the
+               library row further down - two rows for one extension, and the remove on the
+               one nobody could tell apart from the status card. */
+            if (e.Button == MouseButtons.Left && _present && RemoveRect.Contains(e.Location))
+            {
+                var h = RemoveRequested;
+                if (h != null) h(this, EventArgs.Empty);
+            }
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
             Ui.Quality(g);
-            g.Clear(Theme.Bg);
+            g.Clear(Ui.SurfaceColor(this));
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             Ui.Fill(g, r, Ui.S(Theme.CardRadius), Theme.Panel);
             Ui.Stroke(g, r, Ui.S(Theme.CardRadius), Theme.Line);
@@ -508,15 +550,30 @@ namespace JoeBrowser
             using (var b = new SolidBrush(tone))
                 g.FillEllipse(b, Ui.S(16), (Height - dot) / 2f, dot, dot);
 
+            /* The remove affordance sits where the state text used to end, and the state text
+               moves left of it - both are measured, so neither runs into the other. */
+            float rightEdge = Width - Ui.S(16);
+            if (_present)
+            {
+                if (_hover == 0) Ui.Fill(g, RemoveRect, Ui.S(Theme.ButtonRadius), Theme.HoverOverlay);
+                float s = Ui.S(15);
+                Icons.Draw(g, "trash", new RectangleF(RemoveRect.X + (RemoveRect.Width - s) / 2f,
+                    RemoveRect.Y + (RemoveRect.Height - s) / 2f, s, s), _hover == 0 ? Theme.Danger : Theme.TextDim);
+                rightEdge = RemoveRect.Left - Ui.S(10);
+            }
+
             /* The state is measured, so the name is given exactly what is left and cannot run
                under it. */
             float stateW = Ui.Measure(g, _state, Theme.Caption).Width + Ui.S(4);
             float left = Ui.S(16) + dot + Ui.S(12);
-            float nameW = Math.Max(Ui.S(60), Width - left - stateW - Ui.S(20));
+            float nameW = Math.Max(Ui.S(60), rightEdge - left - stateW - Ui.S(8));
             Ui.Text(g, _name, Theme.H3, Theme.Text, left, (Height - Theme.LineHeight(Theme.H3)) / 2f, nameW);
-            Ui.Text(g, _state, Theme.Caption, tone, Width - stateW - Ui.S(16),
+            Ui.Text(g, _state, Theme.Caption, tone, rightEdge - stateW,
                 (Height - Theme.LineHeight(Theme.Caption)) / 2f, stateW);
         }
+
+        public void ReStyle() { Invalidate(); }
+        protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(Ui.SurfaceColor(this)); }
     }
 
     /// <summary>Recommended extension tile. Opens a store search, never a made-up id.</summary>
