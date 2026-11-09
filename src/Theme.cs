@@ -614,7 +614,7 @@ namespace JoeBrowser
             if (FontCache.TryGetValue(key, out f)) return f;
 
             /* Device pixels: the size asked for is the size drawn at every scale. */
-            float pt = (float)(px * 0.75 * Scale);
+            float pt = (float)(px * 0.75 * Ui.Scale);
             FontFamily fam = _family;
 
             try
@@ -675,17 +675,17 @@ namespace JoeBrowser
             try
             {
                 using (var g = Graphics.FromHwnd(IntPtr.Zero))
-                    return Math.Max(S(12), (int)Math.Ceiling(f.GetHeight(g)));
+                    return Math.Max(Ui.S(12), (int)Math.Ceiling((double)f.GetHeight(g)));
             }
-            catch { return Math.Max(S(12), (int)Math.Ceiling(f.Height)); }
+            catch { return Math.Max(Ui.S(12), (int)Math.Ceiling((double)f.Height)); }
         }
 
         /* The vertical rhythm every page, card and dialog is built from. A controls library
            that hard codes 18 for a label row and 33 for a field gets 1 px of clipping the day
            the font gets a pixel taller; these are derived from the fonts instead. */
-        public static int Row { get { return LineHeight(Small) + S(4); } }
-        public static int Field { get { return S(34); } }
-        public static int Gap { get { return S(8); } }
+        public static int Row { get { return LineHeight(Small) + Ui.S(4); } }
+        public static int Field { get { return Ui.S(34); } }
+        public static int Gap { get { return Ui.S(8); } }
 
         /// <summary>
         /// A tabular face for values that are read one character at a time: wallet addresses,
@@ -700,7 +700,7 @@ namespace JoeBrowser
             Font f;
             if (FontCache.TryGetValue(key, out f)) return f;
 
-            float pt = (float)(px * 0.75 * Scale);
+            float pt = (float)(px * 0.75 * Ui.Scale);
             FontFamily fam = TryFamily("Consolas") ?? TryFamily("Cascadia Mono") ?? TryFamily("Courier New");
             try { f = fam != null ? new Font(fam, pt, FontStyle.Regular, GraphicsUnit.Pixel) : F(px); }
             catch { f = F(px); }
@@ -783,7 +783,7 @@ namespace JoeBrowser
         /// Pixel size for the screen's frames per inch. A one pixel line on a 4K panel at 200%
         /// covers two device pixels and reads as a grey smear unless it is drawn 2 units wide.
         /// </summary>
-        public static float Hair { get { return Scale >= 1.5f ? 1.6f : 1f; } }
+        public static float Hair { get { return Ui.Scale >= 1.5f ? 1.6f : 1f; } }
 
         /// <summary>
         /// A card edge that stays a crisp line at any scale. Drawn at half pixel offsets with
