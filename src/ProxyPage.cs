@@ -309,8 +309,13 @@ namespace JoeBrowser
             float mid = Height / 2f;
 
             string name = string.IsNullOrWhiteSpace(Item.Name) ? Item.Connection : Item.Name;
-            Ui.Text(g, name, Theme.H3, Theme.Text, x, mid - Ui.S(15), cols[0] - Ui.S(8));
-            Ui.Text(g, Item.Connection, Theme.Caption, Theme.TextFaint, x, mid + Ui.S(3), cols[0] - Ui.S(8));
+            /* The name and its address are a measured pair, centred together. Fixed offsets from
+               the middle (15 up, 3 down) only line up for the font they were written at. */
+            float nameH = Theme.LineHeight(Theme.H3);
+            float addrH = Theme.LineHeight(Theme.Caption);
+            float nameTop = Math.Max(Ui.S(4), (Height - (nameH + addrH)) / 2f);
+            Ui.Text(g, name, Theme.H3, Theme.Text, x, nameTop, cols[0] - Ui.S(8));
+            Ui.Text(g, Item.Connection, Theme.Caption, Theme.TextFaint, x, nameTop + nameH, cols[0] - Ui.S(8));
             x += cols[0];
 
             Ui.Text(g, Item.Location, Theme.Body, Theme.TextDim, x, mid - Theme.Body.GetHeight(g) / 2f, cols[1] - Ui.S(10));

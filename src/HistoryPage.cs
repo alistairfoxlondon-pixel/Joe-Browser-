@@ -438,15 +438,22 @@ namespace JoeBrowser
                     BrowserMark.KindFor(_page.Profile));
                 left += mk + Ui.S(8);
                 w -= mk + Ui.S(8);
-                Ui.Text(g, title, Theme.Body, sel ? Theme.AccentText : Theme.Text, left, Ui.S(9), w);
+                /* Two measured lines, centred as a pair inside the row. At 9 and 28 from the top
+                   the lower line sat a pixel off the bottom edge on any row shorter than 56, and
+                   the two drifted apart as soon as the fonts changed. */
+                float topH = Theme.LineHeight(Theme.Body);
+                float botH = Theme.LineHeight(Theme.Caption);
+                float y0 = Math.Max(Ui.S(6), (Height - (topH + botH)) / 2f);
+                float y1 = y0 + topH;
+                Ui.Text(g, title, Theme.Body, sel ? Theme.AccentText : Theme.Text, left, y0, w);
 
                 /* The host, then the rest of the path, so a long URL still shows where it went. */
-                Ui.Text(g, Short(Entry.Url, 110), Theme.Caption, Theme.TextFaint, left, Ui.S(28), w);
+                Ui.Text(g, Short(Entry.Url, 110), Theme.Caption, Theme.TextFaint, left, y1, w);
 
                 Ui.Text(g, Entry.When.ToString("HH:mm"), Theme.Caption, Theme.TextFaint,
-                    Width - timeW - Ui.S(14), Ui.S(9), timeW, "right");
+                    Width - timeW - Ui.S(14), y0, timeW, "right");
                 Ui.Text(g, Entry.When.ToString("d MMM"), Theme.Caption, Theme.TextFaint,
-                    Width - timeW - Ui.S(14), Ui.S(28), timeW, "right");
+                    Width - timeW - Ui.S(14), y1, timeW, "right");
             }
 
             private static string Host(string url)
