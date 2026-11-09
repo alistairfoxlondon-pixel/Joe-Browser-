@@ -352,12 +352,11 @@ namespace JoeBrowser
                        radius of 1 or 2 still rounds the corners of every card in the app. */
                     try
                     {
-                        using (var g = System.Drawing.Graphics.FromHwnd(IntPtr.Zero))
                         {
                             foreach (float r in new[] { 0f, 0.4f, 0.5f })
                             {
-                                RectangleF box = new RectangleF(0, 0, 40, 20);
-                                using (var path = Theme.Round(box, r))
+                                var box = new System.Drawing.RectangleF(0, 0, 40, 20);
+                                using (var path = Ui.Round(box, r))
                                 {
                                     /* A square corner keeps all four box edges; a rounded one cuts
                                        them away from the corners. */
