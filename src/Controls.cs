@@ -217,15 +217,22 @@ namespace JoeBrowser
             _tip.OwnerDraw = true;
             _tip.Popup += delegate(object sender, PopupEventArgs e)
             {
-                if (e.AssociatedControl == null) return;
-                string text = _tip.GetToolTip(e.AssociatedControl);
-                using (var g = e.AssociatedControl.CreateGraphics())
+                /* A tooltip must never be able to stop the app: this runs on the UI thread while
+                   the pointer is moving, and an exception here would surface as a crash while
+                   hovering a button. */
+                try
                 {
-                    Size size = TextRenderer.MeasureText(g, text ?? "", Theme.Body,
-                        new Size(Ui.S(360), int.MaxValue),
-                        TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
-                    e.ToolTipSize = new Size(size.Width + Ui.S(20), size.Height + Ui.S(14));
+                    if (e.AssociatedControl == null || !e.AssociatedControl.IsHandleCreated) return;
+                    string text = _tip.GetToolTip(e.AssociatedControl);
+                    using (var g = e.AssociatedControl.CreateGraphics())
+                    {
+                        Size size = TextRenderer.MeasureText(g, text ?? "", Theme.Body,
+                            new Size(Ui.S(360), int.MaxValue),
+                            TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
+                        e.ToolTipSize = new Size(size.Width + Ui.S(20), size.Height + Ui.S(14));
+                    }
                 }
+                catch { }
             };
             _tip.Draw += delegate(object sender, DrawToolTipEventArgs e)
             {
