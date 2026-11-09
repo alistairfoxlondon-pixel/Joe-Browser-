@@ -445,13 +445,19 @@ namespace JoeBrowser
             Controls.Add(_maxBtn);
             Controls.Add(_closeBtn);
 
-            _pulse = new Timer { Interval = 90 };
+            /* Cards animate a pulse while a profile is running. The tick was 90 ms, which is
+               eleven frames a second of full card repaints - enough to be felt on a machine with
+               several cards and a 4K window, for an effect that is a slow fade. 160 ms is the same
+               look at a third of the cost, and the tick is skipped for a window that is hidden,
+               minimised, or simply not on screen. */
+            _pulse = new Timer { Interval = 160 };
             _pulse.Tick += delegate
             {
                 /* The running-card animation is cosmetic, so it stops costing anything the moment
                    the window cannot be seen: hidden, minimised or behind another app. */
                 if (_sessions.Count == 0) { _pulse.Stop(); return; }
                 if (!Visible || WindowState == FormWindowState.Minimized) return;
+                if (!IsOnScreen()) return;
                 foreach (var c in _cards.Values) if (c.Running) c.Invalidate();
             };
 
@@ -459,6 +465,24 @@ namespace JoeBrowser
             ApplyLanguage();
             RefreshPlanState();
             CheckUnfinishedPayment();
+        }
+
+        /// <summary>
+        /// True when any part of the window is on a monitor that is showing it. Windows keeps
+        /// painting a window that another window covers, so a background app used to spend its
+        /// timer on cards nobody could see.
+        /// </summary>
+        private bool IsOnScreen()
+        {
+            try
+            {
+                if (!IsHandleCreated) return false;
+                var r = Bounds;
+                foreach (var screen in Screen.AllScreens)
+                    if (screen.WorkingArea.IntersectsWith(r)) return true;
+            }
+            catch { return true; }
+            return false;
         }
 
         /// <summary>

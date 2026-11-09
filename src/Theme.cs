@@ -588,6 +588,9 @@ namespace JoeBrowser
         {
             foreach (var f in FontCache.Values) { try { f.Dispose(); } catch { } }
             FontCache.Clear();
+            /* The heights were measured from those very fonts, so they go with them: a stale
+               entry would hand a page the line height of a disposed font after a theme flip. */
+            _lineHeights.Clear();
         }
 
         public const FontStyle Semi = (FontStyle)128;
@@ -669,15 +672,25 @@ namespace JoeBrowser
         public static Font Micro { get { return F(12, Semi); } }        // section eyebrow
 
         /// <summary>Line height of a face, in device pixels, rounded up.</summary>
+        /* Line heights are asked for on every row of every page and of every card, and each
+           answer is the same for a given font at a given scale. Caching them turns a device
+           context per row into a dictionary lookup, which matters when a page builds sixty
+           rows while the window is being resized. */
+        private static readonly Dictionary<Font, int> _lineHeights = new Dictionary<Font, int>();
+
         public static int LineHeight(Font f)
         {
             if (f == null) return Ui.S(18);
+            int cached;
+            if (_lineHeights.TryGetValue(f, out cached)) return cached;
+            int height;
             try
             {
-                using (var g = Graphics.FromHwnd(IntPtr.Zero))
-                    return Math.Max(Ui.S(12), (int)Math.Ceiling((double)f.GetHeight(g)));
+                height = Math.Max(Ui.S(12), (int)Math.Ceiling((double)f.GetHeight(Ui.Ruler ?? Graphics.FromHwnd(IntPtr.Zero))));
             }
-            catch { return Math.Max(Ui.S(12), (int)Math.Ceiling((double)f.Height)); }
+            catch { height = Math.Max(Ui.S(12), (int)Math.Ceiling((double)f.Height)); }
+            _lineHeights[f] = height;
+            return height;
         }
 
         /* The vertical rhythm every page, card and dialog is built from. A controls library
