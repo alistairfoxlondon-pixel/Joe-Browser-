@@ -1099,9 +1099,14 @@ namespace JoeBrowser
         public static float MeasureWrapped(Graphics g, string text, Font font, float width, int maxLines)
         {
             if (string.IsNullOrEmpty(text) || width <= 0 || maxLines <= 0) return 0f;
-            Size s = TextRenderer.MeasureText(g, text, font, new Size((int)Math.Round(width), 4000),
-                TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
-            float lineH = (float)Math.Ceiling(font.GetHeight(g));
+            /* TextRenderer works without a Graphics; passing null measures on the desktop
+               context, which is what a caller without one has. */
+            Size s = g == null
+                ? TextRenderer.MeasureText(text, font, new Size((int)Math.Round(width), 4000),
+                    TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak)
+                : TextRenderer.MeasureText(g, text, font, new Size((int)Math.Round(width), 4000),
+                    TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
+            float lineH = (float)Math.Ceiling(g == null ? font.GetHeight() : font.GetHeight(g));
             int lines = Math.Max(1, (int)Math.Round(s.Height / lineH));
             return Math.Min(lines, maxLines) * lineH;
         }

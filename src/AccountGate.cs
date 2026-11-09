@@ -101,6 +101,7 @@ namespace JoeBrowser
 
             Controls.AddRange(new Control[] { _title, _subtitle, _email, _name, _password, _error, _signIn, _signUp, _google, _toggle });
             Theme.Restyle(this);
+            LayoutForm();
 
             /* Tab order follows the layout, not the order the controls were created in: the
                display-name field was added last but sits between the email and password boxes,
@@ -139,16 +140,6 @@ namespace JoeBrowser
             _signIn.Visible = !_registering;
             _signUp.Visible = _registering;
             _name.Visible = _registering;
-            _password.Location = new Point(Ui.S(40), Ui.S(_registering ? 192 : 150));
-            /* The label is two lines tall now, so the message box and the buttons below it move
-               down with it: a single-line layout put the second line of every long message
-               underneath the Sign in button. */
-            _error.Location = new Point(Ui.S(40), Ui.S(_registering ? 236 : 186));
-            int top = _registering ? Ui.S(272) : Ui.S(228);
-            _signIn.Location = new Point(Ui.S(40), top);
-            _signUp.Location = new Point(Ui.S(40), top);
-            _google.Location = new Point(Ui.S(40), top + Ui.S(46));
-            _toggle.Location = new Point(Ui.S(40), top + Ui.S(96));
             _toggle.Text = _registering ? "Already have an account? Sign in" : "New here? Create an account";
             Text = "Joe Browser";
             _title.Text = _registering ? "Create your Joe Browser account" : "Welcome to Joe Browser";
@@ -156,12 +147,90 @@ namespace JoeBrowser
                 ? "An email address and a password are all that is required."
                 : "Your profiles, proxies and settings stay on this device.";
             _error.Visible = false;
+            LayoutForm();
+        }
+
+        /// <summary>
+        /// One measured pass over the whole form.
+        ///
+        /// The window used to be a stack of hand written pixel offsets with two sets of them,
+        /// one per mode, and a message box given a fixed 34 px for any text it carried. A Google
+        /// failure is four lines, so its tail was drawn underneath the Sign in button, and the
+        /// title, which is set in the display face, was given one line whether or not it fitted.
+        /// Everything below is placed from what the text actually needs, in one order, and the
+        /// window is then sized to the result so nothing can sit outside it.
+        /// </summary>
+        private void LayoutForm()
+        {
+            int pad = Ui.S(36);
+            int field = Ui.S(40);
+            int btn = Ui.S(42);
+            int gap = Ui.S(10);
+
+            int inner = Ui.S(440) - pad * 2;
+
+            /* Both titles are set in the display face and both are one line at 440 px; the
+               measure is here so a longer translation cannot be clipped at the bottom. */
+            int titleH = Math.Max(Ui.S(30), Theme.LineHeight(Theme.H1));
+            int subH = Math.Max(Ui.S(20), Theme.LineHeight(Theme.Small));
+
+            int y = Ui.S(30);
+            _title.SetBounds(pad, y, inner, titleH);
+            y += titleH + Ui.S(6);
+            _subtitle.SetBounds(pad, y, inner, subH);
+            y += subH + Ui.S(22);
+
+            _email.SetBounds(pad, y, inner, field);
+            y += field + gap;
+            if (_registering)
+            {
+                _name.SetBounds(pad, y, inner, field);
+                y += field + gap;
+            }
+            _password.SetBounds(pad, y, inner, field);
+            y += field + gap;
+
+            /* The message box takes the height its text needs and nothing is drawn over it: the
+               buttons below start under the measured box, whether it is hidden or four lines. */
+            if (_error.Visible && !string.IsNullOrEmpty(_error.Text))
+            {
+                int lines = Math.Max(1, Math.Min(4, CountLines(_error.Text, _error.Font, inner)));
+                int h = Math.Max(Ui.S(18), Theme.LineHeight(_error.Font)) * lines + Ui.S(2);
+                _error.SetBounds(pad, y, inner, h);
+                y += h + Ui.S(6);
+            }
+            else
+            {
+                _error.SetBounds(pad, y, inner, 1);
+            }
+
+            _signIn.SetBounds(pad, y, inner, btn);
+            _signUp.SetBounds(pad, y, inner, btn);
+            y += btn + gap;
+
+            _google.SetBounds(pad, y, inner, btn);
+            y += btn + Ui.S(16);
+
+            _toggle.SetBounds(pad, y, inner, Ui.S(24));
+            y += Ui.S(24) + Ui.S(28);
+
+            ClientSize = new Size(Ui.S(440), Math.Max(y, Ui.S(360)));
+        }
+
+        /// <summary>Whole lines a string needs in a given width, using the wrapped measurement.</summary>
+        private static int CountLines(string text, Font font, int width)
+        {
+            if (string.IsNullOrEmpty(text) || width <= 0) return 1;
+            float lineH = Math.Max(1f, (float)Math.Ceiling(font.GetHeight()));
+            float used = Ui.MeasureWrapped(null, text, font, width, 8);
+            return Math.Max(1, (int)Math.Ceiling(used / lineH));
         }
 
         private void Fail(string message)
         {
             _error.Text = message;
             _error.Visible = true;
+            LayoutForm();
         }
 
         private void DoEmail()
