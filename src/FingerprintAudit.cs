@@ -603,8 +603,8 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(7), Theme.Card);
-            Ui.Stroke(g, r, Ui.S(7), Theme.Line, 1f);
+            Ui.Fill(g, r, Ui.S(10), Theme.Card);
+            Ui.Stroke(g, r, Ui.S(10), Theme.Line);
 
             float ic = Ui.S(16);
             Icons.Draw(g, _finding.Icon, new RectangleF(Ui.S(14), Ui.S(16), ic, ic), _finding.Tint);

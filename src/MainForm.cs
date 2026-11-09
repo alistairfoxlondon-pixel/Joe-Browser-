@@ -2570,18 +2570,23 @@ namespace JoeBrowser
             if (emptyW < Ui.S(40)) emptyW = Ui.S(160);
             int extraW = searching ? _clearFilter.PreferredWidth(Ui.S(140)) + Ui.S(10) : 0;
             int startX = (_emptyPanel.Width - (emptyW + extraW)) / 2;
-            int btnY = _emptyPanel.Height / 2 + Ui.S(52);
+            /* The button sits where the empty state's own paint put it. The old fixed
+               half-height-plus-52 offset was computed for a two line block, so at a wide scale
+               the button was drawn over the last line of the explanation. */
+            _emptyPanel.Invalidate();
+            if (_emptyButtonTop < 0) _emptyButtonTop = _emptyPanel.Height / 2 + Ui.S(40);
+            int btnY = Math.Min(_emptyButtonTop, Math.Max(Ui.S(8), _emptyPanel.Height - Ui.S(34) - Ui.S(16)));
             if (searching)
             {
                 _clearFilter.Kind = BtnKind.Primary;
-                _clearFilter.SetBounds(startX, btnY, extraW - Ui.S(10), Ui.S(33));
+                _clearFilter.SetBounds(startX, btnY, extraW - Ui.S(10), Ui.S(34));
                 _clearFilter.Visible = true;
-                _emptyBtn.SetBounds(startX + extraW, btnY, emptyW, Ui.S(33));
+                _emptyBtn.SetBounds(startX + extraW, btnY, emptyW, Ui.S(34));
             }
             else
             {
                 _clearFilter.Visible = false;
-                _emptyBtn.SetBounds(startX, btnY, emptyW, Ui.S(33));
+                _emptyBtn.SetBounds(startX, btnY, emptyW, Ui.S(34));
             }
             _emptyBtn.Invalidate();
 
@@ -3185,27 +3190,82 @@ namespace JoeBrowser
             if (_search != null && _search.Visible) { try { _search.Box.Focus(); } catch { } }
         }
 
+        /// <summary>
+        /// The first screen a new install shows. It used to be a grey badge, one line of title and
+        /// one line of explanation floating in the middle of the window - a placeholder, not a
+        /// design. It is a real empty state now: the mark, what the page is for, the three steps a
+        /// person actually takes, and the one button that starts it. Everything is measured and
+        /// centred as a block, so it stays centred on any window and any scale.
+        /// </summary>
         private void EmptyPaint(object sender, PaintEventArgs e)
         {
             var g = e.Graphics;
             Ui.Quality(g);
             bool searching = _filter.Length > 0;
             float w = _emptyPanel.Width;
-            float cy = _emptyPanel.Height / 2f;
-
-            float badge = Ui.S(64);
-            var br = new RectangleF((w - badge) / 2f, cy - Ui.S(112), badge, badge);
-            Ui.Fill(g, br, Ui.S(8), Theme.AccentOnBg);
-            float ic = Ui.S(28);
-            Icons.Draw(g, searching ? "search" : "layers",
-                new RectangleF(br.X + (badge - ic) / 2f, br.Y + (badge - ic) / 2f, ic, ic), Theme.Accent);
+            float contentW = Math.Min(Ui.S(560), Math.Max(Ui.S(240), w - Ui.S(64)));
 
             string title = searching ? L10n.T("empty.nomatch") : L10n.T("empty.title");
             string sub = searching ? L10n.T("empty.nomatch.sub") : L10n.T("empty.sub");
 
-            Ui.Text(g, title, Theme.H1, Theme.Text, 0, br.Bottom + Ui.S(16), w, "center");
-            Ui.Text(g, sub, Theme.Small, Theme.TextDim, 0, br.Bottom + Ui.S(44), w, "center", 2);
+            /* The block is laid out top down from a computed origin, so the button placed by
+               LayoutAll at cy + buttonOffset lines up with what is painted here. */
+            float badge = Ui.S(56);
+            float titleH = Ui.S(30);
+            int subLines = Math.Max(1, Ui.WrapLines(g, sub, Theme.Small, contentW).Count);
+            subLines = Math.Min(3, subLines);
+            float subH = subLines * Theme.LineHeight(Theme.Small);
+            float stepsH = searching ? 0f : Ui.S(3) * Ui.S(30) + Ui.S(2) * Ui.S(10);
+            float blockH = badge + Ui.S(20) + titleH + Ui.S(8) + subH
+                + (searching ? 0f : Ui.S(24) + stepsH) + Ui.S(28) + Ui.S(34);
+            float top = Math.Max(Ui.S(16), (_emptyPanel.Height - blockH) / 2f);
+
+            float badgeX = (w - badge) / 2f;
+            var br = new RectangleF(badgeX, top, badge, badge);
+            Ui.Fill(g, br, Ui.S(16), Theme.AccentOnBg);
+            Ui.Stroke(g, br, Ui.S(16), Theme.AccentBorder);
+            float ic = Ui.S(26);
+            Icons.Draw(g, searching ? "search" : "layers",
+                new RectangleF(br.X + (badge - ic) / 2f, br.Y + (badge - ic) / 2f, ic, ic), Theme.Accent);
+
+            float y = br.Bottom + Ui.S(20);
+            Ui.Text(g, title, Theme.H1, Theme.Text, (w - contentW) / 2f, y, contentW, "center");
+            y += titleH + Ui.S(8);
+            Ui.Text(g, sub, Theme.Small, Theme.TextDim, (w - contentW) / 2f, y, contentW, "center", subLines);
+            y += subH;
+
+            if (!searching)
+            {
+                y += Ui.S(24);
+                string[] steps =
+                {
+                    "Press New profile. A full identity is generated for you.",
+                    "Optionally attach a proxy on the new profile's Proxy tab.",
+                    "Press Open. That profile opens in its own browser window."
+                };
+                for (int i = 0; i < steps.Length; i++)
+                {
+                    var row = new RectangleF((w - contentW) / 2f, y, contentW, Ui.S(30));
+                    /* A numbered step reads as instructions; a bullet list reads as marketing.
+                       The numeral is a filled circle so it survives at any contrast setting. */
+                    float dot = Ui.S(22);
+                    var dr = new RectangleF(row.X, row.Y + (row.Height - dot) / 2f, dot, dot);
+                    Ui.Fill(g, dr, dot / 2f, Theme.Panel2);
+                    Ui.Text(g, (i + 1).ToString(), Theme.Caption, Theme.TextDim, dr.X, dr.Y + Ui.S(2), dr.Width, "center");
+                    Ui.Text(g, steps[i], Theme.Small, Theme.TextDim, dr.Right + Ui.S(12),
+                        row.Y + (row.Height - Theme.LineHeight(Theme.Small)) / 2f, contentW - dot - Ui.S(12));
+                    y += Ui.S(30) + Ui.S(10);
+                }
+                y += Ui.S(10);
+            }
+
+            /* Where the button goes, in panel coordinates, for LayoutAll to place the real
+               control on top of the paint. */
+            _emptyButtonTop = (int)Math.Round(y + Ui.S(6));
         }
+
+        /// <summary>Top edge the empty state's button is placed at, computed by its own paint.</summary>
+        private int _emptyButtonTop = -1;
 
         /// <summary>
         /// The single way a profile is born: a fresh identity that is provably unlike everything
@@ -4152,8 +4212,8 @@ namespace JoeBrowser
             for (int i = 0; i < features.Length; i++)
             {
                 var r = new RectangleF(x + (i % cols) * (tileW + gap), tileY + (i / cols) * (tileH + gap), tileW, tileH);
-                Ui.Fill(g, r, Ui.S(8), Theme.Card);
-                Ui.Stroke(g, r, Ui.S(8), Theme.Line, 1f);
+                Ui.Fill(g, r, Ui.S(10), Theme.Card);
+                Ui.Stroke(g, r, Ui.S(10), Theme.Line);
 
                 float chip = Ui.S(28);
                 /* The block is centred in the tile: pinning the description to a fixed offset left

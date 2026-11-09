@@ -315,7 +315,7 @@ namespace JoeBrowser
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             bool cues = Ui.FocusCues(this);
             Ui.Fill(g, r, Ui.S(6), cues ? Theme.PanelHover : Theme.Card);
-            Ui.Stroke(g, r, Ui.S(6), Theme.Line, 1f);
+            Ui.Stroke(g, r, Ui.S(10), Theme.Line);
 
             float chip = Ui.S(34);
             var cr = new RectangleF(Ui.S(16), (Height - chip) / 2f, chip, chip);

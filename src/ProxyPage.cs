@@ -171,8 +171,8 @@ namespace JoeBrowser
 
                 for (int i = 0; i < _rows.Count; i++)
                 {
-                    _rows[i].SetBounds(pad, y, inner, Ui.S(66));
-                    y += Ui.S(66) + Ui.S(8);
+                    _rows[i].SetBounds(pad, y, inner, Ui.S(72));
+                    y += Ui.S(72) + Ui.S(8);
                 }
                 if (Items.Count > 0) y += Ui.S(10);
 
@@ -194,6 +194,7 @@ namespace JoeBrowser
         public event EventHandler TestRequested, UseRequested, EditRequested, DeleteRequested, LiveRequested;
 
         private int _hover = -1;
+        private bool _rowHover;
         private static readonly string[] ActionKeys = { "bolt", "plus", "pencil", "trash" };
         private static readonly string[] ActionTips = { "Check this proxy", "Create a profile with it", "Edit", "Delete" };
 
@@ -222,7 +223,7 @@ namespace JoeBrowser
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             Ui.Opaque(this);
-            Height = Ui.S(66);
+            Height = Ui.S(72);
             Cursor = Cursors.Hand;
         }
 
@@ -250,11 +251,12 @@ namespace JoeBrowser
             for (int i = 0; i < a.Length; i++) if (a[i].Contains(e.Location)) { hit = i; break; }
             SyncTip(hit);
             Cursor = hit >= 0 ? Cursors.Hand : Cursors.Default;
-            if (hit != _hover) { _hover = hit; Invalidate(); }
+            bool row = hit < 0;
+            if (hit != _hover || row != _rowHover) { _hover = hit; _rowHover = row; Invalidate(); }
             base.OnMouseMove(e);
         }
 
-        protected override void OnMouseLeave(EventArgs e) { _hover = -1; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = -1; _rowHover = false; Invalidate(); base.OnMouseLeave(e); }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
@@ -278,12 +280,14 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             if (Item == null) return;
+            /* A row is a surface with a hairline, and it lifts under the pointer: on a list of
+               twenty proxies the hovered row is how a person knows which one a click will hit. */
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(6), Theme.Card);
-            Ui.Stroke(g, r, Ui.S(6), Theme.Line, 1f);
+            Ui.Fill(g, r, Ui.S(10), _hover >= 0 || _rowHover ? Theme.PanelHover : Theme.Card);
+            Ui.Stroke(g, r, Ui.S(10), _hover >= 0 || _rowHover ? Theme.HoverStrong : Theme.Line);
 
             float pad = Ui.S(16);
-            float chip = Ui.S(34);
+            float chip = Ui.S(36);
             var cr = new RectangleF(pad, (Height - chip) / 2f, chip, chip);
             Ui.Fill(g, cr, Ui.S(7), Theme.AccentOnBg);
             float ic = Ui.S(18);
@@ -324,7 +328,7 @@ namespace JoeBrowser
             var a = Actions();
             for (int i = 0; i < a.Length; i++)
             {
-                if (_hover == i) Ui.Fill(g, a[i], Ui.S(4), Theme.HoverOverlay);
+                if (_hover == i) { Ui.Fill(g, a[i], Ui.S(7), Theme.HoverOverlay); Ui.Stroke(g, a[i], Ui.S(7), Theme.Line); }
                 float s = Ui.S(15);
                 Icons.Draw(g, ActionKeys[i],
                     new RectangleF(a[i].X + (a[i].Width - s) / 2f, a[i].Y + (a[i].Height - s) / 2f, s, s),
@@ -352,7 +356,7 @@ namespace JoeBrowser
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             Ui.Fill(g, r, Ui.S(8), Theme.Panel);
-            Ui.Stroke(g, r, Ui.S(8), Theme.Line, 1f);
+            Ui.Stroke(g, r, Ui.S(10), Theme.Line);
 
             float chip = Ui.S(46);
             var cr = new RectangleF(Ui.S(20), (Height - chip) / 2f, chip, chip);

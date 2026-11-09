@@ -587,7 +587,7 @@ namespace JoeBrowser
             float w = _plan.Width;
             bool pro = Plan.IsPro;
             var r = new RectangleF(0.5f, 0.5f, w - 1.5f, _plan.Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(8), Theme.Card);
+            Ui.Fill(g, r, Ui.S(10), Theme.Card);
             Ui.Stroke(g, r, Ui.S(8), pro ? Theme.AccentBorder : Theme.Line, 1f);
 
             /* Icon chip, title block, state pill - the same three-part shape as a settings row.
@@ -663,8 +663,8 @@ namespace JoeBrowser
             Ui.Quality(g);
             float w = _termsPanel.Width;
             var r = new RectangleF(0.5f, 0.5f, w - 1.5f, _termsPanel.Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(8), Theme.Card);
-            Ui.Stroke(g, r, Ui.S(8), Theme.Line, 1f);
+            Ui.Fill(g, r, Ui.S(10), Theme.Card);
+            Ui.Stroke(g, r, Ui.S(10), Theme.Line);
 
             float x = Ui.S(20), y = Ui.S(16);
             Ui.Text(g, "Before you pay", Theme.H3, Theme.Text, x, y, w - Ui.S(40));
