@@ -939,3 +939,44 @@ It cannot prove what it looks like: there is no Windows desktop here. Nor can it
 extension download end to end, because this sandbox has no route to the store, so the shipped
 pair is reported by the app itself - which is precisely why their state is now on the page
 instead of being assumed.
+
+## Round 19: the correction, and the interface the reports describe
+
+### The version, corrected
+
+Round 18 gave every profile a build of a different major so a workspace would look varied. It
+made a workspace look diverse and made it detectable. ipfighter reported "fingerprint masking",
+and the mechanism is not subtle: the profile claimed Chrome 143 while the binary answering the
+request was 131. The TLS stack, the HTTP/2 settings, the JavaScript engine and every timing
+behaviour belong to the real build. No user agent string, client hint or injected property can
+disagree with them and win.
+
+It is now the other way round. `Browser.getVersion` is asked for the build of the running image
+before anything is overridden, and that answer is what the user agent, the client hints and the
+card report. A pinned kernel reports its own build, because it really is a different executable,
+and that is where a workspace's version diversity legitimately comes from. `BrowserVersions.Assign`
+takes the base version and refuses to move a profile off it; the load-time repair corrects stored
+versions to the running binary instead of spreading majors; an unknown binary produces nothing
+invented. The self test asserts the agreement in both directions and the pin's exception.
+
+### The reports, one by one
+
+| Reported | Cause | Change |
+|---|---|---|
+| ipfighter: masking | profiles claimed a build they did not run | everything reports the running image; diversity comes from pins |
+| Paste as human does nothing | the menu and the paste path were both in the build, and the tools had no documentation anywhere in the app | the editor explains the gesture, and Tools & data lists the tool with where its switch lives |
+| No IP rotation or offline alert | the alarm and the proxy flag were created only on install, and the flag was one fire-and-forget message | both are re-established on every worker start, and the relay asks for the flag |
+| The two store extensions never install | the download ran on the browser launch path behind a 15 second timeout, and a folder counted as installed if a manifest file merely existed | the fetch is off the launch path, once per process, and "installed" now means a manifest that parses and declares a name, version and MV3 |
+| Cookies must be clean after use | there was no such option | Fresh session: cookies, storage, service workers, history and caches are deleted when the browser process exits, on the closing path |
+| Flashes when switching theme | every control repainted the instant it heard the change, against a palette the next control was about to contradict; tooltips were the only Windows-drawn surface and stayed pale yellow in Night Mode; the DWM border and caption were never re-applied | a change runs with the window frozen and repaints once; tooltips are owner-drawn; DWM attributes are re-applied |
+| Cut-off, truncated, no scrollbar | both scrollers showed their bar only while scrolling, then faded | a bar is shown whenever there is content below |
+| Not responsive | a drag-resize re-laid every page for every pixel and queued every invalidation | one coalesced layout per frame and an immediate paint |
+| Corners | nine files still passed literal radii to Fill and Stroke | one theme constant, and a self test that builds the path at three radii and checks the bounds still equal the box |
+
+### What is still not proven here
+
+There is no Windows desktop in this environment and no route to the Chrome Web Store, so the
+visual claims are argued from measured geometry, and the extension download is reported by the
+app's own state rather than observed end to end. Both of those are exactly why the app now says
+what it thinks is true - the shipped pair's state on the page, the running build on the card -
+instead of assuming it.
