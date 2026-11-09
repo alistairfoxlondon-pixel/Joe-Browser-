@@ -83,6 +83,12 @@ namespace JoeBrowser
             Add("net", "wifi", "tools.net", "tools.net.desc", "btn.check");
             Add("cookies", "cookie", "tools.cookies", "tools.cookies.desc", "btn.open");
             Add("ext", "apps", "tools.ext", "tools.ext.desc", "btn.open");
+            /* The tools the user could not find: all three live inside a profile, so they were
+               nowhere in the app's own navigation - which reads as "the app does not have them".
+               They are listed here with what they do and the exact gesture that uses them. */
+            Add("human", "clipboard", "tools.human", "tools.human.desc", "btn.how");
+            Add("pastehelp", "copy", "tools.rightclick", "tools.rightclick.desc", "btn.how");
+            Add("watcher", "route", "tools.watch", "tools.watch.desc", "btn.how");
             Add("trash", "trash", "tools.trash", "tools.trash.desc", "btn.restore");
             Add("shortcuts", "command", "tools.shortcuts", "tools.shortcuts.desc", "btn.view");
             Add("clean", "sync", "tools.clean", "tools.clean.desc", "btn.clean");

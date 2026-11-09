@@ -687,6 +687,9 @@ namespace JoeBrowser
                     case "ext": OpenExtensionFolder(); break;
                     case "trash": RecycleBin(); break;
                     case "shortcuts": ShortcutHelp(); break;
+                    case "human": ToolExplainer("human"); break;
+                    case "pastehelp": ToolExplainer("rightclick"); break;
+                    case "watcher": ToolExplainer("watch"); break;
                     case "clean": ClearCaches(); break;
                     case "audit": AccountAudit(); break;
                     case "report": Report.OpenForm(this, ""); break;
@@ -1164,6 +1167,46 @@ namespace JoeBrowser
                 rows.Add(new[] { r[0], r[1] });
             }
             return rows;
+        }
+
+        /// <summary>
+        /// Where a built-in tool lives and how it is used. Every one of them is per profile, and
+        /// that is the fact a user cannot discover by clicking around the app: the switches are
+        /// in the profile editor, and the feature itself happens inside the browser. The dialog
+        /// says where, what, and how in that order, and offers the one action that gets them
+        /// there rather than describing it.
+        /// </summary>
+        private void ToolExplainer(string which)
+        {
+            string title, where, what, how;
+            if (which == "rightclick")
+            {
+                title = "Right click & copy";
+                where = "On by default for every new profile. Edit a profile, Tools tab, to switch it off.";
+                what = "Sites that cancel the context menu, the copy key or text selection lose that power inside the profile. The menu opens, Ctrl+C copies, and dragging selects text.";
+                how = "Nothing to press. Open a page that blocks copying, right click it, and copy.";
+            }
+            else if (which == "watch")
+            {
+                title = "Proxy IP change & offline alerts";
+                where = "On by default. Edit a profile, Tools tab, to change the check interval.";
+                what = "The profile asks a public IP service what its exit address is. When the address changes, or the check fails twice in a row, you are told in the page and in a browser notification.";
+                how = "It runs only while a profile that has a proxy is open. After a live proxy change it re-arms itself.";
+            }
+            else
+            {
+                title = "Paste as human";
+                where = "On by default. Edit a profile, Tools tab, to choose the typing speed.";
+                what = "The clipboard text is typed into the page one character at a time with human timings, instead of being inserted in one jump. Keystrokes are real key events, so a field that watches typing sees typing.";
+                how = "Copy as usual, then press Ctrl+V in the page. The right-click menu on a text box also has \"Paste as human\".";
+            }
+            using (var dlg = new ToolDialog(title, "Close", "", 600, 460))
+            {
+                dlg.Secondary.Visible = false;
+                dlg.AddNote(where);
+                dlg.AddReadOnlyText(what + "\r\n\r\n" + how, 200);
+                dlg.ShowDialog(this);
+            }
         }
 
         private void ShortcutHelp()

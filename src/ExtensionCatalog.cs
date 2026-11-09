@@ -710,6 +710,10 @@ namespace JoeBrowser
                 req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) JoeBrowser/1.2";
                 req.Timeout = 15000;
                 req.ReadWriteTimeout = 15000;
+                /* A store that answers 404 or 403 for a withdrawn listing throws before any body
+                   can be read, and the inner exception is the one that says what happened. */
+                try { req.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate; }
+                catch { }
                 req.AllowAutoRedirect = true;
                 long delivered;
                 string contentType, finalUrl;

@@ -59,6 +59,7 @@ namespace JoeBrowser
             d["file"] = Ch(0xE873);         // description
             d["pencil"] = Ch(0xE3C9);       // edit
             d["copy"] = Ch(0xE14D);         // content_copy
+            d["clipboard"] = Ch(0xE14E);    // content_paste
             d["trash"] = Ch(0xE872);        // delete
             d["download"] = Ch(0xE2C4);     // file_download
             d["external"] = Ch(0xE89E);     // open_in_new
