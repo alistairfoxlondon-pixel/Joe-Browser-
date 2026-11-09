@@ -709,3 +709,42 @@ viewport, one logo per built in extension and the icon face loading. These need 
 desktop with a real proxy. The Brave, Edge and Firefox launch paths and the Android, iOS, macOS
 and Linux profile targets are implemented and selectable, and their runtimes cannot be
 exercised here either.
+
+## Round 16: overflow, overlap, and the store import
+
+The report for this round named two things and then said "lots of bugs". The two named ones
+were fixed first, then the whole interface was walked control by control looking for the same
+class of fault: a width that was assumed rather than measured.
+
+### The two the user named
+
+| Report | Cause | Fix |
+|---|---|---|
+| History and Account sections overflow and overlap | Card bounds were computed from a fixed reserve, so a wide scale or a narrow window pushed names under the buttons | Every row measures its own text and its own buttons, and gives way instead of crossing (`HistoryPage`, `AccountPage`) |
+| Adding an extension from a Chrome Web Store URL does not work | The id was cut out of the link by splitting on every colon, which chopped `https:` and left no id; the folder was deleted before the new copy existed; and two entries could point at one folder, which Chromium refuses | `StoreId` reads the link from the end; imports unpack to a staging folder and swap; the folder list is unique and bounded |
+
+### The sweep
+
+| Area | What was wrong | Fix |
+|---|---|---|
+| Editor tabs | Five names split a fixed 560 px, so at a large scale one name was drawn under the next | The row reports the width its names need and the header gives it that width |
+| Proxy type and kernel pickers | The same, at 420 px for three and four names | Both measured (`JBSegment.PreferredWidth`) |
+| Dialog footers | The secondary button was placed left of the primary with no check, so on a narrow dialog it left the window | `Ui.FitPair` shrinks the pair in proportion when both do not fit; four dialog footers use it |
+| Editor page buttons | "Regenerate", "Randomise", "Test" and the folder button had no cap at all | Each clamped to its column |
+| Upgrade chips | Three network chips per row at a large scale trimmed every label | The row fits as many as the widest label allows |
+| Launch notices | Three toasts fired in one launch and each replaced the last, so the caveat was never read | One notice, carrying the caveat that applies |
+| Leak summary | The bar after the report repeated the sentence the report had just shown | The bar gives the count and points at the report |
+| Store errors | A failed fetch showed the socket text Windows wrote | Three plain sentences and the two ways forward |
+| Store link fallback | If no browser accepted the link, nothing happened | The link goes on the clipboard, and the dialog opens on a store link already there |
+| Extension loading | A duplicated or over long `--load-extension` list made Chromium drop every extension silently | The list is unique, capped, and the log says what was left out |
+
+### What this round proves, and what it does not
+
+`JoeBrowser.exe --selftest` runs on every push and checks the parts a machine can check. The
+visual claims in this file, meaning no scrollbars, no overlap, one logo per extension and a
+centred mobile viewport, are argued from measured geometry: each of these faults was a width
+computed from a constant, and each is now computed from the font that is actually drawn.
+A Windows desktop at 100%, 125% and 150% is what would confirm it, and that has not been run.
+The store download itself cannot be exercised from this sandbox: `clients2.google.com` is not
+reachable from here, so the fetch path is covered by `tools/check-extension-fetch.py`, which
+the user or CI runs on a machine with a network.
