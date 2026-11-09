@@ -518,11 +518,21 @@ namespace JoeBrowser
                which is how a store link pasted without "https://" opened nothing at all. */
             if (!url.Contains("://") && !url.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase))
                 url = "https://" + url;
-            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+            try
+            {
+                /* Where the fetch and the Go shell disagree about a link, the clipboard is the
+                   one place it can still land: a user who copied a store link and got a failed
+                   fetch can paste it into the browser they already have open. */
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
             catch (Exception ex)
             {
                 Log.Error("Open url failed: " + url, ex);
-                Toast("Could not open the link. Your default browser may not be set.", ToastKind.Error);
+                bool copied = false;
+                try { Clipboard.SetText(url); copied = true; } catch { }
+                Toast(copied
+                    ? "No browser would open that link, so it is on your clipboard instead."
+                    : "Could not open the link. Your default browser may not be set.", ToastKind.Error);
             }
         }
 
@@ -3830,6 +3840,20 @@ namespace JoeBrowser
 
         private static string ShortError(Exception ex)
         {
+            /* A failed download is the most common error on this path and its own message is
+               the one Windows wrote, which tells the user nothing about what to try next. Say
+               what happened and what the two ways forward are. */
+            var web = ex as System.Net.WebException;
+            if (web != null)
+            {
+                string hint = web.Status == System.Net.WebExceptionStatus.Timeout
+                    ? "The store took too long to answer."
+                    : web.Status == System.Net.WebExceptionStatus.NameResolutionFailure ||
+                      web.Status == System.Net.WebExceptionStatus.ConnectFailure
+                        ? "The store could not be reached from this connection."
+                        : "The store did not answer with a package.";
+                return hint + " Try again, or download the .crx and use the file import.";
+            }
             string m = ex.Message ?? "Could not open the profile";
             int i = m.IndexOf("\r\n", StringComparison.Ordinal);
             if (i < 0) i = m.IndexOf('\n');
