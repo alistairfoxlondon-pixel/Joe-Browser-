@@ -1326,29 +1326,6 @@ namespace JoeBrowser
 
         public string Icon { get { return _icon; } set { _icon = value; Invalidate(); } }
 
-        /// <summary>
-        /// The width this row of names wants before any of them has to shrink. Measuring the
-        /// names rather than guessing keeps the five editor tabs from drawing over each other in
-        /// a narrow window: past 125% scale "Fingerprint" and "Privacy" used to sit on top of one
-        /// another, and the label that was clicked was not the label that was read.
-        /// </summary>
-        public int PreferredWidth(int minCell)
-        {
-            if (Items.Count == 0) return 0;
-            int widest = 0;
-            try
-            {
-                using (var g = Graphics.FromHwnd(IntPtr.Zero))
-                {
-                    foreach (var item in Items)
-                        widest = Math.Max(widest, (int)Math.Ceiling(Ui.Measure(g, item, Theme.BodyBold).Width));
-                }
-            }
-            catch { }
-            int cell = Math.Max(minCell, widest + Ui.S(28));
-            return cell * Items.Count;
-        }
-
         public int SelectedIndex
         {
             get { return _selected; }
@@ -1730,6 +1707,29 @@ namespace JoeBrowser
             Items.AddRange(items);
             _selected = Math.Max(0, Math.Min(selected, Items.Count - 1));
             Invalidate();
+        }
+
+        /// <summary>
+        /// The width this row of names wants before any of them has to shrink. Measuring the
+        /// names rather than guessing keeps the five editor tabs from drawing over each other in
+        /// a narrow window: past 125% scale "Fingerprint" and "Privacy" used to sit on top of one
+        /// another, and the label that was clicked was not the label that was read.
+        /// </summary>
+        public int PreferredWidth(int minCell)
+        {
+            if (Items.Count == 0) return 0;
+            int widest = 0;
+            try
+            {
+                using (var g = Graphics.FromHwnd(IntPtr.Zero))
+                {
+                    foreach (var item in Items)
+                        widest = Math.Max(widest, (int)Math.Ceiling(Ui.Measure(g, item, Theme.BodyBold).Width));
+                }
+            }
+            catch { }
+            int cell = Math.Max(minCell, widest + Ui.S(28));
+            return cell * Items.Count;
         }
 
         protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
