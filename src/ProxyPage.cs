@@ -179,8 +179,8 @@ namespace JoeBrowser
                 }
                 if (Items.Count > 0) y += Ui.S(10);
 
-                _promo.SetBounds(pad, y, inner, Ui.S(112));
-                y += Ui.S(112) + Ui.S(24);
+                _promo.SetBounds(pad, y, inner, PromoCard.CardH);
+                y += PromoCard.CardH + Ui.S(24);
 
                 _column.SetBounds(0, 0, Math.Max(inner + pad * 2, w), Math.Max(y, _host.Height));
                 _host.SyncExtent();
@@ -352,11 +352,25 @@ namespace JoeBrowser
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             Ui.Opaque(this);
-            Height = Ui.S(112);
+            Height = CardH;
         }
 
         public void ReStyle() { Invalidate(); }
         protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(Ui.SurfaceColor(this)); }
+
+        /// <summary>
+        /// A 46 px chip and three measured lines, with the same inset above and below. Derived
+        /// from the type scale so the card grows with the text instead of clipping it.
+        /// </summary>
+        public static int CardH
+        {
+            get
+            {
+                int text = Theme.LineHeight(Theme.H2) + Theme.LineHeight(Theme.Small) +
+                           Theme.LineHeight(Theme.Caption) + Ui.S(8);
+                return Math.Max(Ui.S(112), Math.Max(text, Ui.S(46)) + Ui.S(24));
+            }
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -379,15 +393,21 @@ namespace JoeBrowser
             float bw = Math.Max(Ui.S(96), Ui.Measure(g, "Coming soon", Theme.SmallBold).Width + Ui.S(28));
             float bh = Ui.S(32);
             float textW = Math.Max(Ui.S(120), Width - tx - bw - Ui.S(36));
-            Ui.Text(g, "Static residential proxy", Theme.H2, Theme.Text, tx, Ui.S(20), textW);
+            /* Three lines at 20, 50 and 74 from the top were one line of arithmetic for one font
+               size. They are measured and centred as a block now, so the card holds at any scale. */
+            float h2 = Theme.LineHeight(Theme.H2);
+            float sm = Theme.LineHeight(Theme.Small);
+            float cap = Theme.LineHeight(Theme.Caption);
+            float blockTop = Math.Max(Ui.S(10), (Height - (h2 + sm + cap + Ui.S(8))) / 2f);
+            Ui.Text(g, "Static residential proxy", Theme.H2, Theme.Text, tx, blockTop, textW);
             Ui.Text(g, "1 proxy  ·  $3.50 / month  ·  clean, dedicated home IP", Theme.Small, Theme.TextDim,
-                tx, Ui.S(50), textW);
+                tx, blockTop + h2 + Ui.S(2), textW);
             Ui.Text(g, "Buy direct inside Joe Browser. No third-party checkout, no tracking.",
-                Theme.Caption, Theme.TextFaint, tx, Ui.S(74), textW);
+                Theme.Caption, Theme.TextFaint, tx, blockTop + h2 + sm + Ui.S(4), textW);
 
             var badge = new RectangleF(Width - Ui.S(20) - bw, (Height - bh) / 2f, bw, bh);
             Ui.Fill(g, badge, Ui.S(6), Theme.AccentOnBg);
-            Ui.Stroke(g, badge, Ui.S(6), Theme.AccentBorder, 1f);
+            Ui.Stroke(g, badge, Ui.S(6), Theme.AccentBorder);
             Ui.Text(g, "Coming soon", Theme.SmallBold, Theme.AccentText, badge.X,
                 badge.Y + (bh - Theme.SmallBold.GetHeight(g)) / 2f, bw, "center");
         }
