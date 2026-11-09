@@ -13,7 +13,7 @@ namespace JoeBrowser
     /// and nothing else, so there was no way to see which accounts existed, when each last
     /// signed in, whether a PIN or 2FA was set, or to switch, sign out or delete one.
     /// </summary>
-    internal sealed class AccountPage : Panel, IReStyle
+    internal sealed class AccountPage : Panel, IReStyle, ISyncLayout
     {
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
@@ -89,7 +89,7 @@ namespace JoeBrowser
 
         private static JBButton MakeButton(string text, string icon, BtnKind kind)
         {
-            return new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 4, Height = Ui.S(33) };
+            return new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 6, Height = Theme.Field };
         }
 
         /// <summary>Re-reads the account store and the plan, then rebuilds.</summary>
@@ -151,6 +151,9 @@ namespace JoeBrowser
 
         protected override void OnResize(EventArgs e) { base.OnResize(e); LayoutCore(); }
 
+        /// <summary>One more pass once the scroll host has fixed its width.</summary>
+        public void LayoutAtWidth() { LayoutCore(); }
+
         private void LayoutCore()
         {
             if (_layingOut || !_ready || _host == null) return;
@@ -159,21 +162,21 @@ namespace JoeBrowser
             {
                 _host.SetBounds(0, 0, Math.Max(1, Width), Math.Max(1, Height));
                 int w = Math.Max(Ui.S(320), _host.Width - Ui.S(10));
-                int pad = Ui.S(28);
+                int pad = Ui.S(32);
                 int inner = Math.Max(Ui.S(200), w - pad * 2);
                 int y = pad;
 
-                _title.SetBounds(pad, y, inner, Ui.S(30));
-                y += Ui.S(34);
-                _plan.SetBounds(pad, y, inner, Ui.S(22));
-                y += Ui.S(26);
+                _title.SetBounds(pad, y, inner, Ui.S(32));
+                y += Ui.S(38);
+                _plan.SetBounds(pad, y, inner, Ui.S(24));
+                y += Ui.S(30);
                 /* The plan note wraps, and on a narrow window two lines of it sat on top of the
                    first button row. Its height is measured from the text that is in it. */
                 int noteH = MeasureLines(_planNote.Text, Theme.Caption, inner);
                 _planNote.SetBounds(pad, y, inner, noteH);
                 y += noteH + Ui.S(10);
 
-                int bh = Ui.S(33);
+                int bh = Theme.Field;
                 JBButton[] actions = { _manage, _signOut, _switch, _pin, _twoFactor };
                 /* FlowButtons wraps and never overlaps; the old loop compared bx + bw against
                    the wrap edge without adding the gap it was about to advance by, so the last
@@ -235,7 +238,7 @@ namespace JoeBrowser
                 SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                          ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
                 BackColor = Theme.Bg;
-                _remove = new JBButton { Kind = BtnKind.Ghost, Text = L10n.T("acct.remove"), Height = Ui.S(28) };
+                _remove = new JBButton { Kind = BtnKind.Ghost, Text = L10n.T("acct.remove"), Height = Ui.S(30) };
                 _remove.Click += delegate
                 {
                     var h = _page.DeleteAccountRequested;
@@ -245,7 +248,7 @@ namespace JoeBrowser
                 ToolTips.Attach(this, (string.IsNullOrEmpty(account.Email) ? "" : account.Email));
             }
 
-            public int RowHeight { get { return Ui.S(62); } }
+            public int RowHeight { get { return Ui.S(72); } }
 
             protected override void OnResize(EventArgs e)
             {
@@ -265,8 +268,8 @@ namespace JoeBrowser
             {
                 int bw = _remove.PreferredWidth(Ui.S(96));
                 if (bw > Math.Max(Ui.S(40), Width - Ui.S(28))) bw = Math.Max(Ui.S(40), Width - Ui.S(28));
-                _remove.SetBounds(Math.Max(Ui.S(6), Width - bw - Ui.S(12)),
-                    (RowHeight - Ui.S(28)) / 2, bw, Ui.S(28));
+                _remove.SetBounds(Math.Max(Ui.S(6), Width - bw - Ui.S(14)),
+                    (RowHeight - Ui.S(30)) / 2, bw, Ui.S(30));
                 Invalidate();
             }
 
@@ -279,8 +282,8 @@ namespace JoeBrowser
                 Ui.Quality(g);
                 g.Clear(Theme.Bg);
                 var box = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-                Ui.Fill(g, box, Ui.S(8), _hover ? Theme.PanelHover : Theme.Card);
-                Ui.Stroke(g, box, Ui.S(8), _hover ? Theme.HoverStrong : Theme.Line, 1f);
+                Ui.Fill(g, box, Ui.S(10), _hover ? Theme.PanelHover : Theme.Card);
+                Ui.Stroke(g, box, Ui.S(10), _hover ? Theme.HoverStrong : Theme.Line);
 
                 float left = Ui.S(14);
                 /* The remove button is measured, not assumed: a fixed 120 px reserve is narrower

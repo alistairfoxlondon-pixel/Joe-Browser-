@@ -48,27 +48,33 @@ namespace JoeBrowser
             return p;
         }
 
+        /* A four step neutral ramp, the way a designed dark theme is built: the window sits on
+           the lowest step, a card one above it, an input above that. The previous palette had a
+           black window and a #303030 card with a #282828 line between them, so the card edge was
+           darker than the card and the whole page read as stacked boxes. These steps are 6 to 9
+           values apart, which is the smallest difference that still separates two surfaces on a
+           cheap panel. */
         private static readonly Pal DarkPal = NewPal(
-            bg: C(0x11, 0x11, 0x11), bgSoft: C(0x18, 0x18, 0x18), sidebar: C(0x20, 0x20, 0x20),
-            card: C(0x30, 0x30, 0x30), panel: C(0x2B, 0x2B, 0x2B), panelHover: C(0x33, 0x33, 0x33),
-            panel2: C(0x26, 0x26, 0x26), input: C(0x11, 0x11, 0x11),
-            line: C(0x28, 0x28, 0x28), lineSoft: C(0x1F, 0x1F, 0x1F),
-            text: C(0xFF, 0xFF, 0xFF), textDim: C(0xD2, 0xD2, 0xD2), textFaint: C(0xAF, 0xAF, 0xAF),
-            accent: C(0x60, 0xCD, 0xFF), accentHover: C(0x87, 0xDA, 0xFF), accentPressed: C(0x4C, 0xB8, 0xE6),
-            onAccent: C(0x00, 0x00, 0x00),
-            buttonBg: C(0x3E, 0x3E, 0x3E), buttonBorder: C(0x3A, 0x3A, 0x3A),
-            success: C(0x6A, 0xCB, 0x5D), danger: C(0xFF, 0x99, 0xA3));
+            bg: C(0x17, 0x18, 0x1B), bgSoft: C(0x1C, 0x1D, 0x21), sidebar: C(0x14, 0x15, 0x18),
+            card: C(0x23, 0x25, 0x29), panel: C(0x2A, 0x2C, 0x31), panelHover: C(0x31, 0x33, 0x39),
+            panel2: C(0x2D, 0x2F, 0x34), input: C(0x1B, 0x1C, 0x20),
+            line: C(0x33, 0x35, 0x3B), lineSoft: C(0x28, 0x2A, 0x2F),
+            text: C(0xF2, 0xF3, 0xF5), textDim: C(0xC3, 0xC6, 0xCC), textFaint: C(0x9A, 0x9E, 0xA6),
+            accent: C(0x5B, 0x9B, 0xF7), accentHover: C(0x74, 0xAD, 0xFF), accentPressed: C(0x44, 0x85, 0xE0),
+            onAccent: C(0xFF, 0xFF, 0xFF),
+            buttonBg: C(0x2E, 0x30, 0x36), buttonBorder: C(0x3B, 0x3E, 0x45),
+            success: C(0x4E, 0xC3, 0x8A), danger: C(0xF2, 0x6D, 0x76));
 
         private static readonly Pal LightPal = NewPal(
-            bg: C(0xFF, 0xFF, 0xFF), bgSoft: C(0xF7, 0xF7, 0xF7), sidebar: C(0xF3, 0xF3, 0xF3),
-            card: C(0xFB, 0xFB, 0xFB), panel: C(0xFB, 0xFB, 0xFB), panelHover: C(0xF0, 0xF0, 0xF0),
-            panel2: C(0xE8, 0xE8, 0xE8), input: C(0xFF, 0xFF, 0xFF),
-            line: C(0xE0, 0xE0, 0xE0), lineSoft: C(0xED, 0xED, 0xED),
-            text: C(0x1A, 0x1A, 0x1A), textDim: C(0x50, 0x50, 0x50), textFaint: C(0x60, 0x60, 0x60),
-            accent: C(0x00, 0x78, 0xD7), accentHover: C(0x1A, 0x88, 0xDD), accentPressed: C(0x00, 0x5A, 0x9E),
+            bg: C(0xF7, 0xF8, 0xFA), bgSoft: C(0xFF, 0xFF, 0xFF), sidebar: C(0xF1, 0xF3, 0xF7),
+            card: C(0xFF, 0xFF, 0xFF), panel: C(0xFF, 0xFF, 0xFF), panelHover: C(0xF2, 0xF4, 0xF8),
+            panel2: C(0xEC, 0xEE, 0xF3), input: C(0xFF, 0xFF, 0xFF),
+            line: C(0xDF, 0xE2, 0xE8), lineSoft: C(0xEB, 0xED, 0xF2),
+            text: C(0x16, 0x18, 0x1D), textDim: C(0x4A, 0x4E, 0x57), textFaint: C(0x6B, 0x70, 0x7A),
+            accent: C(0x2C, 0x6B, 0xD6), accentHover: C(0x3D, 0x7B, 0xE6), accentPressed: C(0x20, 0x55, 0xB0),
             onAccent: C(0xFF, 0xFF, 0xFF),
-            buttonBg: C(0xFE, 0xFE, 0xFE), buttonBorder: C(0xDF, 0xDF, 0xDF),
-            success: C(0x2C, 0x8B, 0x2C), danger: C(0xC5, 0x05, 0x00));
+            buttonBg: C(0xFF, 0xFF, 0xFF), buttonBorder: C(0xDA, 0xDD, 0xE4),
+            success: C(0x1F, 0x8A, 0x5F), danger: C(0xC3, 0x37, 0x44));
 
         private static Pal P = DarkPal;
 
@@ -106,7 +112,7 @@ namespace JoeBrowser
         public static Color Scrim { get { return Color.FromArgb(Dark ? 140 : 60, 0, 0, 0); } }
         public static Color AccentOnBg { get { return Color.FromArgb(Dark ? 34 : 22, Accent.R, Accent.G, Accent.B); } }
         public static Color AccentBorder { get { return Color.FromArgb(Dark ? 130 : 110, Accent.R, Accent.G, Accent.B); } }
-        public static Color AccentText { get { return Dark ? C(0x60, 0xCD, 0xFF) : C(0x00, 0x5A, 0x9E); } }
+        public static Color AccentText { get { return Dark ? C(0x8C, 0xBA, 0xFF) : C(0x1C, 0x51, 0xA8); } }
         public static Color HoverOverlay { get { return Color.FromArgb(Dark ? 20 : 16, Text.R, Text.G, Text.B); } }
         public static Color SelOverlay { get { return Color.FromArgb(Dark ? 34 : 24, Text.R, Text.G, Text.B); } }
 
@@ -117,7 +123,7 @@ namespace JoeBrowser
 
         // windows-ui control metrics
         public const int ControlHeight = 33;
-        public const int ButtonRadius = 4;
+        public const int ButtonRadius = 6;
         public const int CardRadius = 8;
         public const int NavbarWidth = 280;
 
@@ -572,16 +578,46 @@ namespace JoeBrowser
 
         private static readonly Dictionary<long, Font> FontCache = new Dictionary<long, Font>();
 
+        /// <summary>
+        /// Throws the font instances away so the next request builds them for the current
+        /// display scale. Called when the window moves to a monitor with a different DPI; the
+        /// cache key includes the scale, so this also keeps the cache from growing without
+        /// bound when a laptop is docked and undocked all day.
+        /// </summary>
+        public static void ClearFontCache()
+        {
+            foreach (var f in FontCache.Values) { try { f.Dispose(); } catch { } }
+            FontCache.Clear();
+            /* The heights were measured from those very fonts, so they go with them: a stale
+               entry would hand a page the line height of a disposed font after a theme flip. */
+            _lineHeights.Clear();
+        }
+
         public const FontStyle Semi = (FontStyle)128;
 
-        /// <summary>Font from a CSS pixel size, so the app matches windows-ui's scale exactly.</summary>
+        /// <summary>
+        /// A font for a CSS pixel size, measured in DEVICE pixels.
+        ///
+        /// This is the single most important line in the whole interface. A Font created in
+        /// points is already scaled by the display DPI when it is drawn, while every rectangle
+        /// in this app is computed with Ui.S() at 96 dpi multiplied by the display scale - so a
+        /// 15 px font asked for in points becomes 15 * scale DEVICE pixels inside a box that is
+        /// 15 * scale big, but the font's line height grows by MORE than the scale (a Segoe UI
+        /// line is about 1.33 em, not 1 em) and the two stopped agreeing. At 125% and 150% the
+        /// result was text that was a pixel or two too tall for every row, clipped descenders,
+        /// and baselines that did not line up between a label and the value beside it. Asking
+        /// for the size in pixels removes the font from the DPI transform entirely: the size in
+        /// the code is the size on the glass, and measuring it reports the same box that is
+        /// drawn.
+        /// </summary>
         public static Font F(double px, FontStyle style = FontStyle.Regular)
         {
             long key = ((long)Math.Round(px * 100) << 8) | (long)(uint)style;
             Font f;
             if (FontCache.TryGetValue(key, out f)) return f;
 
-            float pt = (float)(px * 0.75);
+            /* Device pixels: the size asked for is the size drawn at every scale. */
+            float pt = (float)(px * 0.75 * Ui.Scale);
             FontFamily fam = _family;
 
             try
@@ -601,33 +637,68 @@ namespace JoeBrowser
                     // A real Semibold family, never a synthesised bold: emboldened outlines
                     // smear the stems, which reads as broken type.
                     f = semi != null
-                        ? new Font(semi, pt, FontStyle.Regular, GraphicsUnit.Point)
-                        : new Font(fam, pt, FontStyle.Bold, GraphicsUnit.Point);
+                        ? new Font(semi, pt, FontStyle.Regular, GraphicsUnit.Pixel)
+                        : new Font(fam, pt, FontStyle.Bold, GraphicsUnit.Pixel);
                 }
                 else
                 {
-                    f = new Font(fam, pt, style, GraphicsUnit.Point);
+                    f = new Font(fam, pt, style, GraphicsUnit.Pixel);
                 }
             }
             catch
             {
-                f = new Font("Segoe UI", pt, style == Semi ? FontStyle.Bold : style, GraphicsUnit.Point);
+                f = new Font("Segoe UI", pt, style == Semi ? FontStyle.Bold : style, GraphicsUnit.Pixel);
             }
             FontCache[key] = f;
             return f;
         }
 
-        // windows-ui type scale
-        public static Font Display { get { return F(20, Semi); } }      // page/dialog title
-        public static Font H1 { get { return F(17, Semi); } }           // section heading
-        public static Font H2 { get { return F(15, Semi); } }           // card title / button
-        public static Font H3 { get { return F(13, Semi); } }           // small heading
-        public static Font Body { get { return F(15); } }               // base text
-        public static Font BodyBold { get { return F(15, Semi); } }
-        public static Font Small { get { return F(13); } }              // secondary
+        /* The type scale. DevToys, which this interface is measured against, runs its body at
+           14 and its captions at 12; this app used 15 for body but 13 for labels and 12 for
+           captions, and "the text is not clear" almost always means a caption that small. The
+           scale below keeps one rhythm (14, 16, 18, 20, 24) and stops at 13 for anything a
+           person has to read rather than glance at: 12 is for a footnote, not for the label of
+           a field. Line heights come from the font, so a row that is sized from Theme.Row
+           below stays in step with the size. */
+        public static Font Display { get { return F(24, Semi); } }      // page/dialog title
+        public static Font H1 { get { return F(20, Semi); } }           // section heading
+        public static Font H2 { get { return F(16, Semi); } }           // card title
+        public static Font H3 { get { return F(15, Semi); } }           // row title / button
+        public static Font Body { get { return F(14); } }               // base text
+        public static Font BodyBold { get { return F(14, Semi); } }
+        public static Font Small { get { return F(13); } }              // secondary, labels
         public static Font SmallBold { get { return F(13, Semi); } }
-        public static Font Caption { get { return F(12); } }            // captions, labels
-        public static Font Micro { get { return F(11, Semi); } }        // section eyebrow
+        public static Font Caption { get { return F(13); } }            // captions, hints
+        public static Font Micro { get { return F(12, Semi); } }        // section eyebrow
+
+        /// <summary>Line height of a face, in device pixels, rounded up.</summary>
+        /* Line heights are asked for on every row of every page and of every card, and each
+           answer is the same for a given font at a given scale. Caching them turns a device
+           context per row into a dictionary lookup, which matters when a page builds sixty
+           rows while the window is being resized. */
+        private static readonly Dictionary<Font, int> _lineHeights = new Dictionary<Font, int>();
+
+        public static int LineHeight(Font f)
+        {
+            if (f == null) return Ui.S(18);
+            int cached;
+            if (_lineHeights.TryGetValue(f, out cached)) return cached;
+            int height;
+            try
+            {
+                height = Math.Max(Ui.S(12), (int)Math.Ceiling((double)f.GetHeight(Ui.Ruler ?? Graphics.FromHwnd(IntPtr.Zero))));
+            }
+            catch { height = Math.Max(Ui.S(12), (int)Math.Ceiling((double)f.Height)); }
+            _lineHeights[f] = height;
+            return height;
+        }
+
+        /* The vertical rhythm every page, card and dialog is built from. A controls library
+           that hard codes 18 for a label row and 33 for a field gets 1 px of clipping the day
+           the font gets a pixel taller; these are derived from the fonts instead. */
+        public static int Row { get { return LineHeight(Small) + Ui.S(4); } }
+        public static int Field { get { return Ui.S(34); } }
+        public static int Gap { get { return Ui.S(8); } }
 
         /// <summary>
         /// A tabular face for values that are read one character at a time: wallet addresses,
@@ -642,9 +713,9 @@ namespace JoeBrowser
             Font f;
             if (FontCache.TryGetValue(key, out f)) return f;
 
-            float pt = (float)(px * 0.75);
+            float pt = (float)(px * 0.75 * Ui.Scale);
             FontFamily fam = TryFamily("Consolas") ?? TryFamily("Cascadia Mono") ?? TryFamily("Courier New");
-            try { f = fam != null ? new Font(fam, pt, FontStyle.Regular, GraphicsUnit.Point) : F(px); }
+            try { f = fam != null ? new Font(fam, pt, FontStyle.Regular, GraphicsUnit.Pixel) : F(px); }
             catch { f = F(px); }
             FontCache[key] = f;
             return f;
@@ -693,6 +764,16 @@ namespace JoeBrowser
         }
     }
 
+    /// <summary>
+    /// A page that lays its column out from the host's content width. Implementing this lets
+    /// JBScrollHost ask for one more pass once that width is final, which is what makes a resize
+    /// land correctly on the first paint instead of after the next event.
+    /// </summary>
+    internal interface ISyncLayout
+    {
+        void LayoutAtWidth();
+    }
+
     internal interface IReStyle
     {
         void ReStyle();
@@ -710,10 +791,32 @@ namespace JoeBrowser
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.PixelOffsetMode = PixelOffsetMode.Half;
+            /* Text is drawn with TextRenderer (GDI), which does its own ClearType and ignores
+               this hint. It matters for the few places that fall back to Graphics.DrawString,
+               and there the difference is visible: AntiAlias feathered the glyphs grey, which
+               was the "unclear text" this app showed next to native Windows text on the same
+               screen. ClearTypeGridFit matches what GDI does on the rest of the window. */
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             // Interpolation stays at the default (NearestNeighbor): bicubic softens 1:1 icon
             // and flag blits, which reads as fuzziness. Icons ask for bicubic themselves.
             g.CompositingQuality = CompositingQuality.HighQuality;
+        }
+
+        /// <summary>
+        /// Pixel size for the screen's frames per inch. A one pixel line on a 4K panel at 200%
+        /// covers two device pixels and reads as a grey smear unless it is drawn 2 units wide.
+        /// </summary>
+        public static float Hair { get { return Ui.Scale >= 1.5f ? 1.6f : 1f; } }
+
+        /// <summary>
+        /// A card edge that stays a crisp line at any scale. Drawn at half pixel offsets with
+        /// AntiAlias it lands on exactly one device pixel row, so borders look drawn rather than
+        /// smudged - which is the difference between a flat design and a low quality one.
+        /// </summary>
+        public static void Card(Graphics g, RectangleF r, float radius, Color fill, Color border)
+        {
+            Fill(g, r, radius, fill);
+            Stroke(g, r, radius, border, Ui.Hair);
         }
 
         /// <summary>
@@ -834,10 +937,17 @@ namespace JoeBrowser
                 g.FillPath(b, p);
         }
 
+        /// <summary>
+        /// An outline. A width of one means one DEVICE pixel, not one logical pixel: at 150%
+        /// the old code drew a 1 unit pen, which the DPI transform turned into 1.5 device
+        /// pixels and antialiased into two half-covered rows of grey. Every card edge on a
+        /// scaled screen looked soft for that reason. A pen of exactly one device pixel drawn
+        /// on a half pixel boundary is the crisp line a designer means by "a hairline".
+        /// </summary>
         public static void Stroke(Graphics g, RectangleF r, float radius, Color color, float width = 1f)
         {
             using (var p = Round(r, radius))
-            using (var pen = new Pen(color, width))
+            using (var pen = new Pen(color, width < 1.2f ? Hair : width))
                 g.DrawPath(pen, p);
         }
 
@@ -940,9 +1050,33 @@ namespace JoeBrowser
             return lines;
         }
 
+        private static Graphics _ruler;
+
+        /// <summary>
+        /// A measuring surface that is reused instead of one per call.
+        ///
+        /// Ui.Measure was called with whatever Graphics a caller happened to have; on a control
+        /// that meant CreateGraphics(), which allocates a device context and releases it on every
+        /// label. A layout pass with sixty labels then spent its time in GDI handle churn, which is
+        /// exactly the hitch a user feels when a page opens. One process wide surface does the
+        /// same measurement with no allocation.
+        /// </summary>
+        public static Graphics Ruler
+        {
+            get
+            {
+                if (_ruler == null)
+                {
+                    try { _ruler = Graphics.FromHwnd(IntPtr.Zero); } catch { }
+                }
+                return _ruler;
+            }
+        }
+
         public static SizeF Measure(Graphics g, string text, Font font)
         {
             if (string.IsNullOrEmpty(text)) return SizeF.Empty;
+            if (g == null) g = Ruler;
             Size s = TextRenderer.MeasureText(g, text, font, new Size(4000, 4000),
                 TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
             return new SizeF(s.Width, s.Height);
@@ -965,9 +1099,14 @@ namespace JoeBrowser
         public static float MeasureWrapped(Graphics g, string text, Font font, float width, int maxLines)
         {
             if (string.IsNullOrEmpty(text) || width <= 0 || maxLines <= 0) return 0f;
-            Size s = TextRenderer.MeasureText(g, text, font, new Size((int)Math.Round(width), 4000),
-                TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
-            float lineH = (float)Math.Ceiling(font.GetHeight(g));
+            /* TextRenderer works without a Graphics; passing null measures on the desktop
+               context, which is what a caller without one has. */
+            Size s = g == null
+                ? TextRenderer.MeasureText(text, font, new Size((int)Math.Round(width), 4000),
+                    TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak)
+                : TextRenderer.MeasureText(g, text, font, new Size((int)Math.Round(width), 4000),
+                    TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
+            float lineH = (float)Math.Ceiling(g == null ? font.GetHeight() : font.GetHeight(g));
             int lines = Math.Max(1, (int)Math.Round(s.Height / lineH));
             return Math.Min(lines, maxLines) * lineH;
         }

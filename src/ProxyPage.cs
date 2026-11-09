@@ -17,7 +17,7 @@ namespace JoeBrowser
     /// profile is created. A running profile can also be re-pointed at a different proxy
     /// without closing its browser tab.
     /// </summary>
-    internal sealed class ProxyPage : Panel, IReStyle
+    internal sealed class ProxyPage : Panel, IReStyle, ISyncLayout
     {
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
@@ -62,7 +62,7 @@ namespace JoeBrowser
 
         private JBButton MakeButton(string text, string icon, BtnKind kind, string key)
         {
-            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 4, Height = Ui.S(33) };
+            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 6, Height = Theme.Field };
             b.Click += delegate { Raise(key, -1); };
             return b;
         }
@@ -124,15 +124,21 @@ namespace JoeBrowser
         {
             var g = e.Graphics;
             Ui.Quality(g);
+            /* The empty panel is 96 tall and put its two lines at 28 and 52 from the top, which
+               is arithmetic for one font size; the pair is measured and centred with the chip
+               now. */
             float w = _empty.Width;
             float chip = Ui.S(44);
-            var cr = new RectangleF(Ui.S(22), (Ui.S(96) - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(8), Theme.AccentOnBg);
+            var cr = new RectangleF(Ui.S(22), (Height - chip) / 2f, chip, chip);
+            Ui.Fill(g, cr, Ui.S(10), Theme.AccentOnBg);
             float ic = Ui.S(22);
             Icons.Draw(g, "proxy", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
-            Ui.Text(g, "No proxies saved yet", Theme.H3, Theme.Text, cr.Right + Ui.S(16), Ui.S(28), w - cr.Right - Ui.S(30));
+            float h3 = Theme.LineHeight(Theme.H3);
+            float sm = Theme.LineHeight(Theme.Small);
+            float top = Math.Max(Ui.S(6), (Height - (h3 + Ui.S(2) + sm)) / 2f);
+            Ui.Text(g, "No proxies saved yet", Theme.H3, Theme.Text, cr.Right + Ui.S(16), top, w - cr.Right - Ui.S(30));
             Ui.Text(g, "Add one to use it in profiles.",
-                Theme.Small, Theme.TextDim, cr.Right + Ui.S(16), Ui.S(52), w - cr.Right - Ui.S(30), "left", 2);
+                Theme.Small, Theme.TextDim, cr.Right + Ui.S(16), top + h3 + Ui.S(2), w - cr.Right - Ui.S(30), "left", 1);
         }
 
         public void ReStyle()
@@ -147,6 +153,9 @@ namespace JoeBrowser
 
         protected override void OnResize(EventArgs e) { base.OnResize(e); LayoutCore(); }
         protected override void OnLayout(LayoutEventArgs e) { base.OnLayout(e); LayoutCore(); }
+
+        /// <summary>One more pass once the scroll host has fixed its width.</summary>
+        public void LayoutAtWidth() { LayoutCore(); }
 
         private void LayoutCore()
         {
@@ -171,13 +180,13 @@ namespace JoeBrowser
 
                 for (int i = 0; i < _rows.Count; i++)
                 {
-                    _rows[i].SetBounds(pad, y, inner, Ui.S(66));
-                    y += Ui.S(66) + Ui.S(8);
+                    _rows[i].SetBounds(pad, y, inner, Ui.S(72));
+                    y += Ui.S(72) + Ui.S(8);
                 }
                 if (Items.Count > 0) y += Ui.S(10);
 
-                _promo.SetBounds(pad, y, inner, Ui.S(112));
-                y += Ui.S(112) + Ui.S(24);
+                _promo.SetBounds(pad, y, inner, PromoCard.CardH);
+                y += PromoCard.CardH + Ui.S(24);
 
                 _column.SetBounds(0, 0, Math.Max(inner + pad * 2, w), Math.Max(y, _host.Height));
                 _host.SyncExtent();
@@ -194,6 +203,7 @@ namespace JoeBrowser
         public event EventHandler TestRequested, UseRequested, EditRequested, DeleteRequested, LiveRequested;
 
         private int _hover = -1;
+        private bool _rowHover;
         private static readonly string[] ActionKeys = { "bolt", "plus", "pencil", "trash" };
         private static readonly string[] ActionTips = { "Check this proxy", "Create a profile with it", "Edit", "Delete" };
 
@@ -222,7 +232,7 @@ namespace JoeBrowser
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             Ui.Opaque(this);
-            Height = Ui.S(66);
+            Height = Ui.S(72);
             Cursor = Cursors.Hand;
         }
 
@@ -250,11 +260,12 @@ namespace JoeBrowser
             for (int i = 0; i < a.Length; i++) if (a[i].Contains(e.Location)) { hit = i; break; }
             SyncTip(hit);
             Cursor = hit >= 0 ? Cursors.Hand : Cursors.Default;
-            if (hit != _hover) { _hover = hit; Invalidate(); }
+            bool row = hit < 0;
+            if (hit != _hover || row != _rowHover) { _hover = hit; _rowHover = row; Invalidate(); }
             base.OnMouseMove(e);
         }
 
-        protected override void OnMouseLeave(EventArgs e) { _hover = -1; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = -1; _rowHover = false; Invalidate(); base.OnMouseLeave(e); }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
@@ -278,12 +289,14 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             if (Item == null) return;
+            /* A row is a surface with a hairline, and it lifts under the pointer: on a list of
+               twenty proxies the hovered row is how a person knows which one a click will hit. */
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(6), Theme.Card);
-            Ui.Stroke(g, r, Ui.S(6), Theme.Line, 1f);
+            Ui.Fill(g, r, Ui.S(10), _hover >= 0 || _rowHover ? Theme.PanelHover : Theme.Card);
+            Ui.Stroke(g, r, Ui.S(10), _hover >= 0 || _rowHover ? Theme.HoverStrong : Theme.Line);
 
             float pad = Ui.S(16);
-            float chip = Ui.S(34);
+            float chip = Ui.S(36);
             var cr = new RectangleF(pad, (Height - chip) / 2f, chip, chip);
             Ui.Fill(g, cr, Ui.S(7), Theme.AccentOnBg);
             float ic = Ui.S(18);
@@ -302,8 +315,13 @@ namespace JoeBrowser
             float mid = Height / 2f;
 
             string name = string.IsNullOrWhiteSpace(Item.Name) ? Item.Connection : Item.Name;
-            Ui.Text(g, name, Theme.H3, Theme.Text, x, mid - Ui.S(15), cols[0] - Ui.S(8));
-            Ui.Text(g, Item.Connection, Theme.Caption, Theme.TextFaint, x, mid + Ui.S(3), cols[0] - Ui.S(8));
+            /* The name and its address are a measured pair, centred together. Fixed offsets from
+               the middle (15 up, 3 down) only line up for the font they were written at. */
+            float nameH = Theme.LineHeight(Theme.H3);
+            float addrH = Theme.LineHeight(Theme.Caption);
+            float nameTop = Math.Max(Ui.S(4), (Height - (nameH + addrH)) / 2f);
+            Ui.Text(g, name, Theme.H3, Theme.Text, x, nameTop, cols[0] - Ui.S(8));
+            Ui.Text(g, Item.Connection, Theme.Caption, Theme.TextFaint, x, nameTop + nameH, cols[0] - Ui.S(8));
             x += cols[0];
 
             Ui.Text(g, Item.Location, Theme.Body, Theme.TextDim, x, mid - Theme.Body.GetHeight(g) / 2f, cols[1] - Ui.S(10));
@@ -324,7 +342,7 @@ namespace JoeBrowser
             var a = Actions();
             for (int i = 0; i < a.Length; i++)
             {
-                if (_hover == i) Ui.Fill(g, a[i], Ui.S(4), Theme.HoverOverlay);
+                if (_hover == i) { Ui.Fill(g, a[i], Ui.S(7), Theme.HoverOverlay); Ui.Stroke(g, a[i], Ui.S(7), Theme.Line); }
                 float s = Ui.S(15);
                 Icons.Draw(g, ActionKeys[i],
                     new RectangleF(a[i].X + (a[i].Width - s) / 2f, a[i].Y + (a[i].Height - s) / 2f, s, s),
@@ -340,23 +358,37 @@ namespace JoeBrowser
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             Ui.Opaque(this);
-            Height = Ui.S(112);
+            Height = CardH;
         }
 
         public void ReStyle() { Invalidate(); }
         protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(Ui.SurfaceColor(this)); }
+
+        /// <summary>
+        /// A 46 px chip and three measured lines, with the same inset above and below. Derived
+        /// from the type scale so the card grows with the text instead of clipping it.
+        /// </summary>
+        public static int CardH
+        {
+            get
+            {
+                int text = Theme.LineHeight(Theme.H2) + Theme.LineHeight(Theme.Small) +
+                           Theme.LineHeight(Theme.Caption) + Ui.S(8);
+                return Math.Max(Ui.S(112), Math.Max(text, Ui.S(46)) + Ui.S(24));
+            }
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(8), Theme.Panel);
-            Ui.Stroke(g, r, Ui.S(8), Theme.Line, 1f);
+            Ui.Fill(g, r, Ui.S(10), Theme.Panel);
+            Ui.Stroke(g, r, Ui.S(10), Theme.Line);
 
             float chip = Ui.S(46);
             var cr = new RectangleF(Ui.S(20), (Height - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(9), Theme.AccentOnBg);
+            Ui.Fill(g, cr, Ui.S(10), Theme.AccentOnBg);
             float ic = Ui.S(24);
             Icons.Draw(g, "globe", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
 
@@ -367,15 +399,21 @@ namespace JoeBrowser
             float bw = Math.Max(Ui.S(96), Ui.Measure(g, "Coming soon", Theme.SmallBold).Width + Ui.S(28));
             float bh = Ui.S(32);
             float textW = Math.Max(Ui.S(120), Width - tx - bw - Ui.S(36));
-            Ui.Text(g, "Static residential proxy", Theme.H2, Theme.Text, tx, Ui.S(20), textW);
+            /* Three lines at 20, 50 and 74 from the top were one line of arithmetic for one font
+               size. They are measured and centred as a block now, so the card holds at any scale. */
+            float h2 = Theme.LineHeight(Theme.H2);
+            float sm = Theme.LineHeight(Theme.Small);
+            float cap = Theme.LineHeight(Theme.Caption);
+            float blockTop = Math.Max(Ui.S(10), (Height - (h2 + sm + cap + Ui.S(8))) / 2f);
+            Ui.Text(g, "Static residential proxy", Theme.H2, Theme.Text, tx, blockTop, textW);
             Ui.Text(g, "1 proxy  ·  $3.50 / month  ·  clean, dedicated home IP", Theme.Small, Theme.TextDim,
-                tx, Ui.S(50), textW);
+                tx, blockTop + h2 + Ui.S(2), textW);
             Ui.Text(g, "Buy direct inside Joe Browser. No third-party checkout, no tracking.",
-                Theme.Caption, Theme.TextFaint, tx, Ui.S(74), textW);
+                Theme.Caption, Theme.TextFaint, tx, blockTop + h2 + sm + Ui.S(4), textW);
 
             var badge = new RectangleF(Width - Ui.S(20) - bw, (Height - bh) / 2f, bw, bh);
             Ui.Fill(g, badge, Ui.S(6), Theme.AccentOnBg);
-            Ui.Stroke(g, badge, Ui.S(6), Theme.AccentBorder, 1f);
+            Ui.Stroke(g, badge, Ui.S(6), Theme.AccentBorder);
             Ui.Text(g, "Coming soon", Theme.SmallBold, Theme.AccentText, badge.X,
                 badge.Y + (bh - Theme.SmallBold.GetHeight(g)) / 2f, bw, "center");
         }

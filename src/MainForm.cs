@@ -13,9 +13,13 @@ namespace JoeBrowser
 {
     internal sealed class MainForm : JBForm
     {
-        private const int SidebarW = 280;
-        private const int HeaderH = 68;
-        private const int ContentPad = 28;
+        /* The window is a workspace, so the shell metrics are generous: a 264 rail holds the
+           longest navigation label at 150% without an ellipsis, and a 72 header band gives the
+           page title and its one line of state room to breathe instead of sitting on the rule
+           below them. */
+        private const int SidebarW = 268;
+        private const int HeaderH = 76;
+        private const int ContentPad = 32;
 
         private readonly ProfileStore _store = new ProfileStore();
         private AppSettings _settings;
@@ -134,14 +138,25 @@ namespace JoeBrowser
             ApplyLanguage();
         }
 
+        /// <summary>Set at construction, so the first log line measures the whole start.</summary>
+        private readonly System.Diagnostics.Stopwatch _startup = System.Diagnostics.Stopwatch.StartNew();
+
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
             ApplyScale();
             ResolveAutoBrowserKind();
+            long tDetect = _startup.ElapsedMilliseconds;
             ReloadCards(true);
+            long tCards = _startup.ElapsedMilliseconds;
             SetPage(0);
             LayoutAll();
+            /* One line per launch, so a slow start can be diagnosed from the log instead of
+               guessed at: reading the workspace, building the cards for it, and the first
+               layout are the three costs that grow with the number of profiles. */
+            Log.Info("Startup " + _startup.ElapsedMilliseconds + " ms: detect " + tDetect +
+                ", " + _cards.Count + " cards " + (tCards - tDetect) +
+                ", first layout " + (_startup.ElapsedMilliseconds - tCards));
             ShowInTaskbar = true;
             _search.Box.AccessibleName = "Search profiles";
 
@@ -236,16 +251,21 @@ namespace JoeBrowser
 
         private JBButton Nav(string text, string icon, EventHandler click)
         {
-            var b = new JBButton { Kind = BtnKind.Nav, Icon = icon, Text = text, Radius = 4, Height = Ui.S(40) };
+            var b = new JBButton { Kind = BtnKind.Nav, Icon = icon, Text = text, Radius = 8, Height = Ui.S(42) };
             b.Click += click;
             return b;
         }
 
-        /// <summary>Small caption above a cluster of navigation items.</summary>
+        /// <summary>
+        /// Small caption above a cluster of navigation items. Letter spaced the way a real
+        /// section label is, because uppercase Segoe at 12 px without tracking reads as cramped.
+        /// </summary>
         private JBLabel NavGroup(string text)
         {
             var l = new JBLabel(LabelRole.Faint, text.ToUpperInvariant());
             l.AutoEllipsis = false;
+            l.Font = Theme.Micro;
+            l.ForeColor = Theme.TextFaint;
             return l;
         }
 
@@ -279,19 +299,19 @@ namespace JoeBrowser
                 ApplyFilter();
             };
 
-            _newBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("btn.new"), Radius = 4, Height = Ui.S(33) };
+            _newBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("btn.new"), Radius = 6, Height = Ui.S(34) };
             _newBtn.Click += delegate { NewProfile(); };
 
-            _sortBtn = new JBButton { Text = "Sort: recent", Radius = 4, Height = Ui.S(33), Tip = "Change the order of the list (Ctrl+O)" };
+            _sortBtn = new JBButton { Text = "Sort: recent", Radius = 6, Height = Theme.Field, Tip = "Change the order of the list (Ctrl+O)" };
             _sortBtn.Click += delegate { CycleSort(); };
 
             _bulk = new JBPanel { Visible = false };
             _bulkCount = new Label { AutoSize = true, Font = Theme.H3, ForeColor = Theme.Text, BackColor = Color.Transparent };
-            _bulkOpen = new JBButton { Kind = BtnKind.Primary, Icon = "play", Text = L10n.T("btn.openall"), Radius = 4, Height = Ui.S(31) };
-            _bulkStop = new JBButton { Kind = BtnKind.Soft, Icon = "power", Text = L10n.T("btn.stop"), Radius = 4, Height = Ui.S(31) };
-            _bulkDup = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = L10n.T("btn.duplicate"), Radius = 4, Height = Ui.S(31) };
-            _bulkDel = new JBButton { Kind = BtnKind.Danger, Icon = "trash", Text = L10n.T("btn.delete"), Radius = 4, Height = Ui.S(31) };
-            _bulkCancel = new JBButton { Kind = BtnKind.Ghost, Icon = "close", Radius = 4, Height = Ui.S(31), Tip = "Clear selection (Esc)" };
+            _bulkOpen = new JBButton { Kind = BtnKind.Primary, Icon = "play", Text = L10n.T("btn.openall"), Radius = 6, Height = Ui.S(32) };
+            _bulkStop = new JBButton { Kind = BtnKind.Soft, Icon = "power", Text = L10n.T("btn.stop"), Radius = 6, Height = Ui.S(32) };
+            _bulkDup = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = L10n.T("btn.duplicate"), Radius = 6, Height = Ui.S(32) };
+            _bulkDel = new JBButton { Kind = BtnKind.Danger, Icon = "trash", Text = L10n.T("btn.delete"), Radius = 6, Height = Ui.S(32) };
+            _bulkCancel = new JBButton { Kind = BtnKind.Ghost, Icon = "close", Radius = 6, Height = Ui.S(32), Tip = "Clear selection (Esc)" };
             _bulkOpen.Click += delegate { BulkOpen(); };
             _bulkStop.Click += delegate { BulkStop(); };
             _bulkDup.Click += delegate { BulkDuplicate(); };
@@ -304,7 +324,7 @@ namespace JoeBrowser
             _bulk.Controls.Add(_bulkDel);
             _bulk.Controls.Add(_bulkCancel);
 
-            _saveSettings = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = L10n.T("btn.save"), Radius = 4, Height = Ui.S(33) };
+            _saveSettings = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = L10n.T("btn.save"), Radius = 6, Height = Ui.S(34) };
             _saveSettings.Click += delegate { SaveSettings(); };
 
             _minBtn = new JBIconButton { Icon = "min", IconSize = 11, Caption = true, Tip = "Minimize" };
@@ -314,18 +334,26 @@ namespace JoeBrowser
             _maxBtn.Click += delegate { ToggleMaximize(); };
             _closeBtn.Click += delegate { Close(); };
 
-            _grid = new JBGrid { MinCell = 360, CellHeight = 200, Gap = 16 };
+            /* The cell is the size of the card it has to hold, plus the gap it is placed with.
+               A 360 x 200 cell for a card that became 224 tall left the last row clipped by the
+               scroll host; the two numbers now come from one place. */
+            _grid = new JBGrid
+            {
+                MinCell = ProfileCard.PreferredMinWidth(),
+                CellHeight = ProfileCard.PreferredHeight() + Ui.S(18),
+                Gap = 18
+            };
             _host = new JBScrollHost(_grid);
 
             _emptyPanel = new Panel { BackColor = Theme.Bg, Visible = false };
             _emptyPanel.Paint += EmptyPaint;
-            _emptyBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("empty.action"), Radius = 4, Height = Ui.S(33) };
+            _emptyBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("empty.action"), Radius = 6, Height = Ui.S(34) };
             _emptyBtn.Click += delegate
             {
                 if (_filter.Length > 0) { ClearSearch(); }
                 else NewProfile();
             };
-            _clearFilter = new JBButton { Kind = BtnKind.Soft, Icon = "close", Text = "Clear search", Radius = 4, Height = Ui.S(33), Visible = false };
+            _clearFilter = new JBButton { Kind = BtnKind.Soft, Icon = "close", Text = "Clear search", Radius = 6, Height = Theme.Field, Visible = false };
             _clearFilter.Click += delegate { ClearSearch(); };
             _emptyPanel.Controls.Add(_emptyBtn);
             _emptyPanel.Controls.Add(_clearFilter);
@@ -369,10 +397,14 @@ namespace JoeBrowser
 
             _upgradePage = new UpgradePage { Visible = false };
             _upgradePage.ActionRequested += delegate(object sender, UpgradeActionEventArgs e) { PlanAction(e.Key); };
+            /* Only needed while the plan page is open, and only it has anything to tick. A one
+               second timer that runs for the life of the window, wakes the message loop and then
+               returns, is a watt and a hitch for nothing: it is started when the page opens and
+               stopped when it closes. */
             _planTimer = new Timer { Interval = 1000 };
             _planTimer.Tick += delegate
             {
-                if (_page != 7) return;
+                if (_page != 7) { _planTimer.Stop(); return; }
                 _upgradePage.TickTimer();
                 /* The chain is watched while the page is open, so a payment confirms on its own.
                    The manual button stays for someone who wants an answer immediately. */
@@ -389,7 +421,7 @@ namespace JoeBrowser
             _aboutColumn = new Panel { BackColor = Theme.Bg };
             _aboutColumn.Paint += AboutPaint;
             _aboutHost = new JBScrollHost(_aboutColumn);
-            _aboutTelegram = new JBButton { Kind = BtnKind.Soft, BrandIcon = "telegram", Text = "@joegoldberg2025", Radius = 4, Height = Ui.S(33) };
+            _aboutTelegram = new JBButton { Kind = BtnKind.Soft, BrandIcon = "telegram", Text = "@joegoldberg2025", Radius = 6, Height = Ui.S(34) };
             _aboutTelegram.Click += delegate { OpenUrl("https://t.me/joegoldberg2025"); };
             _aboutColumn.Controls.Add(_aboutTelegram);
             _aboutPage.Controls.Add(_aboutHost);
@@ -428,13 +460,19 @@ namespace JoeBrowser
             Controls.Add(_maxBtn);
             Controls.Add(_closeBtn);
 
-            _pulse = new Timer { Interval = 90 };
+            /* Cards animate a pulse while a profile is running. The tick was 90 ms, which is
+               eleven frames a second of full card repaints - enough to be felt on a machine with
+               several cards and a 4K window, for an effect that is a slow fade. 160 ms is the same
+               look at a third of the cost, and the tick is skipped for a window that is hidden,
+               minimised, or simply not on screen. */
+            _pulse = new Timer { Interval = 160 };
             _pulse.Tick += delegate
             {
                 /* The running-card animation is cosmetic, so it stops costing anything the moment
                    the window cannot be seen: hidden, minimised or behind another app. */
                 if (_sessions.Count == 0) { _pulse.Stop(); return; }
                 if (!Visible || WindowState == FormWindowState.Minimized) return;
+                if (!IsOnScreen()) return;
                 foreach (var c in _cards.Values) if (c.Running) c.Invalidate();
             };
 
@@ -442,6 +480,24 @@ namespace JoeBrowser
             ApplyLanguage();
             RefreshPlanState();
             CheckUnfinishedPayment();
+        }
+
+        /// <summary>
+        /// True when any part of the window is on a monitor that is showing it. Windows keeps
+        /// painting a window that another window covers, so a background app used to spend its
+        /// timer on cards nobody could see.
+        /// </summary>
+        private bool IsOnScreen()
+        {
+            try
+            {
+                if (!IsHandleCreated) return false;
+                var r = Bounds;
+                foreach (var screen in Screen.AllScreens)
+                    if (screen.WorkingArea.IntersectsWith(r)) return true;
+            }
+            catch { return true; }
+            return false;
         }
 
         /// <summary>
@@ -1711,14 +1767,14 @@ namespace JoeBrowser
 
             _setBrowserPath = Field("Automatic (recommended)");
             _setBrowserPath.Value = _settings.BrowserPath ?? "";
-            _setBrowse = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.browse"), Radius = 4, Height = Ui.S(33) };
-            _setDetect = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = L10n.T("btn.detect"), Radius = 4, Height = Ui.S(33) };
+            _setBrowse = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.browse"), Radius = 6, Height = Ui.S(34) };
+            _setDetect = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = L10n.T("btn.detect"), Radius = 6, Height = Ui.S(34) };
             _setStartUrl = Field(Profile.FingerprintTestUrl);
             _setDefaultGroup = Field(L10n.T("set.group.hint"));
             _setDefaultGroup.Value = _settings.DefaultGroup ?? "";
-            _setOpenData = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.opendata"), Radius = 4, Height = Ui.S(33) };
-            _setDownload = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.download"), Radius = 4, Height = Ui.S(33) };
-            _setClearCache = new JBButton { Kind = BtnKind.Soft, Icon = "sync", Text = L10n.T("btn.clean"), Radius = 4, Height = Ui.S(33) };
+            _setOpenData = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.opendata"), Radius = 6, Height = Ui.S(34) };
+            _setDownload = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.download"), Radius = 6, Height = Ui.S(34) };
+            _setClearCache = new JBButton { Kind = BtnKind.Soft, Icon = "sync", Text = L10n.T("btn.clean"), Radius = 6, Height = Ui.S(34) };
             _setClearCache.Click += delegate { ClearCaches(); };
 
             /* Interface language: circular flag + full language name, never a bare code. */
@@ -1788,13 +1844,13 @@ namespace JoeBrowser
             Row(storage, "set.row.build", new[] { Ui.S(110) }, _setDownload);
             /* History off means nothing new is recorded; what is already there stays until the
                user clears it, because turning recording off should not quietly delete evidence. */
-            _setClearHistory = new JBButton { Kind = BtnKind.Soft, Icon = "trash", Text = L10n.T("set.clearhistory"), Radius = 4, Height = Ui.S(33) };
+            _setClearHistory = new JBButton { Kind = BtnKind.Soft, Icon = "trash", Text = L10n.T("set.clearhistory"), Radius = 6, Height = Ui.S(34) };
             _setClearHistory.Click += delegate { ClearAllHistory(); };
             Row(storage, "set.row.history", new[] { Ui.S(46), Ui.S(120) }, _setHistory, _setClearHistory);
 
             /* The one line to the developer when anything looks wrong. It opens Telegram with
                the user's own words; the technical details ride on the clipboard. */
-            _setReport = new JBButton { Kind = BtnKind.Soft, Icon = "error", Text = L10n.T("btn.report"), Radius = 4, Height = Ui.S(33) };
+            _setReport = new JBButton { Kind = BtnKind.Soft, Icon = "error", Text = L10n.T("btn.report"), Radius = 6, Height = Ui.S(34) };
             _setReport.Click += delegate { Report.OpenForm(this, ""); };
             Row(storage, "set.row.report", new[] { Ui.S(96) }, _setReport);
 
@@ -1811,15 +1867,15 @@ namespace JoeBrowser
             _setGoogleSecret = Field("GOCSPX-…  (optional)");
             _setGoogleSecret.Value = string.IsNullOrWhiteSpace(_settings.GoogleClientSecret)
                 ? GoogleSignIn.DefaultClientSecret : _settings.GoogleClientSecret;
-            _setSecurity = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.security"), Radius = 4, Height = Ui.S(33) };
+            _setSecurity = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.security"), Radius = 6, Height = Ui.S(34) };
             /* The Google client id is the only setting that cannot be pre-filled by the app,
                so it gets a guided setup and a button that actually runs the flow and reports
                what Google said. Without those two, a wrong id just looks like a dead button. */
-            _setGoogleGuide = new JBButton { Kind = BtnKind.Soft, Icon = "help", Text = "Set up", Radius = 4, Height = Ui.S(33), Tip = L10n.T("set.google.hint") };
-            _setGoogleTest = new JBButton { Kind = BtnKind.Soft, Icon = "check", Text = "Test", Radius = 4, Height = Ui.S(33), Tip = "Run the real Google sign-in now" };
+            _setGoogleGuide = new JBButton { Kind = BtnKind.Soft, Icon = "help", Text = "Set up", Radius = 6, Height = Theme.Field, Tip = L10n.T("set.google.hint") };
+            _setGoogleTest = new JBButton { Kind = BtnKind.Soft, Icon = "check", Text = "Test", Radius = 6, Height = Theme.Field, Tip = "Run the real Google sign-in now" };
             _setGoogleGuide.Click += delegate { GoogleSetupHelp(); };
             _setGoogleTest.Click += delegate { TestGoogleSignIn(); };
-            _setSignOut = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("set.row.signout"), Radius = 4, Height = Ui.S(33) };
+            _setSignOut = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("set.row.signout"), Radius = 6, Height = Ui.S(34) };
             _setSecurity.Click += delegate
             {
                 if (Session.Current == null) { Toast("Sign in first.", ToastKind.Error); return; }
@@ -2354,16 +2410,24 @@ namespace JoeBrowser
 
             g.Clear(Theme.Bg);
 
-            // ---- navbar: windows-ui #202020 sidebar, 280px ----
+            /* The rail is a surface of its own, separated by a hairline rather than by a colour
+               step alone: on a cheap panel two dark neutrals that close look like one, and the
+               whole window then reads as one undivided sheet. */
             using (var b = new SolidBrush(Theme.Sidebar)) g.FillRectangle(b, 0, 0, sb, h);
+            using (var p = new Pen(Theme.Line, Ui.Hair))
+                g.DrawLine(p, sb - 0.5f, 0, sb - 0.5f, h);
 
-            float logoSize = Ui.S(24);
-            var logoBox = new RectangleF(Ui.S(20), Ui.S(16), logoSize, logoSize);
+            /* Brand: the mark, the name and the one line that says what the app is. The old
+               header was a logo and a name at 24 px with the rest of the rail starting 100 px
+               below it, which left a hole where a designed app puts its title block. */
+            float logoSize = Ui.S(26);
+            var logoBox = new RectangleF(Ui.S(20), Ui.S(20), logoSize, logoSize);
             Logo.Draw(g, logoBox);
-            Ui.Text(g, "Joe Browser", Theme.BodyBold, Theme.Text, Ui.S(52), Ui.S(18), sb - Ui.S(70));
+            Ui.Text(g, "Joe Browser", Theme.H3, Theme.Text, Ui.S(54), Ui.S(18), sb - Ui.S(66));
+            Ui.Text(g, "Anti detect workspace", Theme.Caption, Theme.TextFaint, Ui.S(54), Ui.S(38), sb - Ui.S(66));
 
-            using (var p = new Pen(Theme.Line))
-                g.DrawLine(p, Ui.S(20), Ui.S(114), sb - Ui.S(20), Ui.S(114));
+            using (var p = new Pen(Theme.Line, Ui.Hair))
+                g.DrawLine(p, Ui.S(18), Ui.S(HeaderH + Ui.S(34)), sb - Ui.S(18), Ui.S(HeaderH + Ui.S(34)));
 
             // ---- page header band ----
             string title, sub;
@@ -2396,18 +2460,41 @@ namespace JoeBrowser
                 default: title = L10n.T("header.about"); sub = L10n.T("sub.about"); break;
             }
 
-            Ui.Text(g, title, Theme.H1, Theme.Text, sb + Ui.S(ContentPad), Ui.S(12), w - sb - Ui.S(ContentPad) - Ui.S(180));
-            Ui.Text(g, sub, Theme.Small, Theme.TextDim, sb + Ui.S(ContentPad), Ui.S(36), w - sb - Ui.S(ContentPad) - Ui.S(180));
+            /* The header text is measured so the toolbar that floats over this band can never
+               be drawn on top of it: the title gets the width that is actually left, and the
+               subtitle is trimmed with an ellipsis instead of running under the buttons. */
+            int textX = sb + Ui.S(ContentPad);
+            int textW = Math.Max(Ui.S(120), w - textX - Ui.S(ContentPad) - _toolbarReserve);
+            Ui.Text(g, title, Theme.H1, Theme.Text, textX, Ui.S(14), textW);
+            Ui.Text(g, sub, Theme.Small, Theme.TextDim, textX, Ui.S(42), textW);
 
-            using (var p = new Pen(Theme.Line))
-                g.DrawLine(p, sb, headerH, w, headerH);
+            using (var p = new Pen(Theme.Line, Ui.Hair))
+                g.DrawLine(p, sb, headerH - 0.5f, w, headerH - 0.5f);
         }
+
+        /// <summary>
+        /// Width the page header has to leave for the toolbar (and the caption buttons above
+        /// it), kept up to date by the layout so the paint pass and the layout agree.
+        /// </summary>
+        private int _toolbarReserve = 320;
 
         private int ShownCount()
         {
             int n = 0;
             foreach (var c in _cards.Values) if (c.Visible) n++;
             return n;
+        }
+
+        /// <summary>
+        /// Height the rail needs for ten destinations in two captioned groups, at the given row
+        /// height and gap. Used to pick the density that fits the window instead of discovering
+        /// it after the rows have been placed.
+        /// </summary>
+        private static int RailHeight(int row, int gap)
+        {
+            int rows = 10;
+            int captions = 2;
+            return rows * row + rows * gap + captions * (Theme.Row + Ui.S(4)) + Ui.S(8);
         }
 
         private void LayoutAll()
@@ -2418,58 +2505,109 @@ namespace JoeBrowser
             int sb = Ui.S(SidebarW);
             int headerH = Ui.S(HeaderH);
 
-            // navbar rows, grouped the way a workspace actually reads: day-to-day work first,
-            // configuration second.
-            int navX = Ui.S(10), navW = sb - Ui.S(20);
-            /* The theme switch belongs with the app chrome, not with navigation: at the top of
-               the rail it competed with the primary destinations for attention. */
-            _themeSwitch.SetBounds(navX, h - Ui.S(54), navW, Ui.S(38));
-            int navY = Ui.S(130), navStep = Ui.S(44);
-            _navGroupWorkspace.SetBounds(navX + Ui.S(8), Ui.S(112), navW, Ui.S(16));
-            _navProfiles.SetBounds(navX, navY, navW, Ui.S(40));
-            _navHistory.SetBounds(navX, navY + navStep, navW, Ui.S(40));
-            _navAccount.SetBounds(navX, navY + navStep * 2, navW, Ui.S(40));
-            _navProxies.SetBounds(navX, navY + navStep * 3, navW, Ui.S(40));
-            _navExtensions.SetBounds(navX, navY + navStep * 4, navW, Ui.S(40));
-            _navBrowsers.SetBounds(navX, navY + navStep * 5, navW, Ui.S(40));
-            _navGroupSystem.SetBounds(navX + Ui.S(8), navY + navStep * 6 + Ui.S(2), navW, Ui.S(16));
-            _navSettings.SetBounds(navX, navY + navStep * 6 + Ui.S(22), navW, Ui.S(40));
-            _navTools.SetBounds(navX, navY + navStep * 7 + Ui.S(22), navW, Ui.S(40));
-            _navAbout.SetBounds(navX, navY + navStep * 8 + Ui.S(22), navW, Ui.S(40));
-            _navPlan.SetBounds(navX, navY + navStep * 9 + Ui.S(22), navW, Ui.S(40));
+            /* The rail is laid out from one running y instead of eleven hand computed offsets.
+               The old version spaced rows by a fixed 44 and broke the System group out with a
+               further +22, so at 150% the last row (Plan) sat under the theme switch, and the
+               rail's content height depended on arithmetic that had to be edited whenever a
+               destination was added. */
+            int navX = Ui.S(12), navW = sb - Ui.S(24);
+            int railTop = Ui.S(HeaderH + Ui.S(34)) + Ui.S(18);
+            _themeSwitch.SetBounds(navX, h - Ui.S(58), navW, Ui.S(40));
+
+            /* The rail packs itself into whatever height the window has. It is placed from one
+               running y, and it tries progressively tighter rows until the last destination fits
+               above the theme switch; only when even the tightest does not fit is the switch
+               hidden, because every destination also lives in Settings but the rail is the only
+               way to reach them at all. Before this, the gap was recomputed after the rows had
+               already been placed, so the computation changed nothing and the switch simply
+               disappeared on a short window. */
+            int navRow = Ui.S(42), navGap = Ui.S(4);
+            int room = _themeSwitch.Top - Ui.S(10) - railTop;
+            while (true)
+            {
+                int need = RailHeight(navRow, navGap);
+                if (need <= room) break;
+                if (navGap > Ui.S(1)) { navGap = Ui.S(1); continue; }
+                if (navRow > Ui.S(34)) { navRow -= Ui.S(2); continue; }
+                break;
+            }
+            int navY = railTop;
+
+            _navGroupWorkspace.SetBounds(navX + Ui.S(10), navY, navW, Theme.Row);
+            navY += Theme.Row + Ui.S(4);
+            _navProfiles.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navHistory.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navAccount.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navProxies.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navExtensions.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navBrowsers.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+
+            navY += Ui.S(8);
+            _navGroupSystem.SetBounds(navX + Ui.S(10), navY, navW, Theme.Row);
+            navY += Theme.Row + Ui.S(4);
+            _navSettings.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navTools.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navPlan.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navAbout.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+
+            /* Ten destinations and two captions. The switch gives way before a destination does. */
+            _themeSwitch.Visible = navY <= _themeSwitch.Top;
 
             // caption buttons, flush with the top right corner
-            int cw = Ui.S(46), ch = Ui.S(32);
+            int cw = Ui.S(46), ch = Ui.S(34);
             _closeBtn.SetBounds(w - cw, 0, cw, ch);
             _maxBtn.SetBounds(w - cw * 2, 0, cw, ch);
             _minBtn.SetBounds(w - cw * 3, 0, cw, ch);
 
-            // toolbar sits left of the caption area so nothing overlaps
-            int toolbarRight = w - cw * 3 - Ui.S(14);
-            int newW = Math.Min(Ui.S(150), _newBtn.PreferredWidth(Ui.S(132)));
-            _newBtn.SetBounds(toolbarRight - newW, Ui.S(17), newW, Ui.S(33));
-            /* The toolbar gives way rather than overlapping. The old minimum of 150 px for the
-               search box was applied even when the space left was smaller, so on a narrow window
-               the box was drawn over the sort button and the sort button was pushed off the left
-               edge of the window. Whatever cannot fit is hidden, and it comes back on resize. */
-            const int minSearch = 120;
-            int sortW = _sortBtn.PreferredWidth(Ui.S(110));
-            int room = _newBtn.Left - Ui.S(16) - (sb + Ui.S(12));
-            bool showSort = room - sortW - Ui.S(8) >= minSearch;
-            bool showSearch = room - (showSort ? sortW + Ui.S(8) : 0) - Ui.S(8) >= minSearch;
-            _sortBtn.Visible = showSort && _page == 0;
-            _search.Visible = showSearch && _page == 0;
-            if (showSearch)
-            {
-                int searchW = Math.Min(Ui.S(250),
-                    room - (showSort ? sortW + Ui.S(8) : 0) - Ui.S(8));
-                _search.SetBounds(_newBtn.Left - Ui.S(8) - searchW, Ui.S(17), searchW, Ui.S(33));
-            }
+            /* One toolbar row, laid out from the right edge inwards, and every control on it is
+               placed before anything is shown: the row is measured, whatever does not fit is
+               hidden, and only then are the bounds set. That is what stops a button being drawn
+               under another at a narrow width, which is the single most reported fault. */
+            int toolbarRight = w - cw * 3 - Ui.S(16);
+            int toolbarY = (headerH - Ui.S(34)) / 2 - Ui.S(4);
+            int newW = Math.Min(Ui.S(148), Math.Max(Ui.S(96), _newBtn.PreferredWidth(Ui.S(124))));
+            bool profilesPage = _page == 0;
+            _newBtn.Visible = profilesPage;
+            _sortBtn.Visible = profilesPage;
+            _search.Visible = profilesPage;
+            _saveSettings.Visible = _page == 4;
+
+            int cursor = toolbarRight;
+            if (profilesPage) cursor -= newW + Ui.S(10);
+            int sortW = _sortBtn.PreferredWidth(Ui.S(108));
+            int searchMin = Ui.S(150);
+            int leftEdge = sb + Ui.S(ContentPad);
+            bool showSort = profilesPage && cursor - Ui.S(8) - sortW >= leftEdge + searchMin + Ui.S(10);
+            if (showSort) cursor -= sortW + Ui.S(8);
+            bool showSearch = profilesPage && cursor - Ui.S(8) >= leftEdge + searchMin;
+            int searchW = showSearch ? Math.Min(Ui.S(280), cursor - Ui.S(8) - leftEdge) : 0;
+            if (showSearch) cursor -= searchW + Ui.S(8);
+
+            _sortBtn.Visible = showSort;
+            _search.Visible = showSearch;
+            if (profilesPage) _newBtn.SetBounds(toolbarRight - newW, toolbarY, newW, Ui.S(34));
             if (showSort)
-                _sortBtn.SetBounds((showSearch ? _search.Left : _newBtn.Left) - Ui.S(8) - sortW,
-                    Ui.S(17), sortW, Ui.S(33));
-            int saveW = Math.Min(Ui.S(160), _saveSettings.PreferredWidth(Ui.S(140)));
-            _saveSettings.SetBounds(toolbarRight - saveW, Ui.S(17), saveW, Ui.S(33));
+                _sortBtn.SetBounds(_newBtn.Left - Ui.S(8) - sortW, toolbarY, sortW, Ui.S(34));
+            if (showSearch)
+                _search.SetBounds(cursor, toolbarY, searchW, Ui.S(34));
+
+            /* What the toolbar occupies on the right, so the page title above it is drawn into
+               the space that is left instead of under the buttons. */
+            /* The title sits on the row above the buttons, so what it has to clear is the
+               narrowest thing on the toolbar - not the whole row. Using the full width of the
+               row reserved half a window for a title that had room, which is the wasted space
+               the old header showed. */
+            int searchLeft = profilesPage
+                ? (showSearch ? _search.Left : showSort ? _sortBtn.Left : _newBtn.Left)
+                : toolbarRight;
+            _toolbarReserve = Math.Max(Ui.S(180), toolbarRight - searchLeft + Ui.S(24));
+
+            if (_page == 4)
+            {
+                int saveW = Math.Min(Ui.S(170), _saveSettings.PreferredWidth(Ui.S(140)));
+                _saveSettings.SetBounds(toolbarRight - saveW, toolbarY, saveW, Ui.S(34));
+                _toolbarReserve = Math.Max(Ui.S(200), saveW + Ui.S(40));
+            }
 
             int contentX = sb;
             int contentW = Math.Max(Ui.S(200), w - sb);
@@ -2492,18 +2630,23 @@ namespace JoeBrowser
             if (emptyW < Ui.S(40)) emptyW = Ui.S(160);
             int extraW = searching ? _clearFilter.PreferredWidth(Ui.S(140)) + Ui.S(10) : 0;
             int startX = (_emptyPanel.Width - (emptyW + extraW)) / 2;
-            int btnY = _emptyPanel.Height / 2 + Ui.S(52);
+            /* The button sits where the empty state's own paint put it. The old fixed
+               half-height-plus-52 offset was computed for a two line block, so at a wide scale
+               the button was drawn over the last line of the explanation. */
+            _emptyPanel.Invalidate();
+            if (_emptyButtonTop < 0) _emptyButtonTop = _emptyPanel.Height / 2 + Ui.S(40);
+            int btnY = Math.Min(_emptyButtonTop, Math.Max(Ui.S(8), _emptyPanel.Height - Ui.S(34) - Ui.S(16)));
             if (searching)
             {
                 _clearFilter.Kind = BtnKind.Primary;
-                _clearFilter.SetBounds(startX, btnY, extraW - Ui.S(10), Ui.S(33));
+                _clearFilter.SetBounds(startX, btnY, extraW - Ui.S(10), Ui.S(34));
                 _clearFilter.Visible = true;
-                _emptyBtn.SetBounds(startX + extraW, btnY, emptyW, Ui.S(33));
+                _emptyBtn.SetBounds(startX + extraW, btnY, emptyW, Ui.S(34));
             }
             else
             {
                 _clearFilter.Visible = false;
-                _emptyBtn.SetBounds(startX, btnY, emptyW, Ui.S(33));
+                _emptyBtn.SetBounds(startX, btnY, emptyW, Ui.S(34));
             }
             _emptyBtn.Invalidate();
 
@@ -2578,10 +2721,12 @@ namespace JoeBrowser
             int hostW = Math.Max(Ui.S(320), _settingsHost.Width - Ui.S(10));
             // Windows UI pages run edge to edge; a centered column only wasted the viewport.
             int colW = Math.Max(Ui.S(320), hostW - Ui.S(8));
-            int headH = Ui.S(44), rowH = Ui.S(54), pad = Ui.S(18), gap = Ui.S(16);
+            /* Row heights follow the type scale: a title and its value need a line each plus
+               their padding, and the old 54 was 6 px short of that once the fonts were fixed. */
+            int headH = Ui.S(48), rowH = Ui.S(60), pad = Ui.S(20), gap = Ui.S(16);
             /* One row runs to two lines of text - the browser-build summary - and a wrapped label
                in a 54px row would be clipped by the divider under it. */
-            int tallRowH = Ui.S(68);
+            int tallRowH = Ui.S(76);
 
             _settingsColumn.SetBounds(0, 0, Math.Max(colW, hostW), _settingsColumn.Height);
 
@@ -2590,10 +2735,10 @@ namespace JoeBrowser
             {
                 int rowsH = 0;
                 foreach (var r in card.Rows) rowsH += RowHeight(r, rowH, tallRowH);
-                int h = headH + rowsH + Ui.S(10);
+                int h = headH + rowsH + Ui.S(6);
                 card.Panel.SetBounds(0, y, colW, h);
                 var lbl = card.Panel.Tag as JBLabel;
-                if (lbl != null) lbl.SetBounds(pad, Ui.S(14), colW - pad * 2, Ui.S(18));
+                if (lbl != null) lbl.SetBounds(pad, Ui.S(15), colW - pad * 2, Theme.LineHeight(Theme.H2));
 
                 var divs = new float[Math.Max(0, card.Rows.Count - 1)];
                 int rowY = headH;
@@ -2705,7 +2850,7 @@ namespace JoeBrowser
                its left edge past that edge and leave it hanging outside the card. */
             int colW = Math.Max(Ui.S(300), _aboutColumn.Width);
             int tw = Math.Min(Math.Max(Ui.S(96), colW - Ui.S(60)), _aboutTelegram.PreferredWidth(Ui.S(190)));
-            _aboutTelegram.SetBounds(Math.Max(Ui.S(8), colW - tw - Ui.S(20)), Ui.S(47), tw, Ui.S(33));
+            _aboutTelegram.SetBounds(Math.Max(Ui.S(8), colW - tw - Ui.S(20)), Ui.S(47), tw, Theme.Field);
             _aboutColumn.Invalidate();
         }
 
@@ -2837,6 +2982,9 @@ namespace JoeBrowser
         private void SetPageCore(int page)
         {
             _page = page;
+            /* Only the plan page has a clock. Leaving it stops the timer here rather than on its
+               next tick, so the message loop goes quiet the moment the page does. */
+            if (page != 7 && _planTimer != null) _planTimer.Stop();
             SuspendLayout();
             /* Pages 0-7 are the long-standing destinations; 8 and 9 are History and Account.
                Selected state is per button, so the subscript mismatch between "page number" and
@@ -2953,38 +3101,41 @@ namespace JoeBrowser
 
             foreach (var c in _cards.Values) c.Dispose();
             _cards.Clear();
-            _grid.Controls.Clear();
+            _grid.Batch(delegate { _grid.Controls.Clear(); });
 
             /* Worked out once per rebuild rather than per card: the ordering that decides which
                profiles a lapsed plan still covers is a sort of the whole list. */
             var locked = Entitlements.LockedProfiles(_profiles);
-            foreach (var p in _profiles)
+            _grid.Batch(delegate
             {
-                string id = p.Id;
-                var card = new ProfileCard
+                foreach (var p in _profiles)
                 {
-                    Model = p,
-                    Running = _sessions.ContainsKey(id),
-                    Launching = _launching.Contains(id),
-                    Locked = locked.Contains(id),
-                    AccessibleName = p.Name,
-                    AccessibleRole = AccessibleRole.PushButton
-                };
-                card.OpenRequested += delegate { OpenProfile(id); };
-                card.FocusRequested += delegate { FocusSession(id); };
-                card.CloseRequested += delegate { CloseSession(id); };
-                card.EditRequested += delegate { EditProfile(id); };
-                card.ProxyRequested += delegate { EditProfile(id, 3); };
-                card.RenameRequested += delegate { RenameProfile(id); };
-                card.ClearCacheRequested += delegate { ClearProfileData(id); };
-                card.LeakTestRequested += delegate { RunLeakTest(id); };
-                card.HistoryRequested += delegate { ShowProfileHistory(id); };
-                card.DuplicateRequested += delegate { DuplicateProfile(id); };
-                card.DeleteRequested += delegate { DeleteProfile(id); };
-                card.PickToggled += delegate { TogglePick(id, (ModifierKeys & Keys.Shift) != 0); };
-                _grid.Controls.Add(card);
-                _cards[id] = card;
-            }
+                    string id = p.Id;
+                    var card = new ProfileCard
+                    {
+                        Model = p,
+                        Running = _sessions.ContainsKey(id),
+                        Launching = _launching.Contains(id),
+                        Locked = locked.Contains(id),
+                        AccessibleName = p.Name,
+                        AccessibleRole = AccessibleRole.PushButton
+                    };
+                    card.OpenRequested += delegate { OpenProfile(id); };
+                    card.FocusRequested += delegate { FocusSession(id); };
+                    card.CloseRequested += delegate { CloseSession(id); };
+                    card.EditRequested += delegate { EditProfile(id); };
+                    card.ProxyRequested += delegate { EditProfile(id, 3); };
+                    card.RenameRequested += delegate { RenameProfile(id); };
+                    card.ClearCacheRequested += delegate { ClearProfileData(id); };
+                    card.LeakTestRequested += delegate { RunLeakTest(id); };
+                    card.HistoryRequested += delegate { ShowProfileHistory(id); };
+                    card.DuplicateRequested += delegate { DuplicateProfile(id); };
+                    card.DeleteRequested += delegate { DeleteProfile(id); };
+                    card.PickToggled += delegate { TogglePick(id, (ModifierKeys & Keys.Shift) != 0); };
+                    _grid.Controls.Add(card);
+                    _cards[id] = card;
+                }
+            });
 
             ApplySignatures();
 
@@ -3059,22 +3210,35 @@ namespace JoeBrowser
             if (_pickAnchor != null && !_cards.ContainsKey(_pickAnchor)) _pickAnchor = null;
         }
 
+        /// <summary>How many cards were visible at the last grid layout.</summary>
+        private int _visibleCards = -1;
+
         private void ApplyFilter()
         {
-            string q = _filter.ToLowerInvariant();
+            /* Lowercased once per card, not five times per card. This runs on every keystroke in
+               the search box, so on a workspace of sixty profiles it was three hundred string
+               allocations per character typed. */
+            string q = (_filter ?? "").ToLowerInvariant();
             int shown = 0;
+            int visible = 0;
             foreach (var kv in _cards)
             {
                 var p = kv.Value.Model;
-                bool hit = q.Length == 0
-                    || (p.Name ?? "").ToLowerInvariant().Contains(q)
-                    || (p.Fp != null && (p.Fp.Os ?? "").ToLowerInvariant().Contains(q))
-                    || (p.Fp != null && (p.Fp.Timezone ?? "").ToLowerInvariant().Contains(q))
-                    || (p.Fp != null && ((p.Fp.Language ?? "").ToLowerInvariant().Contains(q)
-                        || FingerprintFactory.LanguageName(p.Fp.Language).ToLowerInvariant().Contains(q)))
-                    || (p.Proxy != null && (p.Proxy.Host ?? "").ToLowerInvariant().Contains(q));
+                bool hit;
+                if (q.Length == 0) hit = true;
+                else
+                {
+                    string name = (p.Name ?? "").ToLowerInvariant();
+                    string os = p.Fp == null ? "" : (p.Fp.Os ?? "").ToLowerInvariant();
+                    string tz = p.Fp == null ? "" : (p.Fp.Timezone ?? "").ToLowerInvariant();
+                    string lang = p.Fp == null ? "" : (p.Fp.Language ?? "").ToLowerInvariant();
+                    string langName = p.Fp == null ? "" : FingerprintFactory.LanguageName(p.Fp.Language).ToLowerInvariant();
+                    string host = p.Proxy == null ? "" : (p.Proxy.Host ?? "").ToLowerInvariant();
+                    hit = name.Contains(q) || os.Contains(q) || tz.Contains(q)
+                        || lang.Contains(q) || langName.Contains(q) || host.Contains(q);
+                }
                 kv.Value.Visible = hit;
-                if (hit) shown++;
+                if (hit) { shown++; visible++; }
             }
             /* Only selections that are still on screen survive a filter change. A pick whose
                card has been unloaded is dropped too, rather than trusted - see PrunePicks. */
@@ -3091,8 +3255,14 @@ namespace JoeBrowser
                top of the first card whenever a filter emptied and then refilled the list. */
             if (_emptyPanel.Visible) _emptyPanel.BringToFront();
             else if (shown > 0 && _page == 0) _host.BringToFront();
-            _grid.LayoutGrid();
-            _host.SyncExtent();
+            /* The grid only has a layout to recompute when the count of visible cards changed:
+               a keystroke that hides nothing used to re-place every card on the page. */
+            if (visible != _visibleCards)
+            {
+                _visibleCards = visible;
+                _grid.LayoutGrid();
+                _host.SyncExtent();
+            }
             Restack();
             _emptyPanel.Invalidate();
             Invalidate();
@@ -3107,27 +3277,82 @@ namespace JoeBrowser
             if (_search != null && _search.Visible) { try { _search.Box.Focus(); } catch { } }
         }
 
+        /// <summary>
+        /// The first screen a new install shows. It used to be a grey badge, one line of title and
+        /// one line of explanation floating in the middle of the window - a placeholder, not a
+        /// design. It is a real empty state now: the mark, what the page is for, the three steps a
+        /// person actually takes, and the one button that starts it. Everything is measured and
+        /// centred as a block, so it stays centred on any window and any scale.
+        /// </summary>
         private void EmptyPaint(object sender, PaintEventArgs e)
         {
             var g = e.Graphics;
             Ui.Quality(g);
             bool searching = _filter.Length > 0;
             float w = _emptyPanel.Width;
-            float cy = _emptyPanel.Height / 2f;
-
-            float badge = Ui.S(64);
-            var br = new RectangleF((w - badge) / 2f, cy - Ui.S(112), badge, badge);
-            Ui.Fill(g, br, Ui.S(8), Theme.AccentOnBg);
-            float ic = Ui.S(28);
-            Icons.Draw(g, searching ? "search" : "layers",
-                new RectangleF(br.X + (badge - ic) / 2f, br.Y + (badge - ic) / 2f, ic, ic), Theme.Accent);
+            float contentW = Math.Min(Ui.S(560), Math.Max(Ui.S(240), w - Ui.S(64)));
 
             string title = searching ? L10n.T("empty.nomatch") : L10n.T("empty.title");
             string sub = searching ? L10n.T("empty.nomatch.sub") : L10n.T("empty.sub");
 
-            Ui.Text(g, title, Theme.H1, Theme.Text, 0, br.Bottom + Ui.S(16), w, "center");
-            Ui.Text(g, sub, Theme.Small, Theme.TextDim, 0, br.Bottom + Ui.S(44), w, "center", 2);
+            /* The block is laid out top down from a computed origin, so the button placed by
+               LayoutAll at cy + buttonOffset lines up with what is painted here. */
+            float badge = Ui.S(56);
+            float titleH = Ui.S(30);
+            int subLines = Math.Max(1, Ui.WrapLines(g, sub, Theme.Small, contentW).Count);
+            subLines = Math.Min(3, subLines);
+            float subH = subLines * Theme.LineHeight(Theme.Small);
+            float stepsH = searching ? 0f : Ui.S(3) * Ui.S(30) + Ui.S(2) * Ui.S(10);
+            float blockH = badge + Ui.S(20) + titleH + Ui.S(8) + subH
+                + (searching ? 0f : Ui.S(24) + stepsH) + Ui.S(28) + Ui.S(34);
+            float top = Math.Max(Ui.S(16), (_emptyPanel.Height - blockH) / 2f);
+
+            float badgeX = (w - badge) / 2f;
+            var br = new RectangleF(badgeX, top, badge, badge);
+            Ui.Fill(g, br, Ui.S(16), Theme.AccentOnBg);
+            Ui.Stroke(g, br, Ui.S(16), Theme.AccentBorder);
+            float ic = Ui.S(26);
+            Icons.Draw(g, searching ? "search" : "layers",
+                new RectangleF(br.X + (badge - ic) / 2f, br.Y + (badge - ic) / 2f, ic, ic), Theme.Accent);
+
+            float y = br.Bottom + Ui.S(20);
+            Ui.Text(g, title, Theme.H1, Theme.Text, (w - contentW) / 2f, y, contentW, "center");
+            y += titleH + Ui.S(8);
+            Ui.Text(g, sub, Theme.Small, Theme.TextDim, (w - contentW) / 2f, y, contentW, "center", subLines);
+            y += subH;
+
+            if (!searching)
+            {
+                y += Ui.S(24);
+                string[] steps =
+                {
+                    "Press New profile. A full identity is generated for you.",
+                    "Optionally attach a proxy on the new profile's Proxy tab.",
+                    "Press Open. That profile opens in its own browser window."
+                };
+                for (int i = 0; i < steps.Length; i++)
+                {
+                    var row = new RectangleF((w - contentW) / 2f, y, contentW, Ui.S(30));
+                    /* A numbered step reads as instructions; a bullet list reads as marketing.
+                       The numeral is a filled circle so it survives at any contrast setting. */
+                    float dot = Ui.S(22);
+                    var dr = new RectangleF(row.X, row.Y + (row.Height - dot) / 2f, dot, dot);
+                    Ui.Fill(g, dr, dot / 2f, Theme.Panel2);
+                    Ui.Text(g, (i + 1).ToString(), Theme.Caption, Theme.TextDim, dr.X, dr.Y + Ui.S(2), dr.Width, "center");
+                    Ui.Text(g, steps[i], Theme.Small, Theme.TextDim, dr.Right + Ui.S(12),
+                        row.Y + (row.Height - Theme.LineHeight(Theme.Small)) / 2f, contentW - dot - Ui.S(12));
+                    y += Ui.S(30) + Ui.S(10);
+                }
+                y += Ui.S(10);
+            }
+
+            /* Where the button goes, in panel coordinates, for LayoutAll to place the real
+               control on top of the paint. */
+            _emptyButtonTop = (int)Math.Round(y + Ui.S(6));
         }
+
+        /// <summary>Top edge the empty state's button is placed at, computed by its own paint.</summary>
+        private int _emptyButtonTop = -1;
 
         /// <summary>
         /// The single way a profile is born: a fresh identity that is provably unlike everything
@@ -4037,19 +4262,29 @@ namespace JoeBrowser
             int x = 0;
             int gap = Ui.S(16);
 
-            // identity card
-            var card = new RectangleF(x, Ui.S(8), colW, Ui.S(112));
-            Ui.Fill(g, card, Ui.S(8), Theme.Panel);
-            Ui.Stroke(g, card, Ui.S(8), Theme.Line, 1f);
+            /* Identity card. Three lines at 20, 52 and 76 from the top of a 112 px card were
+               arithmetic for one font size: at 150% the installation path sat on the line above
+               it and the card's own bottom edge cut through it. The card is as tall as the block
+               it carries, and the block is centred beside the mark. */
+            float markSize = Ui.S(56);
+            float dispH = Theme.LineHeight(Theme.Display);
+            float subH = Theme.LineHeight(Theme.Small);
+            float pathH = Theme.LineHeight(Theme.Caption);
+            float idH = Math.Max(markSize, dispH + Ui.S(4) + subH + Ui.S(4) + pathH) + Ui.S(32);
+            var card = new RectangleF(x, Ui.S(8), colW, idH);
+            Ui.Fill(g, card, Ui.S(10), Theme.Panel);
+            Ui.Stroke(g, card, Ui.S(10), Theme.Line);
 
-            var mark = new RectangleF(card.X + Ui.S(20), card.Y + Ui.S(28), Ui.S(56), Ui.S(56));
+            var mark = new RectangleF(card.X + Ui.S(20), card.Y + (idH - markSize) / 2f, markSize, markSize);
             Logo.Draw(g, mark);
 
             float tx = mark.Right + Ui.S(18);
-            float textW = colW - (tx - card.X) - Ui.S(220);
-            Ui.Text(g, "Joe Browser", Theme.Display, Theme.Text, tx, card.Y + Ui.S(20), textW);
-            Ui.Text(g, L10n.T("sub.about"), Theme.Small, Theme.TextDim, tx, card.Y + Ui.S(52), textW);
-            Ui.Text(g, AppPaths.Root, Theme.Caption, Theme.TextFaint, tx, card.Y + Ui.S(76), textW);
+            float textW = Math.Max(Ui.S(120), colW - (tx - card.X) - Ui.S(28));
+            float idBlockH = dispH + Ui.S(4) + subH + Ui.S(4) + pathH;
+            float ty = card.Y + (idH - idBlockH) / 2f;
+            Ui.Text(g, "Joe Browser", Theme.Display, Theme.Text, tx, ty, textW);
+            Ui.Text(g, L10n.T("sub.about"), Theme.Small, Theme.TextDim, tx, ty + dispH + Ui.S(4), textW);
+            Ui.Text(g, AppPaths.Root, Theme.Caption, Theme.TextFaint, tx, ty + dispH + Ui.S(4) + subH + Ui.S(4), textW);
 
             // capability tiles
             float sectY = card.Bottom + Ui.S(26);
@@ -4070,12 +4305,16 @@ namespace JoeBrowser
             float tileY = sectY + Ui.S(26);
             int cols = colW >= Ui.S(1420) ? 4 : colW >= Ui.S(1060) ? 3 : colW >= Ui.S(680) ? 2 : 1;
             float tileW = (colW - gap * (cols - 1)) / cols;
-            float tileH = Ui.S(104);
+            /* A chip row and two description lines, with the same inset above and below. The 104
+               constant clipped the second description line at a large scale. */
+            float tileH = Math.Max(Ui.S(104),
+                Math.Max(Ui.S(28), Theme.LineHeight(Theme.H3)) + Ui.S(8) +
+                Theme.LineHeight(Theme.Caption) * 2 + Ui.S(24));
             for (int i = 0; i < features.Length; i++)
             {
                 var r = new RectangleF(x + (i % cols) * (tileW + gap), tileY + (i / cols) * (tileH + gap), tileW, tileH);
-                Ui.Fill(g, r, Ui.S(8), Theme.Card);
-                Ui.Stroke(g, r, Ui.S(8), Theme.Line, 1f);
+                Ui.Fill(g, r, Ui.S(10), Theme.Card);
+                Ui.Stroke(g, r, Ui.S(10), Theme.Line);
 
                 float chip = Ui.S(28);
                 /* The block is centred in the tile: pinning the description to a fixed offset left
@@ -4106,10 +4345,10 @@ namespace JoeBrowser
             var shortcuts = ShortcutDisplay();
             int scCols = colW >= Ui.S(900) ? 2 : 1;
             int perCol = (int)Math.Ceiling(shortcuts.Count / (double)scCols);
-            float rowH = Ui.S(38);
+            float rowH = Math.Max(Ui.S(38), Theme.LineHeight(Theme.Caption) + Ui.S(14));
             var sc = new RectangleF(x, scSect + Ui.S(26), colW, perCol * rowH + Ui.S(14));
-            Ui.Fill(g, sc, Ui.S(8), Theme.Panel);
-            Ui.Stroke(g, sc, Ui.S(8), Theme.Line, 1f);
+            Ui.Fill(g, sc, Ui.S(10), Theme.Panel);
+            Ui.Stroke(g, sc, Ui.S(10), Theme.Line);
 
             float halfW = colW / scCols;
             for (int i = 0; i < shortcuts.Count; i++)
@@ -4134,7 +4373,7 @@ namespace JoeBrowser
                     }
 
                 int keyW = (int)Math.Ceiling(Ui.Measure(g, shortcuts[i][0], Theme.Caption).Width) + Ui.S(18);
-                var chipR = new RectangleF(kx, cy, keyW, Ui.S(24));
+                var chipR = new RectangleF(kx, cy, keyW, Math.Min(Ui.S(24), rowH - Ui.S(8)));
                 Ui.Fill(g, chipR, Ui.S(4), Theme.Card);
                 Ui.Stroke(g, chipR, Ui.S(4), Theme.Line, 1f);
                 Ui.Text(g, shortcuts[i][0], Theme.Caption, Theme.Text, chipR.X, chipR.Y, chipR.Width, "center");
@@ -4154,10 +4393,10 @@ namespace JoeBrowser
                 new[] { L10n.T("about.w2"), (_proxies == null ? 0 : _proxies.Count).ToString() },
                 new[] { L10n.T("about.w3"), (_extensions == null ? 0 : _extensions.Count).ToString() }
             };
-            float wsRowH = Ui.S(44);
+            float wsRowH = Math.Max(Ui.S(44), Theme.LineHeight(Theme.Body) + Ui.S(20));
             var ws = new RectangleF(x, wsSect + Ui.S(26), colW, stats.Length * wsRowH + Ui.S(12));
-            Ui.Fill(g, ws, Ui.S(8), Theme.Panel);
-            Ui.Stroke(g, ws, Ui.S(8), Theme.Line, 1f);
+            Ui.Fill(g, ws, Ui.S(10), Theme.Panel);
+            Ui.Stroke(g, ws, Ui.S(10), Theme.Line);
             for (int i = 0; i < stats.Length; i++)
             {
                 float ry = ws.Y + Ui.S(6) + i * wsRowH;

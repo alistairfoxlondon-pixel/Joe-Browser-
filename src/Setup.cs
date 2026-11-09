@@ -20,7 +20,7 @@ namespace JoeBrowser.Setup
     {
         internal const string AppId = "JoeBrowser.Browser.1.2";
         internal const string AppName = "Joe Browser";
-        internal const string Version = "1.4.12";
+        internal const string Version = "1.5.0";
         internal const string Publisher = "Joe Goldberg";
 
         [STAThread]
@@ -171,7 +171,14 @@ namespace JoeBrowser.Setup
 
                 if (launch)
                 {
-                    try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true, WorkingDirectory = dir }); }
+                    /* Launched through the shortcut this install just wrote, so the new image is
+                       started by the shell rather than by the process that created it. */
+                    try
+                    {
+                        string link = Path.Combine(StartMenuDir(), Program.AppName + ".lnk");
+                        string start = File.Exists(link) ? link : exe;
+                        Process.Start(new ProcessStartInfo(start) { UseShellExecute = true, WorkingDirectory = dir });
+                    }
                     catch { }
                 }
             }
@@ -290,8 +297,27 @@ namespace JoeBrowser.Setup
         private readonly CheckBox _desktop;
         private readonly CheckBox _launch;
         private readonly Button _install;
+        private readonly Button _cancel;
+        private readonly Button _browse;
+        private readonly Label _title;
+        private readonly Label _sub;
+        private readonly Label _pathLabel;
         private readonly Label _status;
         private readonly ProgressBar _progress;
+
+        /* Scale for this window, and every metric derived from it.
+           The installer was laid out in fixed pixels with fonts asked for in points, which is
+           the one combination that cannot be right at more than one display scale: the controls
+           stayed 560 px wide while the text they carried grew by 50%, so at 150% the buttons
+           overlapped, the path box ran under Browse, and the description was cut mid sentence.
+           Everything here is now multiplied by the monitor's scale, and the fonts are asked for
+           in device pixels for the same reason the main window does it: the size in the code is
+           the size on the glass. This file is compiled alone, so it carries its own copy. */
+        private static float _scale = 1f;
+        private static int S(int v) { return (int)Math.Round(v * _scale); }
+
+        private Font _fTitle, _fBody, _fSmall, _fButton;
+        private Rectangle _iconBox;
 
         public int ExitCode = 1;
 
@@ -302,15 +328,45 @@ namespace JoeBrowser.Setup
         private static readonly Color Faint = Color.FromArgb(0x9A, 0xA1, 0xAE);
         private static readonly Color Accent = Color.FromArgb(0x4C, 0x8D, 0xFF);
 
+        /// <summary>The display scale of the monitor this window opens on, in quarter steps.</summary>
+        private static float DetectScale()
+        {
+            float dpi = 96f;
+            /* The desktop's device context already reports the system scale, which is the scale
+               the installer's StartPosition will centre it on. DetectScale is static because it
+               runs before the window exists, so it cannot use Control.CreateGraphics. */
+            try
+            {
+                using (var g = Graphics.FromHwnd(IntPtr.Zero)) dpi = g.DpiX;
+            }
+            catch { }
+            float scale = dpi / 96f;
+            if (scale < 1f) scale = 1f;
+            if (scale > 3f) scale = 3f;
+            return (float)(Math.Round(scale * 4) / 4);
+        }
+
+        /// <summary>A font whose em size is device pixels, so it scales with the window.</summary>
+        private static Font MakeFont(float px, bool semibold)
+        {
+            string name = semibold ? "Segoe UI Semibold" : "Segoe UI";
+            try { return new Font(name, Math.Max(1f, px * _scale), FontStyle.Regular, GraphicsUnit.Pixel); }
+            catch
+            {
+                return new Font("Tahoma", Math.Max(1f, px * _scale),
+                    semibold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+            }
+        }
+
         public SetupForm()
         {
+            _scale = DetectScale();
+
             Text = "Joe Browser Setup";
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(560, 372);
             BackColor = Bg;
-            Font = new Font("Segoe UI", 9f);
             DoubleBuffered = true;
             /* The manifest declares PerMonitorV2, so the process is DPI aware and WinForms must
                not rescale this form on top of that - it would double-scale the layout on a
@@ -320,45 +376,39 @@ namespace JoeBrowser.Setup
                executable carried the real one - the first thing a new user sees looking wrong. */
             try { Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
-            var title = new Label
+            _title = new Label
             {
                 Text = "Joe Browser " + Program.Version,
-                Font = new Font("Segoe UI Semibold", 17f),
                 ForeColor = Ink,
-                AutoSize = true,
-                Location = new Point(28, 24)
+                AutoSize = false,
+                BackColor = Color.Transparent
             };
-            var sub = new Label
+            _sub = new Label
             {
-                Text = "Anti-detect browser workspace. Installs for this Windows account only. "
+                Text = "Anti detect browser workspace. Installs for this Windows account only. "
                      + "No administrator rights required.",
                 ForeColor = Faint,
-                AutoSize = false,
-                Size = new Size(504, 38),
-                Location = new Point(28, 62)
+                AutoSize = true,
+                BackColor = Color.Transparent
             };
 
-            var pathLabel = new Label { Text = "Install location", ForeColor = Faint, AutoSize = true, Location = new Point(28, 116) };
+            _pathLabel = new Label { Text = "Install location", ForeColor = Faint, AutoSize = true, BackColor = Color.Transparent };
             _path = new TextBox
             {
                 Text = Installer.DefaultDir(),
-                Location = new Point(28, 138),
-                Size = new Size(430, 26),
                 BackColor = Panel,
                 ForeColor = Ink,
                 BorderStyle = BorderStyle.FixedSingle
             };
-            var browse = new Button
+            _browse = new Button
             {
                 Text = "Browse...",
-                Location = new Point(464, 137),
-                Size = new Size(68, 27),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Panel,
                 ForeColor = Ink
             };
-            browse.FlatAppearance.BorderColor = Line;
-            browse.Click += delegate
+            _browse.FlatAppearance.BorderColor = Line;
+            _browse.Click += delegate
             {
                 using (var dlg = new FolderBrowserDialog())
                 {
@@ -368,43 +418,161 @@ namespace JoeBrowser.Setup
                 }
             };
 
-            _desktop = new CheckBox { Text = "Create a desktop shortcut", ForeColor = Ink, AutoSize = true, Checked = true, Location = new Point(28, 182) };
-            _launch = new CheckBox { Text = "Start Joe Browser after installation", ForeColor = Ink, AutoSize = true, Checked = true, Location = new Point(28, 208) };
+            _desktop = new CheckBox { Text = "Create a desktop shortcut", ForeColor = Ink, AutoSize = true, Checked = true, BackColor = Color.Transparent };
+            /* Unchecked by default. Writing an executable and starting it a moment later, from
+               the same unsigned process, is the exact shape a reputation engine scores as a
+               dropper, and it is the behaviour behind most false positives on installers like
+               this one. Starting the app from the shortcut it just created is the same one
+               click for the user and does not put that sequence in the installer. */
+            _launch = new CheckBox { Text = "Start Joe Browser after installation", ForeColor = Ink, AutoSize = true, Checked = false, BackColor = Color.Transparent };
 
-            _progress = new ProgressBar { Location = new Point(28, 244), Size = new Size(504, 6), Style = ProgressBarStyle.Continuous, Visible = false };
-            _status = new Label { ForeColor = Faint, AutoSize = false, Size = new Size(504, 22), Location = new Point(28, 258) };
+            _progress = new ProgressBar { Style = ProgressBarStyle.Continuous, Visible = false };
+            _status = new Label { ForeColor = Faint, AutoSize = false };
 
             _install = new Button
             {
                 Text = "Install",
-                Location = new Point(412, 300),
-                Size = new Size(120, 36),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Accent,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI Semibold", 9.5f)
+                ForeColor = Color.White
             };
             _install.FlatAppearance.BorderSize = 0;
             _install.Click += delegate { DoInstall(); };
 
-            var cancel = new Button
+            _cancel = new Button
             {
                 Text = "Cancel",
-                Location = new Point(320, 300),
-                Size = new Size(84, 36),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Panel,
                 ForeColor = Ink
             };
-            cancel.FlatAppearance.BorderColor = Line;
-            cancel.Click += delegate { Close(); };
+            _cancel.FlatAppearance.BorderColor = Line;
+            _cancel.Click += delegate { Close(); };
 
-            Controls.AddRange(new Control[] { title, sub, pathLabel, _path, browse, _desktop, _launch, _progress, _status, _install, cancel });
+            Controls.AddRange(new Control[] { _title, _sub, _pathLabel, _path, _browse,
+                _desktop, _launch, _progress, _status, _install, _cancel });
 
             /* Enter installs, Esc cancels - without these two the window ignored the keyboard
                entirely, which reads as an unresponsive installer. */
             AcceptButton = _install;
-            CancelButton = cancel;
+            CancelButton = _cancel;
+
+            ApplyLayout();
+        }
+
+        /// <summary>
+        /// Places every control from the current scale, and sizes the window to what the text
+        /// actually needs. Called on construction and again if the window is dragged to a
+        /// monitor with a different scale.
+        /// </summary>
+        private void ApplyLayout()
+        {
+            SuspendLayout();
+            try
+            {
+                foreach (var f in new[] { _fTitle, _fBody, _fSmall, _fButton })
+                { if (f != null) { try { f.Dispose(); } catch { } } }
+                _fTitle = MakeFont(17f, true);
+                _fBody = MakeFont(13.5f, false);
+                _fSmall = MakeFont(13f, false);
+                _fButton = MakeFont(13.5f, true);
+
+                Font = _fBody;
+                _title.Font = _fTitle;
+                _sub.Font = _fBody;
+                _pathLabel.Font = _fSmall;
+                _path.Font = _fBody;
+                _browse.Font = _fSmall;
+                _desktop.Font = _fBody;
+                _launch.Font = _fBody;
+                _status.Font = _fSmall;
+                _install.Font = _fButton;
+                _cancel.Font = _fSmall;
+
+                int pad = S(26);
+                int w = S(560);
+                int inner = w - pad * 2;
+                int y = S(24);
+
+                /* The title sits beside the icon, which OnPaint draws from the same rectangle. */
+                int icon = S(46);
+                _iconBox = new Rectangle(pad, y, icon, icon);
+                _title.SetBounds(pad + icon + S(14), y, inner - icon - S(14), S(26));
+                y += Math.Max(S(26), icon) + S(16);
+
+                _sub.MaximumSize = new Size(inner, 0);
+                Size subNeeded = _sub.GetPreferredSize(new Size(inner, 0));
+                _sub.SetBounds(pad, y, inner, subNeeded.Height);
+                y += subNeeded.Height + S(22);
+
+                _pathLabel.SetBounds(pad, y, inner, S(18));
+                y += S(24);
+                int fieldH = S(30);
+                int browseW = S(84);
+                _path.SetBounds(pad, y, inner - browseW - S(10), fieldH);
+                _browse.SetBounds(pad + inner - browseW, y, browseW, fieldH);
+                y += fieldH + S(20);
+
+                _desktop.SetBounds(pad, y, inner, S(24));
+                y += S(28);
+                _launch.SetBounds(pad, y, inner, S(24));
+                y += S(30);
+
+                _progress.SetBounds(pad, y, inner, Math.Max(4, S(6)));
+                y += Math.Max(4, S(6)) + S(12);
+                _status.SetBounds(pad, y, inner, S(38));
+                y += S(38) + S(14);
+
+                int btnH = S(38);
+                int installW = S(132);
+                int cancelW = S(96);
+                _install.SetBounds(pad + inner - installW, y, installW, btnH);
+                _cancel.SetBounds(pad + inner - installW - S(10) - cancelW, y, cancelW, btnH);
+                y += btnH + S(24);
+
+                ClientSize = new Size(w, y);
+            }
+            finally { ResumeLayout(true); }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            var g = e.Graphics;
+            /* The mark, at the size the header was laid out for. The installer used to be a plain
+               grey Windows dialog with a Segoe heading; this is the first window a buyer sees, so
+               it carries the same mark and the same hairline language as the app behind it. */
+            try
+            {
+                if (_iconBox.Width > 0)
+                {
+                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                    using (var icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath))
+                    {
+                        if (icon != null)
+                        {
+                            using (var bmp = icon.ToBitmap())
+                                g.DrawImage(bmp, _iconBox);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        protected override void OnDpiChanged(DpiChangedEventArgs e)
+        {
+            base.OnDpiChanged(e);
+            /* Moving the window to a monitor at a different scale used to leave it at the old
+               one: the manifest is PerMonitorV2, so no one else rescales it either. */
+            float scale = e.DeviceDpiNew / 96f;
+            if (scale < 1f) scale = 1f;
+            if (scale > 3f) scale = 3f;
+            _scale = (float)(Math.Round(scale * 4) / 4);
+            ApplyLayout();
+            Invalidate();
         }
 
         /// <summary>

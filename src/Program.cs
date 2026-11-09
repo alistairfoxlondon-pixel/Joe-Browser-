@@ -188,6 +188,42 @@ namespace JoeBrowser
                     if (ExtensionCatalog.StoreUrlForId("") != "")
                         sb.Append(" [an empty extension id produced a store link]");
 
+                    /* Every row in the interface is sized from the fonts, and the claim this
+                       round rests on is that a row is never shorter than the text it carries.
+                       That is arithmetic, so it can be asserted here at every scale rather than
+                       argued about: for each scale in use, a row built from the type scale must
+                       be at least one line taller than its tallest line, and a two line block
+                       must fit the pair. This is the check that would have caught the fixed
+                       offsets that put a caption under a button. */
+                    float wasScale = Ui.Scale;
+                    int prevBody = 0;
+                    foreach (float scale in new[] { 1f, 1.25f, 1.5f, 2f })
+                    {
+                        /* The font cache is keyed by size and style, not by scale, so the
+                           previous scale's faces have to go before this one is measured. */
+                        Ui.Scale = scale;
+                        Theme.ClearFontCache();
+
+                        int body = Theme.LineHeight(Theme.Body);
+                        int cap = Theme.LineHeight(Theme.Caption);
+                        int h3 = Theme.LineHeight(Theme.H3);
+                        if (Theme.Row < cap + Ui.S(2)) sb.Append(" [row is shorter than a caption at " + scale + "]");
+                        if (Theme.Field < body + Ui.S(8)) sb.Append(" [field is shorter than a line of text at " + scale + "]");
+                        if (EngineRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [browser row cannot hold its two lines at " + scale + "]");
+                        if (KernelRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [kernel row cannot hold its two lines at " + scale + "]");
+                        if (ExtensionRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [extension row cannot hold its two lines at " + scale + "]");
+                        if (PromoCard.CardH < Theme.LineHeight(Theme.H2) + Theme.LineHeight(Theme.Small) + cap)
+                            sb.Append(" [promo card cannot hold its three lines at " + scale + "]");
+                        /* A measured row is only right if the text it is measured against grows
+                           with the scale. This is the assertion that fails if anyone ever asks
+                           for a type size in points again. */
+                        if (prevBody > 0 && body <= prevBody)
+                            sb.Append(" [line height did not grow at " + scale + "]");
+                        prevBody = body;
+                    }
+                    Ui.Scale = wasScale;
+                    Theme.ClearFontCache();
+
                     var saved = new Profile { Name = "self test save" };
                     store.Save(saved);
                     var back = store.LoadAll();
@@ -269,6 +305,19 @@ namespace JoeBrowser
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            /* Look for the .pdb beside the executable and delete nothing: a marker Windows
+               Defender's reputation engine reads for "a program that ships a separate debug
+               database" is not the problem. What the engine does react to is a single unsigned
+               binary that decompresses another executable, so the installer's own README and the
+               release notes say plainly which of the two to run. Nothing in this block changes
+               behaviour; it records the build shape in the log so a support report carries it. */
+            try
+            {
+                Log.Info("Build " + Application.ProductVersion + " on .NET " +
+                    Environment.Version + ", " + (Environment.Is64BitProcess ? "64" : "32") + " bit process");
+            }
+            catch { }
+
             /* Registered before the first window exists. The install gate used to run with no
                handler at all, so a failure while installing showed the raw .NET crash dialog -
                the "unexpected error" users reported when the very first thing they did was
@@ -297,6 +346,12 @@ namespace JoeBrowser
                     Ui.Scale = Math.Max(1f, g.DpiX / 96f);
             }
             catch { Ui.Scale = 1f; }
+            /* A display between 100% and the next whole step rounds its layout to the nearest
+               quarter, because a half scaled 15 point font and a half scaled row height disagree
+               about where a baseline sits. The quarter is what the eye is comparing when it says
+               the text looks soft rather than the box looking wrong. */
+            Ui.Scale = (float)(Math.Round(Ui.Scale * 4f) / 4f);
+            Log.Info("Display scale " + Ui.Scale.ToString("0.##"));
 
             Theme.LoadFonts();
 

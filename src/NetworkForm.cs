@@ -84,11 +84,11 @@ namespace JoeBrowser
             _empty.Wrap = true;
             _column.Controls.Add(_empty);
 
-            _run = new JBButton { Kind = BtnKind.Primary, Icon = "wifi", Text = "Check", Radius = 4, Height = Ui.S(33) };
+            _run = new JBButton { Kind = BtnKind.Primary, Icon = "wifi", Text = "Check", Radius = 6, Height = Theme.Field };
             _run.Click += delegate { RunCheck(); };
             Controls.Add(_run);
 
-            _close = new JBButton { Kind = BtnKind.Ghost, Text = "Close", Radius = 4, Height = Ui.S(33) };
+            _close = new JBButton { Kind = BtnKind.Ghost, Text = "Close", Radius = 6, Height = Theme.Field };
             _close.Click += delegate { Close(); };
             Controls.Add(_close);
 

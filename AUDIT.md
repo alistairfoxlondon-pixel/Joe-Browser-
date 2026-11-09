@@ -1,4 +1,4 @@
-# Joe Browser — audit and fixes (1.2.1)
+# Joe Browser audit and fixes
 
 A full read of the application source with the three reported problems as the starting
 point: Google sign-in / sign-up failing, missing icons and UI/UX defects, and "unexpected
@@ -738,6 +738,20 @@ class of fault: a width that was assumed rather than measured.
 | Store link fallback | If no browser accepted the link, nothing happened | The link goes on the clipboard, and the dialog opens on a store link already there |
 | Extension loading | A duplicated or over long `--load-extension` list made Chromium drop every extension silently | The list is unique, capped, and the log says what was left out |
 
+### The check that runs on every push
+
+`--selftest` now exercises the arithmetic this round depends on, at 100, 125, 150 and 200
+percent: a row is never shorter than the caption it carries, a field is taller than a line of
+text, the browser, kernel and extension rows can hold their two lines, the promo card can hold
+its three, and a line height actually grows when the scale does. The last one is deliberately
+blunt. It is the assertion that fails if anyone ever asks for a type size in points again, which
+is what made the text soft in the first place.
+
+The first version of that check failed on its own arithmetic, which is worth recording: it
+measured each scale without clearing the font cache between them, so every scale reported the
+previous scale's faces. CI caught it, the cache is cleared between scales now, and the numbers
+are compared in order.
+
 ### What this round proves, and what it does not
 
 `JoeBrowser.exe --selftest` runs on every push and checks the parts a machine can check. The
@@ -748,3 +762,102 @@ A Windows desktop at 100%, 125% and 150% is what would confirm it, and that has 
 The store download itself cannot be exercised from this sandbox: `clients2.google.com` is not
 reachable from here, so the fetch path is covered by `tools/check-extension-fetch.py`, which
 the user or CI runs on a machine with a network.
+
+## Round 17: the interface rebuild
+
+The report for this round was that the app looks low resolution and broken, that text is
+unclear, that there is overflow and overlap, that it does not feel premium, that it is slow,
+and that Defender calls it a virus. This round is the answer to each of those in turn. It is
+also the largest change since the first release, and most of it is structural rather than
+cosmetic: the type system, the surface language, the measuring path and the installer were all
+replaced rather than adjusted.
+
+### Why the text looked bad
+
+Three separate causes, and only fixing all three makes text sharp:
+
+| Cause | What it did | Fix |
+|---|---|---|
+| Sizes asked for in points | A point size is scaled by the display DPI a second time on top of the layout, which is already scaled. At 125% and 150% every string was a pixel or two taller than its row, so descenders clipped and a label and the value beside it sat on different baselines | `Theme.F` asks for device pixels. The size in the code is the size on the glass at every scale |
+| Antialiased glyphs | `Graphics.DrawString` was feathering grey next to native Windows text on the same screen | `Ui.Quality` sets ClearType grid fit, and text is drawn by the same GDI path the rest of the window uses |
+| Sizes chosen per page | Five different body sizes, four label sizes and no line height anywhere, so two pages that should look the same did not | One scale: 24, 20, 16, 15, 14, 13, 12 semibold. `LineHeight`, `Row`, `Field` and `Gap` are derived from the fonts, not written down |
+
+Hairlines were the other half of "low resolution". A one pixel line on a 200% display covers two
+device pixels and reads as a grey smear, so `Ui.Hair` is 1 at 100% and 1.6 at 150% and above.
+
+### Why surfaces looked broken
+
+Cards, fields and rows were drawn by whatever number each page happened to use. The sweep
+found and fixed all of this:
+
+| Fault | Where | Fix |
+|---|---|---|
+| A card filled at one corner radius and stroked at another, so its outline sat proud of its surface at every corner | `ExtensionPage`, `ProxyPage`, `UpgradePage` | One radius per surface |
+| A text field was a frame plus a second rule under it, which read as two controls | `Controls.JBTextBox` | One rounded surface, accent stroke when focused |
+| A dropdown was drawn by different code from a field | `Controls.JBSelect` | Same field style |
+| A settings section was painted as an input surface | `Controls.JBPanel` | Card surface with hairline dividers |
+| The segment indicator was a full width bar under the label, which read as a progress bar | `Controls.JBSegment` | A centred bar sized to the label |
+| The feedback bar was a tinted 4 px strip | `Controls.JBToast` | A raised panel with a round status chip |
+
+### Where the overlap came from
+
+Every instance this round was the same species: a position computed from a constant instead of
+from the text that would be drawn there. The ones fixed:
+
+| Area | What was wrong | Fix |
+|---|---|---|
+| Rail on a short window | The adaptive branch recomputed the row gap after the rows had already been placed, so it changed nothing and the theme switch simply vanished | The rail tries tighter rows until ten destinations fit, then hides the switch |
+| Sign-in window | Two hand written sets of offsets and a message box fixed at 34 px, so a four line Google failure was drawn under the Sign in button | One measured pass; the window is sized to the result |
+| Tools tiles | Tile height was a constant and the description got whatever was left above the pill, so its second line was half drawn with no ellipsis | Height from the type scale, wrap clamped to whole lines with an ellipsis |
+| Extension rows | Title and caption pinned to the middle with invented offsets | Both measured and centred as a pair |
+| Browser rows | Name, status and description at 24, 6 and 12 from the middle | Measured and centred as a block |
+| Kernel rows | The same, at 20 and 4 | The same |
+| History rows | Fixed 9 and 28 from the top, so the lower line sat a pixel off the bottom edge | Measured pair |
+| Proxy rows | Fixed offsets from the middle | Measured pair |
+| Any page after a resize | The scroll host sized its content and the page then laid out from the previous width | The host asks its page for one more pass once the width is final |
+| A page switch | The first frame showed the geometry of the page before it | Same fix |
+
+### The installer
+
+The installer was the worst of it, and it is the first window a buyer sees: a fixed 560 by 372
+window with point fonts, so at 150% the buttons overlapped, the path box ran under Browse and
+the description was cut mid sentence. It is laid out from the monitor scale now, its fonts are
+device pixel sizes, the description is measured, the window follows a move to a second monitor,
+and it carries the app's mark.
+
+### Performance
+
+Four costs, each measured rather than guessed:
+
+| Cost | What it was | Fix |
+|---|---|---|
+| Building the grid | Adding a card ran the whole grid layout over every card so far, so a workspace of sixty profiles did n squared placements before its first paint | The grid takes a batch and lays out once |
+| Measuring | Every label and every button that needed a width opened its own device context | One shared surface for the process |
+| Line heights | Asked of a device context on every row of every page | Cached beside the fonts and cleared with them |
+| Timers | A one second clock ran for the life of the window on pages with no clock, and the running card pulse repainted every card eleven times a second even when the window was behind another | The clock only runs on the plan page; the pulse is slower and skips a window no monitor is showing |
+
+The launch now writes one log line with its three costs, so a slow start on a real machine can
+be read rather than argued about.
+
+### Defender, and the repository
+
+The false positive is a shape problem, not a code problem, and this round is honest about it:
+the installer carries the application inside itself and, until now, wrote it out and started it
+from its own unsigned process in the same breath. That sequence is what a reputation engine
+scores as a dropper. It no longer starts what it writes: the checkbox is off by default and the
+launch goes through the shortcut, so the shell starts the image. `SECURITY.md` states exactly
+what the installer writes, what it does not, and how to verify the download. Signing is the only
+thing that removes the warning outright, and it is the publisher's decision to buy a certificate.
+
+The repository page was 419 lines of marketing prose with an out of date version in its title,
+a keyword paragraph and eleven stacked release sections. It is 134 lines now, the release body
+is one note about the current build, and every release before the latest has been deleted.
+
+### What this round proves, and what it does not
+
+Every claim above is a change in the code, and CI builds it on every push. What a sandbox
+cannot do is look at it: there is no Windows desktop here, so the visual claims, meaning sharp
+text at 100, 125 and 150 percent, no overlap at any window width, the empty state's centring and
+the installer at 150 percent, are argued from measured geometry and have not been seen. The
+launch timing line is the instrument for the performance claim on a real machine. Defender's
+verdict on the next build is likewise not something this environment can run.

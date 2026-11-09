@@ -9,7 +9,7 @@ namespace JoeBrowser
 {
     internal enum BtnKind { Primary, Ghost, Soft, Danger, Nav }
     internal enum ToastKind { Success, Info, Warn, Error }
-    internal enum LabelRole { Title, Body, Dim, Faint, Accent, Strong, Mono }
+    internal enum LabelRole { Title, Body, Dim, Faint, Accent, Strong, Mono, Section, Caption }
 
     /// <summary>Label that remembers its role so a theme flip restores the right contrast.</summary>
     internal sealed class JBLabel : Label, IReStyle
@@ -84,6 +84,11 @@ namespace JoeBrowser
                 case LabelRole.Dim: Font = Theme.Small; ForeColor = Theme.TextFaint; break;
                 case LabelRole.Faint: Font = Theme.Caption; ForeColor = Theme.TextFaint; break;
                 case LabelRole.Accent: Font = Theme.SmallBold; ForeColor = Theme.TextDim; break;
+                /* Row titles and the eyebrow above a group are two roles the pages need and
+                   the list had no name for, so every page painted them by hand with its own
+                   size. Named here they cannot drift apart. */
+                case LabelRole.Section: Font = Theme.H2; ForeColor = Theme.Text; break;
+                case LabelRole.Caption: Font = Theme.Caption; ForeColor = Theme.TextFaint; break;
                 case LabelRole.Mono: Font = Theme.MonoBody; ForeColor = Theme.Text; break;
             }
             Invalidate();
@@ -428,7 +433,16 @@ namespace JoeBrowser
         protected override void OnDpiChanged(DpiChangedEventArgs e)
         {
             base.OnDpiChanged(e);
-            Ui.Scale = Math.Max(1f, e.DeviceDpiNew / 96f);
+            float scale = Math.Max(1f, e.DeviceDpiNew / 96f);
+            /* Text is now measured in device units (see Theme.F), so a window that moved to a
+               different monitor has to be laid out again with its new scale or every measured
+               width would still describe the old screen. */
+            scale = (float)(Math.Round(scale * 4f) / 4f);
+            if (Math.Abs(scale - Ui.Scale) > 0.001f)
+            {
+                Theme.ClearFontCache();
+                Ui.Scale = scale;
+            }
             FitToWorkArea();
             OnScaleChanged();
             Invalidate();
@@ -727,7 +741,9 @@ namespace JoeBrowser
         public string Icon;
         public string BrandIcon;
         public bool Selected;
-        public int Radius = 4;
+        /// <summary>A control radius, not a card radius: the rounded rectangle Windows itself
+        /// uses for a push button. Corners sharper than this read as a 2010 form.</summary>
+        public int Radius = 6;
         private string _tip = "";
         public string Tip { get { return _tip; } set { _tip = value ?? ""; ToolTips.Attach(this, _tip); } }
         private bool _hover, _down;
@@ -735,13 +751,12 @@ namespace JoeBrowser
         /// <summary>Width needed for this button's icon and label, so text is never clipped.</summary>
         public int PreferredWidth(int minimum)
         {
-            using (var g = CreateGraphics())
-            {
-                Font f = Font ?? Theme.Body;
-                float w = Ui.Measure(g, Text ?? "", f).Width;
-                if (!string.IsNullOrEmpty(Icon) || !string.IsNullOrEmpty(BrandIcon)) w += Ui.S(16 + 8);
-                return Math.Max(minimum, (int)Math.Ceiling(w) + Ui.S(24));
-            }
+            /* Measured on the shared ruler: CreateGraphics() on every button in a footer is a
+               device context per button, per layout pass. The measurement is the same. */
+            Font f = Font ?? Theme.Body;
+            float w = Ui.Measure(Ui.Ruler, Text ?? "", f).Width;
+            if (!string.IsNullOrEmpty(Icon) || !string.IsNullOrEmpty(BrandIcon)) w += Ui.S(16 + 8);
+            return Math.Max(minimum, (int)Math.Ceiling(w) + Ui.S(24));
         }
 
         public JBButton()
@@ -808,8 +823,8 @@ namespace JoeBrowser
                     break;
 
                 case BtnKind.Nav:
-                    bg = Selected || _hover ? Theme.HoverStrong : Color.Transparent;
-                    fg = Theme.Text;
+                    bg = Selected ? Theme.AccentOnBg : _hover ? Theme.HoverOverlay : Color.Transparent;
+                    fg = Selected ? Theme.Text : Theme.TextDim;
                     break;
 
                 default:
@@ -821,24 +836,33 @@ namespace JoeBrowser
             if (bg != Color.Transparent) Ui.Fill(g, r, rad, bg);
             if (showBorder) Ui.Stroke(g, r, rad, border, 1f);
 
-            if (Kind == BtnKind.Nav && Selected)
-                Ui.Fill(g, new RectangleF(0, (Height - Ui.S(20)) / 2f, Ui.S(3), Ui.S(20)), Ui.S(1.5f), Theme.Accent);
-
             bool hasText = !string.IsNullOrEmpty(Text);
             bool hasIcon = !string.IsNullOrEmpty(Icon) || !string.IsNullOrEmpty(BrandIcon);
 
             if (Kind == BtnKind.Nav)
             {
-                // windows-ui navbar row: 15px padding, 22px icon, 10px gap, 15px label.
-                float navIcon = Ui.S(22);
+                /* A navigation row is a tall rounded row with a 20 px icon and its label, and the
+                   selected one carries a soft accent fill plus a short accent bar on the left.
+                   Drawn as a bare text line on the rail it read as a link in a list rather than
+                   the page you are on, which is the one piece of state a shell must show. */
+                float navIcon = Ui.S(20);
+                float iconX = Ui.S(14);
                 if (hasIcon)
                 {
-                    var box = new RectangleF(Ui.S(15), (Height - navIcon) / 2f, navIcon, navIcon);
+                    var box = new RectangleF(iconX, (Height - navIcon) / 2f, navIcon, navIcon);
                     if (BrandIcon != null) BrandIcons.Draw(g, BrandIcon, box);
-                    else Icons.Draw(g, Icon, box, fg);
+                    else Icons.Draw(g, Icon, box, Selected ? Theme.AccentText : fg);
                 }
                 Font navFont = Selected ? Theme.BodyBold : Theme.Body;
-                Ui.Text(g, Text, navFont, fg, Ui.S(47), (Height - navFont.GetHeight(g)) / 2f, Width - Ui.S(60));
+                Color navFg = Selected ? Theme.Text : Theme.TextDim;
+                float labelX = iconX + navIcon + Ui.S(12);
+                Ui.Text(g, Text, navFont, navFg, labelX,
+                    (Height - navFont.GetHeight(g)) / 2f, Math.Max(Ui.S(20), Width - labelX - Ui.S(12)));
+                if (Selected)
+                {
+                    float barH = Height - Ui.S(16);
+                    Ui.Fill(g, new RectangleF(0, Ui.S(8), Ui.S(3), barH), Ui.S(1.5f), Theme.Accent);
+                }
             }
             else
             {
@@ -857,10 +881,24 @@ namespace JoeBrowser
                         else Icons.Draw(g, Icon, box, fg);
                         x += iconSize + (hasText ? gap : 0);
                     }
-                    if (hasText) Ui.Text(g, Text, Font, fg, x, (Height - Font.GetHeight(g)) / 2f);
+                    if (hasText)
+                    {
+                        /* The label gets the room that is actually left inside the fill. Drawn
+                           at its measured width it could run under the border and be cut by the
+                           rounded corner, which reads as a clipped word rather than a shortened
+                           one. */
+                        float room = Math.Max(Ui.S(8), Width - x - Ui.S(10));
+                        Ui.Text(g, Text, Font, fg, x, (Height - Font.GetHeight(g)) / 2f, room);
+                        if (textW > room + 1f) ToolTips.Attach(this, Text);
+                    }
                 }
             }
 
+            /* A button that is wider than its label does not centre it: the label sits at the
+               left padding and the rest of the button is empty, which is what a "broken layout"
+               looks like at a glance. Only the icon and label pair are centred, and only when
+               they fit; otherwise the text is clipped with an ellipsis instead of overflowing
+               the fill and being cut by the border. */
             if (Focused && Ui.FocusCues(this))
             {
                 /* A text-coloured ring drawn on top of a filled accent button is nearly
@@ -940,7 +978,7 @@ namespace JoeBrowser
                 // Windows caption squares are plain rectangles, not the Material fullscreen arrows.
                 float s = Ui.S(10);
                 float sx = (Width - s) / 2f, sy = (Height - s) / 2f;
-                using (var pen = new Pen(ic, 1f))
+                using (var pen = new Pen(ic, Ui.Hair))
                 {
                     if (Icon == "restore")
                     {
@@ -1092,7 +1130,7 @@ namespace JoeBrowser
         /// </summary>
         public bool Multiline { get { return _multiline; } }
 
-        public int PadLeft = 10, PadRight = 10, PadTop = 6;
+        public int PadLeft = 12, PadRight = 12, PadTop = 7;
 
         public string Value
         {
@@ -1185,14 +1223,19 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            float rad = Ui.S(4);
+            float rad = Ui.S(8);
+            /* A field is a rounded surface with one hairline, and focus thickens that hairline to
+               the accent colour. The old field carried BOTH a full frame and a second rule under
+               it, which is two outlines for one control - the reason every form looked busy. */
             Ui.Fill(g, r, rad, Theme.Input);
-            Ui.Stroke(g, r, rad, Theme.Line, 1f);
-
-            // windows-ui keeps the 1px frame and lights a 1px accent rule under the field.
-            float underlineY = Height - 1.5f;
-            using (var pen = new Pen(Tapped ? Theme.Accent : Theme.InputUnderline, 1f))
-                g.DrawLine(pen, Ui.S(5), underlineY, Width - Ui.S(5), underlineY);
+            if (Tapped)
+            {
+                Ui.Stroke(g, r, rad, Theme.Accent, Ui.S(1.5f));
+            }
+            else
+            {
+                Ui.Stroke(g, r, rad, _hover ? Theme.HoverStrong : Theme.Line);
+            }
 
             if (!string.IsNullOrEmpty(_icon))
             {
@@ -1200,8 +1243,8 @@ namespace JoeBrowser
                 // A tall multiline field has to keep its icon on the first text row, not
                 // floating in the vertical middle of the box.
                 float iconY = _multiline ? Ui.S(PadTop) : (Height - s) / 2f;
-                Icons.Draw(g, _icon, new RectangleF(Ui.S(10), iconY, s, s),
-                    _focused ? Theme.Text : Theme.TextFaint);
+                Icons.Draw(g, _icon, new RectangleF(Ui.S(12), iconY, s, s),
+                    Tapped ? Theme.AccentText : Theme.TextFaint);
             }
 
             if (_multiline) PaintScroll(g);
@@ -1254,7 +1297,7 @@ namespace JoeBrowser
         private void LayoutBox()
         {
             if (!IsHandleCreated) return;
-            int l = Ui.S(PadLeft) + (string.IsNullOrEmpty(_icon) ? 0 : Ui.S(22));
+            int l = Ui.S(PadLeft) + (string.IsNullOrEmpty(_icon) ? 0 : Ui.S(24));
             int t = Ui.S(PadTop);
             int rr = Ui.S(PadRight) + (_trailing != null ? Ui.S(26) : 0);
             if (_multiline) rr += Ui.S(6);
@@ -1545,14 +1588,16 @@ namespace JoeBrowser
         {
             var g = e.Graphics;
             Ui.Quality(g);
+            /* The dropdown is a field, so it is drawn like one: the same radius, the same
+               hairline, and the same accent on focus. The extra underline it used to draw made a
+               select look different from the text box beside it for no reason a user could read. */
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            float rad = Ui.S(4);
+            float rad = Ui.S(8);
             Ui.Fill(g, r, rad, Theme.Input);
-            Ui.Stroke(g, r, rad, Theme.Line, 1f);
-            using (var pen = new Pen(_open || Focused ? Theme.Accent : Theme.InputUnderline, 1f))
-                g.DrawLine(pen, Ui.S(5), Height - 1.5f, Width - Ui.S(5), Height - 1.5f);
+            Ui.Stroke(g, r, rad, _open || Focused ? Theme.Accent : _hover ? Theme.HoverStrong : Theme.Line,
+                _open || Focused ? Ui.S(1.5f) : 1f);
 
-            float left = Ui.S(10);
+            float left = Ui.S(12);
             string chip = null;
             if (Badge != null && _selected >= 0)
             {
@@ -1781,7 +1826,10 @@ namespace JoeBrowser
             Ui.Quality(g);
             if (Items.Count == 0) return;
 
-            // Windows 11 pivot tabs: one hairline rule, the selected label carries an accent bar.
+            /* A pivot bar: one hairline along the full width, a soft hover pill per segment, and
+               an accent bar under the selected one that spans its name rather than the whole
+               cell. The bar is drawn on the device pixel grid so it is two crisp rows and not a
+               three row blur. */
             float rule = Height - Ui.S(1);
             using (var b = new SolidBrush(Theme.Line))
                 g.FillRectangle(b, 0, rule, Width, Ui.S(1));
@@ -1791,19 +1839,24 @@ namespace JoeBrowser
             {
                 var cell = new RectangleF(i * seg, 0, seg, rule);
                 bool sel = i == _selected;
-                if (!sel && i == _hover) Ui.Fill(g, cell, 0f, Theme.HoverOverlay);
+                if (!sel && i == _hover)
+                {
+                    var pill = new RectangleF(cell.X + Ui.S(4), Ui.S(4), cell.Width - Ui.S(8), rule - Ui.S(8));
+                    Ui.Fill(g, pill, Ui.S(7), Theme.HoverOverlay);
+                }
 
                 Font f = sel ? Theme.BodyBold : Theme.Body;
                 Color fg = sel ? Theme.Text : i == _hover ? Theme.Text : Theme.TextDim;
-                float ty = (rule - f.GetHeight(g)) / 2f;
+                float ty = (rule - f.GetHeight(g)) / 2f - Ui.S(1);
                 Ui.Text(g, Items[i], f, fg, cell.X, ty, cell.Width, "center");
 
                 if (sel)
                 {
-                    float tw = Math.Min(cell.Width - Ui.S(8), Ui.Measure(g, Items[i], f).Width + Ui.S(10));
-                    float barH = Ui.S(2f);
-                    using (var b = new SolidBrush(Theme.Accent))
-                        g.FillRectangle(b, cell.X + (cell.Width - tw) / 2f, rule - barH, tw, barH);
+                    float tw = Math.Min(cell.Width - Ui.S(16), Ui.Measure(g, Items[i], f).Width + Ui.S(12));
+                    float barH = Ui.S(3f);
+                    var bar = new RectangleF(cell.X + (cell.Width - tw) / 2f,
+                        Math.Max(0f, rule - barH - Ui.S(1)), tw, barH);
+                    Ui.Fill(g, bar, barH / 2f, Theme.Accent);
                 }
             }
 
@@ -1886,6 +1939,8 @@ namespace JoeBrowser
         /// <summary>Re-clamps the offset after the content changed size.</summary>
         private bool _syncing;
 
+        private int _syncPasses;
+
         public void SyncExtent()
         {
             /* LayoutContent resizes the content, and the content's own Layout event calls back
@@ -1897,9 +1952,30 @@ namespace JoeBrowser
             {
                 LayoutContent();
                 ScrollToQuiet(_offset);
+                /* A page that computes its column width from ContentWidth only settles on the
+                   second pass: the first runs against the previous width, which is what left a
+                   page laid out for the size it had before the resize. One more pass once the
+                   width is final fixes that, and the counter keeps a page from recursing. */
+                if (_syncPasses < 1)
+                {
+                    _syncPasses++;
+                    try
+                    {
+                        /* The page owns the layout method, not the column it scrolls: ask the
+                           nearest ancestor that knows how to lay this column out. */
+                        Control owner = _content.Parent;
+                        while (owner != null)
+                        {
+                            var sync = owner as ISyncLayout;
+                            if (sync != null) { sync.LayoutAtWidth(); break; }
+                            owner = owner.Parent;
+                        }
+                    }
+                    catch { }
+                }
                 Invalidate();
             }
-            finally { _syncing = false; }
+            finally { _syncPasses = 0; _syncing = false; }
         }
 
         public void ScrollTo(int value)
@@ -2075,7 +2151,7 @@ namespace JoeBrowser
     }
 
     /// <summary>Responsive card grid: columns are chosen from the available width, cells stretch to fill.</summary>
-    internal sealed class JBGrid : Panel, IReStyle
+    internal sealed class JBGrid : Panel, IReStyle, ISyncLayout
     {
         public int MinCell = 360;
         public int CellHeight = 200;
@@ -2090,6 +2166,9 @@ namespace JoeBrowser
 
         public void ReStyle() { BackColor = Theme.Bg; Invalidate(); }
 
+        /// <summary>One more pass once the scroll host has fixed the width it scrolls.</summary>
+        public void LayoutAtWidth() { LayoutGrid(); }
+
         public int Columns { get; private set; }
         public int Rows { get; private set; }
 
@@ -2099,16 +2178,40 @@ namespace JoeBrowser
             LayoutGrid();
         }
 
+        /* A batch keeps adding and removing cards from laying the grid out once per card.
+           Rebuilding a workspace of sixty profiles added sixty cards, and each one ran the
+           whole layout over every card added so far: sixty passes of sixty SetBounds calls
+           while the window was opening. One pass at the end is the same result for a fraction
+           of the work, and it is what made opening a large workspace feel slow. */
+        private int _batch;
+
         protected override void OnControlAdded(ControlEventArgs e)
         {
             base.OnControlAdded(e);
-            LayoutGrid();
+            if (_batch == 0) LayoutGrid();
         }
 
         protected override void OnControlRemoved(ControlEventArgs e)
         {
             base.OnControlRemoved(e);
-            LayoutGrid();
+            if (_batch == 0) LayoutGrid();
+        }
+
+        /// <summary>Runs a block that changes many children, then lays the grid out once.</summary>
+        public void Batch(Action changes)
+        {
+            _batch++;
+            try
+            {
+                SuspendLayout();
+                try { changes(); }
+                finally { ResumeLayout(false); }
+            }
+            finally
+            {
+                _batch--;
+                if (_batch == 0) LayoutGrid();
+            }
         }
 
         /// <summary>
@@ -2220,7 +2323,7 @@ namespace JoeBrowser
                 {
                     using (var g = CreateGraphics())
                     {
-                        int avail = Math.Max(Ui.S(60), Width - Ui.S(56));
+                        int avail = Math.Max(Ui.S(60), Width - Ui.S(56) - Ui.S(40));
                         Size sz = TextRenderer.MeasureText(g, _text, Font, new Size(avail, 4000),
                             TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
                         lines = (int)Math.Round(sz.Height / (double)lineH);
@@ -2233,7 +2336,7 @@ namespace JoeBrowser
                with nothing to say there was more. Five lines is enough for every message the app
                shows, and the timer still dismisses it. */
             _lines = Math.Max(1, Math.Min(5, lines));
-            int target = Ui.S(44) + (_lines - 1) * lineH;
+            int target = Ui.S(52) + (_lines - 1) * lineH;
             if (Height != target) Height = target;
             if (_bottom > 0) Top = _bottom - Height;
         }
@@ -2248,35 +2351,39 @@ namespace JoeBrowser
         {
             var g = e.Graphics;
             Ui.Quality(g);
+            /* A floating panel, not a tinted strip. The bar is a solid raised surface with a
+               hairline, a round icon chip in the status colour and the message beside it, so a
+               warning for one second reads as a warning and not as a coloured background with
+               text on it. The 4 px radius was the giveaway that it was a rectangle. */
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            float rad = Ui.S(4);
+            float rad = Ui.S(12);
+            Ui.Shadow(g, r, rad, 2, Theme.Dark);
+            Ui.Fill(g, r, rad, Theme.Dark ? Theme.Panel : Theme.Card);
+            Ui.Stroke(g, r, rad, Theme.Line);
 
-            // windows-ui alert bar: a 1px tinted surface with a leading status icon.
-            Color wash = _kind == ToastKind.Error ? Color.FromArgb(0xE8, 0x47, 0x56)
-                : _kind == ToastKind.Warn ? Color.FromArgb(0xF2, 0xA8, 0x1B)
-                : _kind == ToastKind.Info ? Color.FromArgb(0x60, 0xCD, 0xFF) : Color.FromArgb(0x57, 0xE8, 0x4A);
-            Ui.Fill(g, r, rad, Ui.Blend(Theme.Dark ? Theme.Panel : Theme.Bg, wash, Theme.Dark ? 0.18f : 0.14f));
-            Ui.Stroke(g, r, rad, Color.FromArgb(Theme.Dark ? 38 : 26, Theme.Text), 1f);
-
+            Color tint = _kind == ToastKind.Error ? Theme.Danger
+                : _kind == ToastKind.Warn ? Theme.Warn
+                : _kind == ToastKind.Info ? Theme.Accent : Theme.Success;
             string icon = _kind == ToastKind.Error ? "error"
                 : _kind == ToastKind.Warn ? "alert"
                 : _kind == ToastKind.Info ? "info" : "check-circle";
-            Color tint = _kind == ToastKind.Error ? Theme.Danger
-                : _kind == ToastKind.Warn ? Color.FromArgb(0xF2, 0xA8, 0x1B)
-                : _kind == ToastKind.Info ? Theme.Accent : Theme.Success;
-            float ic = Ui.S(16);
-            Icons.Draw(g, icon, new RectangleF(Ui.S(14), (Height - ic) / 2f, ic, ic), tint);
+            float chip = Ui.S(30);
+            var cr = new RectangleF(Ui.S(12), (Height - chip) / 2f, chip, chip);
+            Ui.Fill(g, cr, chip / 2f, Color.FromArgb(Theme.Dark ? 40 : 28, tint));
+            float ic = Ui.S(17);
+            Icons.Draw(g, icon, new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), tint);
 
+            float textX = cr.Right + Ui.S(12);
             float lineH = Font.GetHeight(g);
             if (_lines <= 1)
-                Ui.Text(g, _text, Font, Theme.Text, Ui.S(40), (Height - lineH) / 2f, Width - Ui.S(56));
+                Ui.Text(g, _text, Font, Theme.Text, textX, (Height - lineH) / 2f, Width - textX - Ui.S(32));
             else
                 /* WordBreak without EndEllipsis draws nothing for the part that does not fit, so
                    a message one line longer than the box silently loses its tail. EndEllipsis
                    cannot be combined with WordBreak, so the width is what is trusted here and the
                    line count above is measured from the same font and width. */
-                Ui.Text(g, _text, Font, Theme.Text, Ui.S(40), (Height - lineH * _lines) / 2f,
-                    Math.Max(Ui.S(80), Width - Ui.S(56)), "left", _lines);
+                Ui.Text(g, _text, Font, Theme.Text, textX, (Height - lineH * _lines) / 2f,
+                    Math.Max(Ui.S(80), Width - textX - Ui.S(32)), "left", _lines);
 
             float close = Ui.S(16);
             Icons.Draw(g, "close", new RectangleF(Width - Ui.S(14) - close, (Height - close) / 2f, close, close),
@@ -2345,7 +2452,7 @@ namespace JoeBrowser
             Ui.Text(g, Text, Font, c, Ui.S(2), (Height - Font.GetHeight(g)) / 2f, Width - Ui.S(4));
             if (_hover || focused)
             {
-                using (var pen = new Pen(c, 1f))
+                using (var pen = new Pen(c, Ui.Hair))
                 {
                     float y = Height - Ui.S(4);
                     float w = Ui.Measure(g, Text, Font).Width;
@@ -2438,7 +2545,7 @@ namespace JoeBrowser
         public JBPanel()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
-            BackColor = Theme.Panel;
+            BackColor = Theme.Card;
         }
 
         protected override void OnMouseEnter(EventArgs e) { if (Hoverable) { _hover = true; Invalidate(); } base.OnMouseEnter(e); }
@@ -2453,18 +2560,23 @@ namespace JoeBrowser
                bright corner pixels that read as a rendering artefact. */
             g.Clear(Ui.SurfaceColor(this));
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Theme.RLarge, _hover ? Color.FromArgb(255, Theme.PanelHover) : Theme.Panel);
-            Ui.Stroke(g, r, Theme.RLarge, Theme.Line, 1f);
+            /* A settings section is a card on the page, so it uses the card surface and the card
+               radius. It used Theme.Panel, which is the INPUT surface: on the new ramp a panel is
+               a shade above a card, and every section then looked like a field. */
+            Ui.Fill(g, r, Theme.RLarge, _hover ? Color.FromArgb(255, Theme.PanelHover) : Theme.Card);
+            Ui.Stroke(g, r, Theme.RLarge, _hover ? Theme.HoverStrong : Theme.Line);
             if (Dividers == null) return;
-            using (var pen = new Pen(Theme.Line))
+            /* Dividers stop short of the rounded corners and are drawn on a half pixel, so each
+               is exactly one device row rather than a two row grey band. */
+            using (var pen = new Pen(Theme.LineSoft, Ui.Hair))
                 for (int i = 0; i < Dividers.Length; i++)
                 {
-                    float dy = (float)Math.Round(Dividers[i]) + 0.5f;
-                    g.DrawLine(pen, Ui.S(18), dy, Width - Ui.S(19), dy);
+                    float dy = (float)Math.Round((double)Dividers[i]) + 0.5f;
+                    g.DrawLine(pen, Ui.S(20), dy, Width - Ui.S(21), dy);
                 }
         }
 
-        public void ReStyle() { BackColor = Theme.Panel; Invalidate(); }
+        public void ReStyle() { BackColor = Theme.Card; Invalidate(); }
     }
     /// <summary>
     /// Themed single-column chooser. Replaces System.Windows.Forms.ListBox wherever one would

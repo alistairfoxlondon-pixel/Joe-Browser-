@@ -164,7 +164,7 @@ jobs:
         with:
           draft: false
           prerelease: false
-          name: Joe Browser ${{ steps.ver.outputs.version }} - Download JoeBrowserSetup.exe (Windows)
+          name: Joe Browser ${{ steps.ver.outputs.version }} (Windows)
           tag_name: ${{ github.ref_name }}
           files: |
             out/JoeBrowser.exe
@@ -173,234 +173,43 @@ jobs:
           body: |
             ## Joe Browser ${{ steps.ver.outputs.version }}
 
-            **Download and run `JoeBrowserSetup.exe`.** Windows 10/11, 64-bit. The installer is
-            per-user, so there is no administrator prompt and nothing is written outside your
+            **Download and run `JoeBrowserSetup.exe`.** Windows 10 or 11, 64 bit. The installer
+            is per user, so there is no administrator prompt and nothing is written outside your
             profile. `JoeBrowser.exe` is the same app as one portable file: run it with
             `--portable` if you would rather not install.
 
-            Requirements: any installed Chromium-based browser or Firefox. The Browsers page can
-            install Chrome, Brave or Chromium for you.
+            ### In this build
 
-            ### What is new in 1.4.12
+            The interface is rebuilt on a real type scale, so nothing is set in a fractional
+            point size any more: every string is measured in device pixels for the display scale
+            in use, and text is rasterised with ClearType at the size it is drawn at. That is the
+            end of the soft text and the smeared hairlines.
 
-            **Rows that share a line are measured before they are placed.** The five editor
-            tabs, the proxy type picker and the kernel picker each split a fixed width between
-            their names. At a large text scale the names were wider than their share, so one was
-            drawn under the next and the label under the pointer was not the label that was read.
-            Each of those rows now reports the width its names need, and the caller gives it that
-            width up to a cap.
+            A page now settles on the width it actually has. The scroll host used to size its
+            content and then let the page lay out from the previous width, which is why a resize
+            or a page switch could show the old geometry for a frame, and why a narrow window
+            could keep a row measured for a wide one.
 
-            **A row of buttons never pushes one off the window.** Four dialog footers placed the
-            second button at a fixed distance left of the first, so when the two did not both fit
-            the left one left the window and lost its first letters. One helper shrinks the pair
-            in proportion instead, and it is used by the editor, the network and kernel tools, the
-            audit and the crash report.
+            Rows, fields and buttons share one rhythm taken from the fonts instead of hard coded
+            numbers, so a field is a field and a dropdown is not drawn like a different kind of
+            control. Cards are cards, selections have an edge, and the feedback bar is a raised
+            panel with a status chip rather than a tinted strip.
 
-            **The extension library passes each folder once.** When the same extension had been
-            imported from two places the library passed its folder twice, and Chromium refuses a
-            repeated `--load-extension` entry: every extension in the profile then disappeared
-            with no message at all. Imports also unpack into a staging folder and prove the
-            package holds a manifest before the installed copy is replaced, so a truncated
-            download can no longer delete the copy that worked.
-
-            **One notice per launch.** A launch fired three notices in a row and each replaced the
-            last, so the caveat about a mobile profile was overwritten before it could be read.
-            The single notice now carries the caveat that applies.
-
-            **A failed store download says what happened.** The bar showed the text Windows wrote
-            about a socket. It now says whether the store was unreachable, too slow, or answered
-            with something that was not a package, and points at the file import. When no browser
-            accepts a link it goes on the clipboard instead of vanishing, and the store link
-            dialog opens on a link already on the clipboard when there is one.
-
-            ### What was new in 1.4.5
-
-            **The history and account pages no longer overlap.** Both placed their rows of
-            buttons one at a time from the right edge, without accounting for the gap they were
-            about to advance by, so on a narrow window the last button on a line crossed the edge
-            and the next line started underneath it. One shared layout now places every row of
-            buttons: it measures them first and wraps them onto a new line when they do not fit.
-            The same fix reached the proxy, browsers and upgrade pages, where a button could be
-            drawn on top of the QR code or outside its card.
-
-            **Each extension shows its own logo.** Every row drew the same puzzle piece. The
-            logo is now the largest icon the extension's own manifest names, read from its
-            folder, and the picture is used everywhere that extension appears.
-
-            **The store link works, and says why when it cannot.** A link without `https://` was
-            handed to the shell as a file name and opened nothing. The store search appended a
-            percent sign to a path that was already encoded. A store download saved whatever came
-            back, so an HTML page for a removed or region locked id was reported as "not a valid
-            package"; it now reads the answer and says which of those it was.
-
-            **Removing an extension removes its files.** The dialog said the files stayed on
-            disk, and there was no way to reach them, so every removal left a copy behind.
-            Re-importing the same extension now replaces its entry instead of adding a second
-            row for the same package.
-
-            ### What was new in 1.4.4
-
-            **A proxy edited onto an open profile is saved with its own clock.** Matching the
-            clock to the proxy was only done at launch, so a proxy added in the editor could be
-            stored with the previous exit's timezone attached. The locale is now re-derived
-            from the proxy's geography before the profile is saved.
-
-            ### What was new in 1.4.3
-
-            **A changed proxy covers every connection, not just new ones.** Each socket the
-            local relay opens is now tagged with the proxy it was made through and is closed
-            when that proxy changes, so a page cannot keep talking over the old exit after the
-            user has picked a new one. A profile that opened with no proxy has no relay to
-            re-point at all, and the page now says the change is saved for the next open
-            instead of calling it live.
-
-            **The default extensions are listed from the first start.** The three built in
-            tools were written to disk on start but only added to the library when the
-            Extensions page was first opened, so a profile launched from a fresh install could
-            run with no trace of them in the list. They are listed on every start now, and the
-            download that fetches the two store extensions stays off the startup path.
-
-            **Eleven more sentences lost their hyphen.** The speed labels in the profile editor
-            and the welcome line in the installer still used a dash where a comma belongs, and
-            the DNS resolver geography is now recognised by country name rather than by
-            splitting the service's answer on a hyphen.
-
-            **The self test checks the build spread.** Eight profiles made in a row must not
-            share a browser build when more than one is installed, which was the last part of
-            the uniqueness rule that only a person could check.
-
-            ### What was new in 1.4.2
-
-            **Import an extension from a file.** A store link and an unpacked folder covered
-            neither an extension downloaded elsewhere nor a store package saved to disk, and
-            Chrome 137 removed the drag and drop that used to. The Extensions page now takes a
-            `.crx` or `.zip`, finds the package inside the crx header, and unwraps the folder a
-            zip usually wraps it in so the browser can load it.
-
-            **History is per profile, and now reachable per profile.** The page showed whichever
-            profile was opened last, so the pages of a specific one could not be looked at at all.
-            A profile's own menu opens the page focused on it, and the title carries the name.
-
-            **A payment made before the app closed is finished on the next start.** The
-            confirmation used to run only while the upgrade window was open, so a buyer who paid
-            and quit stayed on the free plan. The invoice, including the address it was drawn
-            against, is remembered and checked again. Nothing is granted without a matching unseen
-            transaction.
-
-            **Older Chrome builds are offered.** The catalog carried four builds in total, and
-            every profile is supposed to have a browser version of its own, which four cannot
-            cover. The last hundred known good versions are listed with their exact versions so a
-            workspace can spread across them.
-
-            **Extension changes say when they take effect.** Three messages claimed a change had
-            reached every profile while a browser that was already open keeps the list it started
-            with.
-
-            **A phone profile says what it is.** It emulates the device the page sees, on this PC's
-            hardware, and the window now says so once rather than leaving it to be discovered.
-
-            ### What was new in 1.4.1
-
-            **Text can be selected again.** The tool that restores selection was gated behind the
-            right click switch and only unlocked `html` and `body`, which does nothing for the
-            container a site actually blocks, so a page that refused selection kept refusing it.
-            Selection is now unlocked everywhere and unconditionally. In the app itself, the labels
-            that carry a path, a kernel list or an error can be selected and copied as well.
-
-            **The WebGL vendor is checked, not just the renderer.** The fingerprint check read the
-            renderer and never the vendor, which is half of the pair a checker reports. It now
-            reads both, compares the vendor to the GPU the profile claims, and verifies that the
-            vendor and the renderer name the same manufacturer.
-
-            **Chrome build numbers that could have shipped.** The synthesised version was a hash,
-            so it put out builds like 132.0.6325.213, a number no Chrome has ever had. Build
-            branches now come from a real table and rise with the major version as real ones do.
-
-            **Bot check leftovers removed.** The Selenium and Playwright globals, the document
-            marker, a devtools object, a Node style Buffer and a software WebGL vendor reported
-            behind the renderer are all removed when present. `window.chrome` is created when it is
-            missing, with the shape real Chrome has and without inventing an extension id.
-
-            **Client hints name the browser you are actually in.** A Brave or Edge window reported
-            Google Chrome in its brand list, which is the one place Brave names itself and so the
-            one contradiction such a page can see.
-
-            **A logo per extension, and a second browser build offered.** The three built in
-            extensions had the same picture with a different letter; each now has its own artwork
-            at three sizes. On a PC with one browser build, the first new profile now offers to
-            download another so profiles stop sharing a version.
-
-            ### What was new in 1.4.0
-
-            **Browsing history, per profile.** Every page a profile visits is recorded with the
-            exact address, including the redirect hops a browser passes through on the way there,
-            which are the addresses that cannot be recovered any other way afterwards. History is
-            grouped by profile and by account, so two accounts on one PC never see each other's
-            pages. A new History page lists it, filters down to just the hops, copies an address
-            and opens one in the profile it belongs to. Settings can stop the recording and clear
-            everything, and deleting a profile removes its history with it.
-
-            **An Account page.** Who is signed in, what the plan allows, the other accounts on this
-            PC with when each last signed in, and the buttons that were previously scattered: open
-            the plan, switch account, sign out, set the app PIN, set up a two step code, remove an
-            account.
-
-            **Expired plans lock the profiles they no longer cover.** When a paid plan lapses the
-            profiles stay on disk with all their data, but the ones beyond the free plan cannot be
-            opened until it is renewed. The card says Plan expired and the button says Renew to
-            open; the launch itself is refused, so the limit does not depend on a card being
-            painted correctly.
-
-            **Profiles and history are stored per account.** Previously every account shared one
-            profile folder, so signing in as a second person on the same Windows user showed the
-            first person's profiles. Each account now has its own folder.
-
-            **The Chrome Web Store import works.** The link parser split the pasted URL on every
-            colon, which destroyed `https:` and left nothing to match, so a pasted store link was
-            always rejected. Links with a long title slug and a query string are now parsed.
-
-            **Every dash is gone from the interface text**, as asked, and the punctuation reads as
-            commas, colons and full stops where a dash was doing the work.
-
-            ### What was new in 1.3.0
-
-            **Every new profile is now provably different from every other one.** Profiles used to
-            be generated by pure chance over small pools, so a workspace of thirty reliably
-            contained several pairs sharing a GPU or a screen. Profiles are now compared across
-            twelve fingerprint surfaces and re-rolled until they are unique, with a deterministic
-            fallback for dense workspaces. Every card shows a short signature, so two identical
-            profiles are visible at a glance.
-
-            **A different browser build per profile.** When more than one kernel is installed, a
-            new profile takes the build the workspace is using least, and a duplicate takes a
-            different build from its source. With a single build installed, the app says so
-            instead of pretending.
-
-            **Account audit.** Tools > Account audit finds profiles that read as one browser, and
-            separately flags profiles sharing one proxy address - which no fingerprint can hide.
-            One button re-rolls what is fixable and reports what is not.
-
-            **Impossible machines are repaired.** A stored profile claiming a Direct3D renderer on
-            macOS, 16 GB of `deviceMemory`, or Android with no touch points is corrected when it
-            loads, without touching its seed, so its identity stays unique.
-
-            ### Fixes in this build
-
-            - A profile's signature no longer changes the first time it is opened.
-            - The fingerprint check compares the WebGL renderer exactly, and shows what the page
-              answered instead of echoing the value it expected.
-            - Signatures ignore letter case, so `windows 11` and `Windows 11` are recognised as one
-              machine.
-            - Bulk duplicate counts the copies it actually saved.
-            - Starting a second copy no longer unloads the first one's fonts.
-            - The fingerprint and audit windows close on Esc, like every other window.
+            Measuring no longer allocates a device context per label and per button, and line
+            heights are looked up beside the fonts they came from: opening a page and resizing the
+            window are both cheaper.
 
             ### Notes
 
-            The binaries are unsigned, so Windows may show "unknown publisher" the first time.
-            That warning is removed by a code-signing certificate, not by anything in the code.
-            `SHA256.txt` is attached for verification.
+            The binaries are unsigned, so Windows may show "unknown publisher" the first time. A
+            code signing certificate is the only thing that changes that line, and it is a yearly
+            cost an individual developer carries. `SHA256.txt` is attached: compare the hash of
+            the file you downloaded with the one in it.
 
+            If Defender reports `JoeBrowserSetup.exe`, it is a false positive. It is a self
+            contained installer carrying the application inside itself, a shape malware also
+            uses, and a reputation engine reacts to that shape for a new publisher. The portable
+            `JoeBrowser.exe` unpacks nothing and is the alternative.
       - name: Keep the binaries as a workflow artifact
         if: always()
         uses: actions/upload-artifact@v4
