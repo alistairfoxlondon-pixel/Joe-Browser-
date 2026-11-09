@@ -159,21 +159,21 @@ namespace JoeBrowser
             {
                 _host.SetBounds(0, 0, Math.Max(1, Width), Math.Max(1, Height));
                 int w = Math.Max(Ui.S(320), _host.Width - Ui.S(10));
-                int pad = Ui.S(28);
+                int pad = Ui.S(32);
                 int inner = Math.Max(Ui.S(200), w - pad * 2);
                 int y = pad;
 
-                _title.SetBounds(pad, y, inner, Ui.S(30));
-                y += Ui.S(34);
-                _plan.SetBounds(pad, y, inner, Ui.S(22));
-                y += Ui.S(26);
+                _title.SetBounds(pad, y, inner, Ui.S(32));
+                y += Ui.S(38);
+                _plan.SetBounds(pad, y, inner, Ui.S(24));
+                y += Ui.S(30);
                 /* The plan note wraps, and on a narrow window two lines of it sat on top of the
                    first button row. Its height is measured from the text that is in it. */
                 int noteH = MeasureLines(_planNote.Text, Theme.Caption, inner);
                 _planNote.SetBounds(pad, y, inner, noteH);
                 y += noteH + Ui.S(10);
 
-                int bh = Ui.S(33);
+                int bh = Theme.Field;
                 JBButton[] actions = { _manage, _signOut, _switch, _pin, _twoFactor };
                 /* FlowButtons wraps and never overlaps; the old loop compared bx + bw against
                    the wrap edge without adding the gap it was about to advance by, so the last
@@ -235,7 +235,7 @@ namespace JoeBrowser
                 SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                          ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
                 BackColor = Theme.Bg;
-                _remove = new JBButton { Kind = BtnKind.Ghost, Text = L10n.T("acct.remove"), Height = Ui.S(28) };
+                _remove = new JBButton { Kind = BtnKind.Ghost, Text = L10n.T("acct.remove"), Height = Ui.S(30) };
                 _remove.Click += delegate
                 {
                     var h = _page.DeleteAccountRequested;
@@ -245,7 +245,7 @@ namespace JoeBrowser
                 ToolTips.Attach(this, (string.IsNullOrEmpty(account.Email) ? "" : account.Email));
             }
 
-            public int RowHeight { get { return Ui.S(62); } }
+            public int RowHeight { get { return Ui.S(72); } }
 
             protected override void OnResize(EventArgs e)
             {
@@ -279,8 +279,8 @@ namespace JoeBrowser
                 Ui.Quality(g);
                 g.Clear(Theme.Bg);
                 var box = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-                Ui.Fill(g, box, Ui.S(8), _hover ? Theme.PanelHover : Theme.Card);
-                Ui.Stroke(g, box, Ui.S(8), _hover ? Theme.HoverStrong : Theme.Line, 1f);
+                Ui.Fill(g, box, Ui.S(10), _hover ? Theme.PanelHover : Theme.Card);
+                Ui.Stroke(g, box, Ui.S(10), _hover ? Theme.HoverStrong : Theme.Line);
 
                 float left = Ui.S(14);
                 /* The remove button is measured, not assumed: a fixed 120 px reserve is narrower

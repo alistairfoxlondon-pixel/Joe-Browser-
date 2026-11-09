@@ -147,7 +147,7 @@ namespace JoeBrowser
             float rad = Ui.S(4);
             Ui.Fill(g, r, rad, Theme.Input);
             Ui.Stroke(g, r, rad, Theme.Line, 1f);
-            using (var pen = new Pen(_open || Focused ? Theme.Accent : Theme.InputUnderline, 1f))
+            using (var pen = new Pen(_open || Focused ? Theme.Accent : Theme.InputUnderline, Ui.Hair))
                 g.DrawLine(pen, Ui.S(5), Height - 1.5f, Width - Ui.S(5), Height - 1.5f);
 
             LangItem item = _selected >= 0 && _selected < _items.Count ? _items[_selected] : null;

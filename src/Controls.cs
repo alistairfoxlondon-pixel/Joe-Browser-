@@ -979,7 +979,7 @@ namespace JoeBrowser
                 // Windows caption squares are plain rectangles, not the Material fullscreen arrows.
                 float s = Ui.S(10);
                 float sx = (Width - s) / 2f, sy = (Height - s) / 2f;
-                using (var pen = new Pen(ic, 1f))
+                using (var pen = new Pen(ic, Ui.Hair))
                 {
                     if (Icon == "restore")
                     {
@@ -1131,7 +1131,7 @@ namespace JoeBrowser
         /// </summary>
         public bool Multiline { get { return _multiline; } }
 
-        public int PadLeft = 10, PadRight = 10, PadTop = 6;
+        public int PadLeft = 12, PadRight = 12, PadTop = 7;
 
         public string Value
         {
@@ -1224,14 +1224,19 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            float rad = Ui.S(4);
+            float rad = Ui.S(8);
+            /* A field is a rounded surface with one hairline, and focus thickens that hairline to
+               the accent colour. The old field carried BOTH a full frame and a second rule under
+               it, which is two outlines for one control - the reason every form looked busy. */
             Ui.Fill(g, r, rad, Theme.Input);
-            Ui.Stroke(g, r, rad, Theme.Line, 1f);
-
-            // windows-ui keeps the 1px frame and lights a 1px accent rule under the field.
-            float underlineY = Height - 1.5f;
-            using (var pen = new Pen(Tapped ? Theme.Accent : Theme.InputUnderline, 1f))
-                g.DrawLine(pen, Ui.S(5), underlineY, Width - Ui.S(5), underlineY);
+            if (Tapped)
+            {
+                Ui.Stroke(g, r, rad, Theme.Accent, Ui.S(1.5f));
+            }
+            else
+            {
+                Ui.Stroke(g, r, rad, _hover ? Theme.HoverStrong : Theme.Line);
+            }
 
             if (!string.IsNullOrEmpty(_icon))
             {
@@ -1239,8 +1244,8 @@ namespace JoeBrowser
                 // A tall multiline field has to keep its icon on the first text row, not
                 // floating in the vertical middle of the box.
                 float iconY = _multiline ? Ui.S(PadTop) : (Height - s) / 2f;
-                Icons.Draw(g, _icon, new RectangleF(Ui.S(10), iconY, s, s),
-                    _focused ? Theme.Text : Theme.TextFaint);
+                Icons.Draw(g, _icon, new RectangleF(Ui.S(12), iconY, s, s),
+                    Tapped ? Theme.AccentText : Theme.TextFaint);
             }
 
             if (_multiline) PaintScroll(g);
@@ -1293,7 +1298,7 @@ namespace JoeBrowser
         private void LayoutBox()
         {
             if (!IsHandleCreated) return;
-            int l = Ui.S(PadLeft) + (string.IsNullOrEmpty(_icon) ? 0 : Ui.S(22));
+            int l = Ui.S(PadLeft) + (string.IsNullOrEmpty(_icon) ? 0 : Ui.S(24));
             int t = Ui.S(PadTop);
             int rr = Ui.S(PadRight) + (_trailing != null ? Ui.S(26) : 0);
             if (_multiline) rr += Ui.S(6);
@@ -1584,14 +1589,16 @@ namespace JoeBrowser
         {
             var g = e.Graphics;
             Ui.Quality(g);
+            /* The dropdown is a field, so it is drawn like one: the same radius, the same
+               hairline, and the same accent on focus. The extra underline it used to draw made a
+               select look different from the text box beside it for no reason a user could read. */
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            float rad = Ui.S(4);
+            float rad = Ui.S(8);
             Ui.Fill(g, r, rad, Theme.Input);
-            Ui.Stroke(g, r, rad, Theme.Line, 1f);
-            using (var pen = new Pen(_open || Focused ? Theme.Accent : Theme.InputUnderline, 1f))
-                g.DrawLine(pen, Ui.S(5), Height - 1.5f, Width - Ui.S(5), Height - 1.5f);
+            Ui.Stroke(g, r, rad, _open || Focused ? Theme.Accent : _hover ? Theme.HoverStrong : Theme.Line,
+                _open || Focused ? Ui.S(1.5f) : 1f);
 
-            float left = Ui.S(10);
+            float left = Ui.S(12);
             string chip = null;
             if (Badge != null && _selected >= 0)
             {
@@ -1820,7 +1827,10 @@ namespace JoeBrowser
             Ui.Quality(g);
             if (Items.Count == 0) return;
 
-            // Windows 11 pivot tabs: one hairline rule, the selected label carries an accent bar.
+            /* A pivot bar: one hairline along the full width, a soft hover pill per segment, and
+               an accent bar under the selected one that spans its name rather than the whole
+               cell. The bar is drawn on the device pixel grid so it is two crisp rows and not a
+               three row blur. */
             float rule = Height - Ui.S(1);
             using (var b = new SolidBrush(Theme.Line))
                 g.FillRectangle(b, 0, rule, Width, Ui.S(1));
@@ -1830,19 +1840,24 @@ namespace JoeBrowser
             {
                 var cell = new RectangleF(i * seg, 0, seg, rule);
                 bool sel = i == _selected;
-                if (!sel && i == _hover) Ui.Fill(g, cell, 0f, Theme.HoverOverlay);
+                if (!sel && i == _hover)
+                {
+                    var pill = new RectangleF(cell.X + Ui.S(4), Ui.S(4), cell.Width - Ui.S(8), rule - Ui.S(8));
+                    Ui.Fill(g, pill, Ui.S(7), Theme.HoverOverlay);
+                }
 
                 Font f = sel ? Theme.BodyBold : Theme.Body;
                 Color fg = sel ? Theme.Text : i == _hover ? Theme.Text : Theme.TextDim;
-                float ty = (rule - f.GetHeight(g)) / 2f;
+                float ty = (rule - f.GetHeight(g)) / 2f - Ui.S(1);
                 Ui.Text(g, Items[i], f, fg, cell.X, ty, cell.Width, "center");
 
                 if (sel)
                 {
-                    float tw = Math.Min(cell.Width - Ui.S(8), Ui.Measure(g, Items[i], f).Width + Ui.S(10));
-                    float barH = Ui.S(2f);
-                    using (var b = new SolidBrush(Theme.Accent))
-                        g.FillRectangle(b, cell.X + (cell.Width - tw) / 2f, rule - barH, tw, barH);
+                    float tw = Math.Min(cell.Width - Ui.S(16), Ui.Measure(g, Items[i], f).Width + Ui.S(12));
+                    float barH = Ui.S(3f);
+                    var bar = new RectangleF(cell.X + (cell.Width - tw) / 2f,
+                        Math.Max(0f, rule - barH - Ui.S(1)), tw, barH);
+                    Ui.Fill(g, bar, barH / 2f, Theme.Accent);
                 }
             }
 
@@ -2384,7 +2399,7 @@ namespace JoeBrowser
             Ui.Text(g, Text, Font, c, Ui.S(2), (Height - Font.GetHeight(g)) / 2f, Width - Ui.S(4));
             if (_hover || focused)
             {
-                using (var pen = new Pen(c, 1f))
+                using (var pen = new Pen(c, Ui.Hair))
                 {
                     float y = Height - Ui.S(4);
                     float w = Ui.Measure(g, Text, Font).Width;
@@ -2477,7 +2492,7 @@ namespace JoeBrowser
         public JBPanel()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
-            BackColor = Theme.Panel;
+            BackColor = Theme.Card;
         }
 
         protected override void OnMouseEnter(EventArgs e) { if (Hoverable) { _hover = true; Invalidate(); } base.OnMouseEnter(e); }
@@ -2492,18 +2507,23 @@ namespace JoeBrowser
                bright corner pixels that read as a rendering artefact. */
             g.Clear(Ui.SurfaceColor(this));
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Theme.RLarge, _hover ? Color.FromArgb(255, Theme.PanelHover) : Theme.Panel);
-            Ui.Stroke(g, r, Theme.RLarge, Theme.Line, 1f);
+            /* A settings section is a card on the page, so it uses the card surface and the card
+               radius. It used Theme.Panel, which is the INPUT surface: on the new ramp a panel is
+               a shade above a card, and every section then looked like a field. */
+            Ui.Fill(g, r, Theme.RLarge, _hover ? Color.FromArgb(255, Theme.PanelHover) : Theme.Card);
+            Ui.Stroke(g, r, Theme.RLarge, _hover ? Theme.HoverStrong : Theme.Line);
             if (Dividers == null) return;
-            using (var pen = new Pen(Theme.Line))
+            /* Dividers stop short of the rounded corners and are drawn on a half pixel, so each
+               is exactly one device row rather than a two row grey band. */
+            using (var pen = new Pen(Theme.LineSoft, Ui.Hair))
                 for (int i = 0; i < Dividers.Length; i++)
                 {
-                    float dy = (float)Math.Round(Dividers[i]) + 0.5f;
-                    g.DrawLine(pen, Ui.S(18), dy, Width - Ui.S(19), dy);
+                    float dy = (float)Math.Round((double)Dividers[i]) + 0.5f;
+                    g.DrawLine(pen, Ui.S(20), dy, Width - Ui.S(21), dy);
                 }
         }
 
-        public void ReStyle() { BackColor = Theme.Panel; Invalidate(); }
+        public void ReStyle() { BackColor = Theme.Card; Invalidate(); }
     }
     /// <summary>
     /// Themed single-column chooser. Replaces System.Windows.Forms.ListBox wherever one would

@@ -259,11 +259,11 @@ namespace JoeBrowser
             {
                 _host.SetBounds(0, 0, Math.Max(1, Width), Math.Max(1, Height));
                 int w = Math.Max(Ui.S(320), _host.Width - Ui.S(10));
-                int pad = Ui.S(28);
+                int pad = Ui.S(32);
                 int inner = Math.Max(Ui.S(200), w - pad * 2);
 
                 int y = pad;
-                int bh = Ui.S(33);
+                int bh = Theme.Field;
                 /* Back on the left because it leaves the page; the rest gathered on the right,
                    wrapping onto a second line when the window cannot hold them all. Placing them
                    one at a time from the right edge made them overlap, and on a narrow window the
@@ -319,8 +319,8 @@ namespace JoeBrowser
                 if (_rows.Count > 0)
                 {
                     y += Ui.S(8);
-                    _more.SetBounds(pad, y, _more.PreferredWidth(Ui.S(160)), Ui.S(33));
-                    y += Ui.S(33);
+                    _more.SetBounds(pad, y, _more.PreferredWidth(Ui.S(160)), Theme.Field);
+                    y += Theme.Field;
                 }
                 y += pad;
 
@@ -369,7 +369,7 @@ namespace JoeBrowser
                 TabStop = false;
             }
 
-            public int RowHeight { get { return Ui.S(52); } }
+            public int RowHeight { get { return Ui.S(56); } }
 
             protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
             protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
@@ -406,8 +406,8 @@ namespace JoeBrowser
                 g.Clear(Theme.Bg);
                 bool sel = _page._selected == _index;
                 var r = new RectangleF(0.5f, 0.5f, Width - 1f, Height - 1f);
-                if (sel) Ui.Fill(g, r, Ui.S(6), Theme.AccentOnBg);
-                else if (_hover) Ui.Fill(g, r, Ui.S(6), Theme.HoverOverlay);
+                if (sel) { Ui.Fill(g, r, Ui.S(8), Theme.AccentOnBg); Ui.Stroke(g, r, Ui.S(8), Theme.AccentBorder); }
+                else if (_hover) { Ui.Fill(g, r, Ui.S(8), Theme.HoverOverlay); Ui.Stroke(g, r, Ui.S(8), Theme.Line); }
 
                 /* A hop is marked with a small arrow instead of a word: the list is scanned, not
                    read, and a label repeated on half the rows is noise. */
@@ -417,8 +417,12 @@ namespace JoeBrowser
                     Icons.Draw(g, "arrow-right", new RectangleF(Ui.S(12), (Height - ic) / 2f, ic, ic), Theme.TextFaint);
                 }
 
+                /* The time column is measured, not assumed: a two digit hour and a month
+                   abbreviation at 150% need more than the old 96 px reserve, and the title was
+                   drawn underneath them. */
+                float timeW = Math.Max(Ui.S(76), Ui.Measure(g, "00:00  WWW 00", Theme.Caption).Width);
                 float left = Ui.S(34);
-                float w = Width - left - Ui.S(96);
+                float w = Width - left - timeW - Ui.S(24);
                 /* A hop is marked by an arrow in the left margin, so the arrow's column is not
                    taken out of the text width - the title used to start under a mark that only
                    half the rows draw. */
@@ -437,9 +441,9 @@ namespace JoeBrowser
                 Ui.Text(g, Short(Entry.Url, 110), Theme.Caption, Theme.TextFaint, left, Ui.S(28), w);
 
                 Ui.Text(g, Entry.When.ToString("HH:mm"), Theme.Caption, Theme.TextFaint,
-                    Width - Ui.S(86), Ui.S(9), Ui.S(76), "right");
+                    Width - timeW - Ui.S(14), Ui.S(9), timeW, "right");
                 Ui.Text(g, Entry.When.ToString("d MMM"), Theme.Caption, Theme.TextFaint,
-                    Width - Ui.S(86), Ui.S(28), Ui.S(76), "right");
+                    Width - timeW - Ui.S(14), Ui.S(28), timeW, "right");
             }
 
             private static string Host(string url)

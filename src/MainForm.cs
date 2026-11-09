@@ -2661,10 +2661,12 @@ namespace JoeBrowser
             int hostW = Math.Max(Ui.S(320), _settingsHost.Width - Ui.S(10));
             // Windows UI pages run edge to edge; a centered column only wasted the viewport.
             int colW = Math.Max(Ui.S(320), hostW - Ui.S(8));
-            int headH = Ui.S(44), rowH = Ui.S(54), pad = Ui.S(18), gap = Ui.S(16);
+            /* Row heights follow the type scale: a title and its value need a line each plus
+               their padding, and the old 54 was 6 px short of that once the fonts were fixed. */
+            int headH = Ui.S(48), rowH = Ui.S(60), pad = Ui.S(20), gap = Ui.S(16);
             /* One row runs to two lines of text - the browser-build summary - and a wrapped label
                in a 54px row would be clipped by the divider under it. */
-            int tallRowH = Ui.S(68);
+            int tallRowH = Ui.S(76);
 
             _settingsColumn.SetBounds(0, 0, Math.Max(colW, hostW), _settingsColumn.Height);
 
@@ -2676,7 +2678,7 @@ namespace JoeBrowser
                 int h = headH + rowsH + Ui.S(10);
                 card.Panel.SetBounds(0, y, colW, h);
                 var lbl = card.Panel.Tag as JBLabel;
-                if (lbl != null) lbl.SetBounds(pad, Ui.S(14), colW - pad * 2, Ui.S(18));
+                if (lbl != null) lbl.SetBounds(pad, Ui.S(15), colW - pad * 2, Theme.LineHeight(Theme.H2));
 
                 var divs = new float[Math.Max(0, card.Rows.Count - 1)];
                 int rowY = headH;
