@@ -326,10 +326,10 @@ namespace JoeBrowser
                 Ui.Text(g, initial, f, Theme.AccentText, mx + (m - tw) / 2f, my + (m - Theme.LineHeight(f)) / 2f, tw + Ui.S(2));
 
                 float left = mx + m + Ui.S(18);
-                int btnW = Math.Min(Switch.PreferredWidth(Ui.S(150)) + SignOut.PreferredWidth(Ui.S(110)) + Ui.S(8),
-                    Math.Max(Ui.S(120), Width - left - Ui.S(20)));
+                int wanted = Switch.PreferredWidth(Ui.S(150)) + SignOut.PreferredWidth(Ui.S(110)) + Ui.S(8);
+                int btnW = Math.Min(wanted, Math.Max(Ui.S(120), (int)(Width - left - Ui.S(20))));
                 bool stack = Width < Ui.S(560);
-                float textW = stack ? Width - left - Ui.S(20) : Math.Max(Ui.S(80), Width - left - btnW - Ui.S(28));
+                float textW = stack ? Width - left - Ui.S(20) : Math.Max((float)Ui.S(80), Width - left - btnW - Ui.S(28));
 
                 Ui.Text(g, _title, Theme.H1, Theme.Text, left, my, textW, "left");
                 if (!string.IsNullOrEmpty(_line))
