@@ -2148,9 +2148,6 @@ namespace JoeBrowser
         }
 
         public void ReStyle() { BackColor = Theme.Bg; Invalidate(); }
-
-        /// <summary>One more pass once the scroll host has fixed the width it scrolls.</summary>
-        public void LayoutAtWidth() { LayoutGrid(); }
     }
 
     /// <summary>Responsive card grid: columns are chosen from the available width, cells stretch to fill.</summary>
@@ -2168,6 +2165,9 @@ namespace JoeBrowser
         }
 
         public void ReStyle() { BackColor = Theme.Bg; Invalidate(); }
+
+        /// <summary>One more pass once the scroll host has fixed the width it scrolls.</summary>
+        public void LayoutAtWidth() { LayoutGrid(); }
 
         public int Columns { get; private set; }
         public int Rows { get; private set; }
