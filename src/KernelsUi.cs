@@ -100,7 +100,7 @@ namespace JoeBrowser
         {
             if (!_built || _userSized) return;
             int rows = Math.Max(1, _rows.Count);
-            int want = Ui.S(100) + rows * (Ui.S(58) + Ui.S(8)) + Ui.S(64);
+            int want = Ui.S(100) + rows * (KernelRow.RowH + Ui.S(8)) + Ui.S(64);
             int max = Math.Max(Ui.S(360), Screen.FromControl(this).WorkingArea.Height - Ui.S(140));
             want = Math.Min(Math.Max(want, Ui.S(360)), max);
             if (Math.Abs(want - ClientSize.Height) < Ui.S(2)) return;
@@ -130,8 +130,8 @@ namespace JoeBrowser
             int y = Ui.S(2);
             foreach (var r in _rows)
             {
-                r.SetBounds(0, y, cw, Ui.S(58));
-                y += Ui.S(58) + Ui.S(8);
+                r.SetBounds(0, y, cw, KernelRow.RowH);
+                y += KernelRow.RowH + Ui.S(8);
             }
             _column.SetBounds(0, 0, Math.Max(cw, _host.Width - Ui.S(10)), Math.Max(y, _host.Height));
             _host.SyncExtent();
@@ -311,7 +311,7 @@ namespace JoeBrowser
             _action.Click += delegate { if (!_busy) { var h = ActionRequested; if (h != null) h(this, EventArgs.Empty); } };
             Controls.Add(_action);
             Apply();
-            Height = Ui.S(58);
+            Height = RowH;
         }
 
         public void ShowBusy(string text)
@@ -357,12 +357,23 @@ namespace JoeBrowser
 
         protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(Ui.SurfaceColor(this)); }
 
+        /// <summary>A version and its status line, with the field height for the action.</summary>
+        public static int RowH
+        {
+            get
+            {
+                int text = Theme.LineHeight(Theme.H3) + Ui.S(4) + Theme.LineHeight(Theme.Caption);
+                return Math.Max(Ui.S(58), Math.Max(text + Ui.S(16), Theme.Field + Ui.S(16)));
+            }
+        }
+
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
             if (_action == null) return;
-            int w = _action.PreferredWidth(Ui.S(112));
-            _action.SetBounds(Math.Max(Ui.S(8), Width - Ui.S(14) - w), (Height - Ui.S(29)) / 2, w, Ui.S(29));
+            int bh = Math.Min(Theme.Field, Math.Max(Ui.S(26), Height - Ui.S(16)));
+            int w = Math.Min(Math.Max(Ui.S(88), Width - Ui.S(100)), _action.PreferredWidth(Ui.S(112)));
+            _action.SetBounds(Math.Max(Ui.S(8), Width - Ui.S(14) - w), (Height - bh) / 2, w, bh);
         }
 
         protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
@@ -373,12 +384,16 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(8), _hover ? Theme.PanelHover : Theme.Card);
-            Ui.Stroke(g, r, Ui.S(8), _hover ? Theme.AccentBorder : Theme.Line, 1f);
+            Ui.Fill(g, r, Ui.S(10), _hover ? Theme.PanelHover : Theme.Card);
+            Ui.Stroke(g, r, Ui.S(10), _hover ? Theme.AccentBorder : Theme.Line);
 
             float x = Ui.S(16);
-            float mid = Height / 2f;
             float tw = Math.Max(Ui.S(80), _action.Left - x - Ui.S(12));
+            /* The two lines are measured and centred together; fixed offsets from the middle
+               only line up for the font size they were written at. */
+            float titleH = Theme.LineHeight(Theme.H3);
+            float capH = Theme.LineHeight(Theme.Caption);
+            float top = Math.Max(Ui.S(6), (Height - (titleH + Ui.S(4) + capH)) / 2f);
 
             string title = Rel.Version;
             string sub;
@@ -389,8 +404,8 @@ namespace JoeBrowser
                       (Rel.SizeMb > 0 ? Rel.SizeMb + " MB" : "Portable build");
             else sub = Rel.Channel;
 
-            Ui.Text(g, title, Theme.H3, Theme.Text, x, mid - Ui.S(20), tw);
-            Ui.Text(g, sub, Theme.Caption, Installed ? Theme.Success : Theme.TextDim, x, mid + Ui.S(4), tw);
+            Ui.Text(g, title, Theme.H3, Theme.Text, x, top, tw);
+            Ui.Text(g, sub, Theme.Caption, Installed ? Theme.Success : Theme.TextDim, x, top + titleH + Ui.S(4), tw);
         }
     }
 }
