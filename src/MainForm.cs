@@ -1245,21 +1245,24 @@ namespace JoeBrowser
                 var nameBox = dlg.AddField("NAME", isNew ? "" : entry.Name, "Home IP · Frankfurt", "pencil", false, 33);
                 var typeBox = dlg.AddSelect("TYPE", new[] { "HTTP", "HTTPS", "SOCKS5" },
                     cfg.Type == "socks5" ? 2 : cfg.Type == "https" ? 1 : 0, "proxy");
-                var lineBox = dlg.AddField("HOST : PORT",
+                var lineBox = dlg.AddField("ADDRESS",
                     isNew || !cfg.Enabled ? "" : cfg.Host + ":" + cfg.Port, "proxy.example.com:8080", "globe", false, 33);
                 var userBox = dlg.AddField("USERNAME (OPTIONAL)", cfg.User, "Optional", "user", false, 33);
                 var passBox = dlg.AddField("PASSWORD (OPTIONAL)", cfg.Password, "Optional", "key", false, 33);
                 var noteBox = dlg.AddField("NOTE (OPTIONAL)", isNew ? "" : entry.Note, "Optional", "file", false, 33);
                 dlg.AddNote("Passwords are encrypted on this device.");
 
+                /* Every shape a proxy really arrives in is accepted here: a bare host:port, the
+                   host:port:user:pass form a provider's list exports, and the full
+                   scheme://user:pass@host:port string that is on the clipboard most of the
+                   time. Only requiring the last two colon-separated parts is what made a valid
+                   pasted address report "enter the host and port" and refuse to save. */
                 dlg.Validator = delegate
                 {
-                    string rawLine = (lineBox.Value ?? "").Trim();
-                    int colon = rawLine.LastIndexOf(':');
-                    int port;
-                    if (colon < 1 || !int.TryParse(rawLine.Substring(colon + 1), out port) || port < 1 || port > 65535)
+                    var parsed = ProxyVault.ParseLine(lineBox.Value ?? "");
+                    if (string.IsNullOrWhiteSpace(parsed.Host) || parsed.Port <= 0)
                     {
-                        Toast("Enter the host and port, for example proxy.example.com:8080", ToastKind.Info);
+                        Toast("Enter the proxy as host:port, or paste the full proxy link", ToastKind.Info);
                         return false;
                     }
                     return true;
@@ -1269,13 +1272,21 @@ namespace JoeBrowser
                 name = (nameBox.Value ?? "").Trim();
                 note = (noteBox.Value ?? "").Trim();
                 typeIdx = typeBox.SelectedIndex;
-                string line = (lineBox.Value ?? "").Trim();
-                int c = line.LastIndexOf(':');
-                cfg.Type = typeIdx == 2 ? "socks5" : typeIdx == 1 ? "https" : "http";
-                cfg.Host = line.Substring(0, c).Trim();
-                cfg.Port = int.Parse(line.Substring(c + 1));
-                cfg.User = (userBox.Value ?? "").Trim();
-                cfg.Password = passBox.Value ?? "";
+                /* The parser already understands the scheme and any credentials in the link, so
+                   it decides the address, the port and the default user and password; the
+                   fields on the form still win when the link carried no credentials. */
+                var entered = ProxyVault.ParseLine(lineBox.Value ?? "");
+                cfg.Host = entered.Host;
+                cfg.Port = entered.Port;
+                string typedUser = (userBox.Value ?? "").Trim();
+                string typedPass = passBox.Value ?? "";
+                cfg.User = typedUser.Length > 0 ? typedUser : (entered.User ?? "");
+                cfg.Password = typedUser.Length > 0 ? typedPass : (entered.Password ?? "");
+                /* An explicit type on the form is a decision; otherwise take the scheme in the
+                   link, which the address field carries when the whole link was pasted. */
+                string scheme = ProxyVault.ParseLine(lineBox.Value ?? "").Type;
+                cfg.Type = typeIdx == 2 ? "socks5" : typeIdx == 1 ? "https"
+                    : (scheme == "socks5" || scheme == "https" ? scheme : "http");
             }
 
             if (isNew)
@@ -1326,7 +1337,10 @@ namespace JoeBrowser
                     added++;
                 }
                 SaveProxies();
-                Toast(added + (added == 1 ? " proxy" : " proxies") + " imported", added > 0 ? ToastKind.Success : ToastKind.Info);
+                Toast(added > 0
+                        ? added + (added == 1 ? " proxy" : " proxies") + " imported"
+                        : "No proxy in that file could be read. One per line, as host:port or a full proxy link.",
+                    added > 0 ? ToastKind.Success : ToastKind.Info);
             }
         }
 
@@ -1417,7 +1431,7 @@ namespace JoeBrowser
         /// connection, so replacing Proxy here reroutes traffic inside the SAME browser
         /// process: tabs, cookies, logins and local storage are never closed or reset.
         /// </summary>
-        private void ApplyProxyLive(int index)
+        private async void ApplyProxyLive(int index)
         {
             var e = ProxyAt(index);
             if (e == null) return;
@@ -1448,6 +1462,12 @@ namespace JoeBrowser
             p.Tools.ProxyWatch = true;
             _store.Save(p);
             session.UpdateProfile(p);
+            /* The proxy watcher arms itself from the page runtime, and that runtime was built
+               from the tool config the window opened with - so a profile that had no proxy
+               would keep telling the watcher there is nothing to watch, and its rotation alert
+               stayed silent for the rest of the session. Re-applying the live profile rebuilds
+               the injected script with hasProxy now true. */
+            try { await session.ApplyLiveAsync(); } catch (Exception ex) { Log.Error("Proxy live re-apply", ex); }
             ReloadCards(true);
             /* A window that opened with no proxy has nothing to re-point: Chrome reads its
                proxy once, from the command line. Saying "live" there would be a lie the user
@@ -4109,6 +4129,12 @@ namespace JoeBrowser
                         : "The store did not answer with a package.";
                 return hint + " Try again, or download the .crx and use the file import.";
             }
+            /* The store's own client library is not the only thing that can refuse: an id that
+               resolves but is not served arrives as a redirection or a protocol error, and the
+               message Windows writes for that ("the remote server returned an error") is not
+               something to show a person. */
+            if (ex is System.Net.ProtocolViolationException || ex is System.IO.IOException && ex.Message != null && ex.Message.IndexOf("remote", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "The store refused that download. Try again, or download the .crx and use the file import.";
             string m = ex.Message ?? "Could not open the profile";
             int i = m.IndexOf("\r\n", StringComparison.Ordinal);
             if (i < 0) i = m.IndexOf('\n');

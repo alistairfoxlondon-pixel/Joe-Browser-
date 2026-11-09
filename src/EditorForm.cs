@@ -48,6 +48,10 @@ namespace JoeBrowser
         private JBToggle _canvas, _audio, _fonts, _dnt, _battery, _autoMatch, _autoUa;
         private JBButton _regen, _browse, _testBtn, _save, _cancel, _getBrowser, _openExtFolder, _random;
         private JBToggle _toolHumanPaste, _toolProxyWatch, _toolRightClick, _toolAllowShift;
+        /* One line under the switches that says how to use the two tools a user cannot find by
+           clicking around: the paste that waits in the clipboard, and the menu that a page had
+           taken away. It is a label rather than a paragraph, and it changes with the switches. */
+        private JBLabel _toolHow;
         private JBSelect _toolSpeed, _toolInterval;
         private JBLabel _browserNote;
         private JBLabel _fpWarn;
@@ -886,6 +890,10 @@ namespace JoeBrowser
             _toolProxyWatch = new JBToggle { Text = "Proxy IP change & offline alerts", Checked = _tools.ProxyWatch };
             _toolRightClick = new JBToggle { Text = "Enable right click & copy", Checked = _tools.EnableRightClick };
             _toolAllowShift = new JBToggle { Text = "Also unlock text selection", Checked = _tools.UnlockSelection };
+            _toolHow = new JBLabel(LabelRole.Faint, "");
+            _toolHow.Wrap = true;
+            _toolHow.TextAlign = ContentAlignment.TopLeft;
+            _tabTools.Controls.Add(_toolHow);
             _tabTools.Controls.Add(_toolHumanPaste);
             _tabTools.Controls.Add(_toolProxyWatch);
             _tabTools.Controls.Add(_toolRightClick);
@@ -927,8 +935,32 @@ namespace JoeBrowser
             _toolRightClick.CheckedChanged += delegate
             {
                 _toolAllowShift.Visible = _toolRightClick.Checked;
+                UpdateToolHow();
                 LayoutAll();
             };
+            _toolHumanPaste.CheckedChanged += delegate { UpdateToolHow(); LayoutAll(); };
+            _toolProxyWatch.CheckedChanged += delegate { UpdateToolHow(); LayoutAll(); };
+            UpdateToolHow();
+        }
+
+        /// <summary>
+        /// What the user has to do to use what the switches just turned on. Reported twice as
+        /// "the feature is missing" when it was in fact working and undocumented: a paste tool
+        /// that only runs on Ctrl+V, and a right-click guard whose only sign of life is the
+        /// context menu a blocked site hid in the first place.
+        /// </summary>
+        private void UpdateToolHow()
+        {
+            if (_toolHow == null) return;
+            var lines = new List<string>();
+            if (_toolHumanPaste.Checked)
+                lines.Add("Paste as human: copy as usual, then press Ctrl+V in the page - or right-click a text box and pick \"Paste as human\".");
+            if (_toolRightClick.Checked)
+                lines.Add("Right click & copy: the menu and text selection work again on sites that block them, and copy is never stopped.");
+            if (_toolProxyWatch.Checked)
+                lines.Add("IP change & offline alerts: checked in the page while a profile is open, and the browser shows a notification when your exit IP changes.");
+            _toolHow.Text = string.Join("\r\n", lines.ToArray());
+            _toolHow.Visible = lines.Count > 0;
         }
 
         private void ToggleReveal()
@@ -1466,7 +1498,15 @@ namespace JoeBrowser
                 t.SetBounds((placed % cols) * (colW + gap), y + (placed / cols) * (th + Ui.S(6)), colW, th);
                 placed++;
             }
-            y += ((placed + cols - 1) / cols) * (th + Ui.S(6)) + Ui.S(8);
+            y += ((placed + cols - 1) / cols) * (th + Ui.S(6)) + Ui.S(2);
+
+            if (_toolHow != null && _toolHow.Visible)
+            {
+                int howH = HowHeight(cw);
+                _toolHow.SetBounds(0, y, cw, howH);
+                y += howH + Ui.S(10);
+            }
+            else if (_toolHow != null) _toolHow.SetBounds(0, y, 0, 0);
 
             y = Row(_lblSpeed, _toolSpeed, _lblInterval, _toolInterval, y, cw, two, lh, lg, rg, cg, fh, fh);
 
@@ -1477,6 +1517,19 @@ namespace JoeBrowser
             _openExtFolder.SetBounds(0, y, bw, fh); y += fh + Ui.S(12);
 
             FinishPage(page, host, cw, y);
+        }
+
+        /// <summary>The measured height of the tools explanation at this width, so nothing after
+        /// it can overlap it when the window is narrow.</summary>
+        private int HowHeight(int cw)
+        {
+            if (_toolHow == null || string.IsNullOrEmpty(_toolHow.Text)) return 0;
+            using (var g = System.Drawing.Graphics.FromHwnd(IntPtr.Zero))
+            {
+                var size = TextRenderer.MeasureText(g, _toolHow.Text, _toolHow.Font,
+                    new Size(Math.Max(Ui.S(120), cw), int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
+                return Math.Max(Ui.S(16), size.Height + Ui.S(2));
+            }
         }
 
         /// <summary>Width a toggle needs for its label, plus the switch it draws itself.</summary>

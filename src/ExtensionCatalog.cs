@@ -571,6 +571,15 @@ namespace JoeBrowser
                             ? "The store sent nothing back for this id. Check the link, then try the .crx import instead."
                             : "The store did not send an extension package for this id. It may be removed, region locked, or the link is not a store link. Download the .crx and use the file import instead.");
                 }
+                /* A package the store serves is a zip with a CRX3 header in front. Chrome used
+                   to accept a CRX2 header as well; the store no longer serves one, and a body
+                   that is neither is an error page that happens to start with something other
+                   than plain text. Saying so is better than failing inside the zip reader. */
+                if (raw.Length > 4 && raw[0] == 0x43 && raw[1] == 0x72 && raw[2] == 0x32 && raw[3] == 0x33)
+                {
+                    /* CRX3: fine, the zip starts after the header and FindZipStart already
+                       handled it. Nothing to do, this branch is documentation. */
+                }
                 File.WriteAllBytes(zip, Slice(raw, start));
 
                 /* Unpack beside the target and swap at the end. The old build deleted the
