@@ -27,6 +27,7 @@ namespace JoeBrowser
             public string DescKey;
             public string BtnKey;
             public RectangleF Rect;
+            public int DescLines = 2;
             public RectangleF Button;
             public bool Hover;
             public bool Locked;
@@ -49,7 +50,13 @@ namespace JoeBrowser
         };
 
         private readonly List<Tile> _tiles = new List<Tile>();
-        private const double TileH = 130;
+        /* Derived from the type scale rather than a constant. The tile holds a chip row, the
+           title, two description lines and the action pill; at 130 the description had one line
+           and a half above the pill, so the second line of any real description was clipped. */
+        private static int TileH
+        {
+            get { return Math.Max(Ui.S(140), Ui.S(20) + 34 + Ui.S(10) + Math.Max(Theme.LineHeight(Theme.H3), Ui.S(20)) + Ui.S(8) + Theme.LineHeight(Theme.Caption) * 2 + Ui.S(12) + Ui.S(34) + Ui.S(16)); }
+        }
         private const double Gap = 16;
         private const double Pad = 28;
         private int _scroll;
@@ -213,7 +220,9 @@ namespace JoeBrowser
             if (_tiles.Count == 0 || Width <= 0) return;
             float pad = Ui.S(Pad);
             float gap = Ui.S(Gap);
-            float colW = Math.Max(Ui.S(240), Width - pad * 2);
+            /* The scrollbar lane is kept clear on the right, so a wide tile never has its PRO
+               pill or its action pill sitting under the thumb. */
+            float colW = Math.Max(Ui.S(240), Width - pad * 2 - Ui.S(14));
             int cols = ColumnCount(colW);
             float tileW = (colW - gap * (cols - 1)) / cols;
             float tileH = Ui.S(TileH);
@@ -225,11 +234,15 @@ namespace JoeBrowser
                 float y = pad + (i / cols) * (tileH + gap);
                 t.Rect = new RectangleF(x, y, tileW, tileH);
 
-                // The action pill sits bottom-right inside the tile and is sized to its own label,
-                // so a long translation never clips.
-                float bh = Ui.S(30);
+                /* The action pill sits bottom-right and is sized to its own label, so a long
+                   translation never clips. The description is then wrapped into what is left, and
+                   only as many whole lines as fit are promised to the painter: two half lines of
+                   text under a pill is the exact "cut off text" this pass exists to remove. */
+                float bh = Ui.S(32);
                 float bw = Ui.S(16) * 2 + MeasureLabel(t);
                 t.Button = new RectangleF(t.Rect.Right - bw - Ui.S(14), t.Rect.Bottom - bh - Ui.S(14), bw, bh);
+                float descH = (t.Rect.Bottom - Ui.S(16)) - (t.Rect.Y + Ui.S(42));
+                t.DescLines = Math.Max(1, Math.Min(4, (int)(descH / Math.Max(1f, Theme.LineHeight(Theme.Caption)))));
             }
 
             int rows = (int)Math.Ceiling(_tiles.Count / (double)cols);
@@ -385,11 +398,11 @@ namespace JoeBrowser
 
             Ui.Text(g, title, Theme.H3, Theme.Text, textLeft, r.Y + Ui.S(17), textW);
 
-            // Description wraps into the space above the action pill, never under it.
-            float descTop = r.Y + Ui.S(40);
-            float descBottom = t.Button.Top - Ui.S(8);
+            /* Description wraps into the space above the action pill, never under it, and never
+               more lines than were measured for it when the tile was laid out. */
+            float descTop = r.Y + Ui.S(42);
             PaintWrapped(g, desc, Theme.Caption, Theme.TextFaint, textLeft, descTop, textW,
-                Math.Max(Ui.S(16), descBottom - descTop));
+                Math.Max(1, t.DescLines));
 
             var b = t.Button;
             /* In dark the secondary fill has to sit above the card, not below it: Panel2 is darker
@@ -430,25 +443,49 @@ namespace JoeBrowser
 
         /// <summary>Greedy word wrap clipped to the tile, so a long translation can never overflow.</summary>
         private static void PaintWrapped(Graphics g, string text, Font font, Color color,
-            float x, float y, float width, float maxHeight)
+            float x, float y, float width, int maxLines)
         {
-            if (string.IsNullOrEmpty(text) || width < Ui.S(30)) return;
+            if (string.IsNullOrEmpty(text) || width < Ui.S(30) || maxLines < 1) return;
             float lineH = font.GetHeight(g);
-            var sb = new System.Text.StringBuilder();
-            float cursorY = y;
-            foreach (string word in text.Split(' '))
+            /* Wrapped by measurement and stopped at a whole number of lines. The last line that
+               fits carries an ellipsis when there is more text, so a truncated description says
+               so instead of stopping mid word with nothing to indicate the rest exists. */
+            var words = text.Split(' ');
+            var line = new System.Text.StringBuilder();
+            int used = 0;
+            for (int i = 0; i < words.Length; i++)
             {
-                string trial = sb.Length == 0 ? word : sb + " " + word;
-                if (Ui.Measure(g, trial, font).Width <= width) { sb.Append(sb.Length == 0 ? word : " " + word); continue; }
-                if (sb.Length == 0) { sb.Append(word); }
-                Ui.Text(g, sb.ToString(), font, color, x, cursorY, width);
-                cursorY += lineH;
-                sb.Remove(0, sb.Length);
-                sb.Append(word);
-                if (cursorY + lineH > y + maxHeight) { sb.Remove(0, sb.Length); break; }
+                string trial = line.Length == 0 ? words[i] : line + " " + words[i];
+                if (Ui.Measure(g, trial, font).Width <= width)
+                {
+                    if (line.Length > 0) line.Append(' ');
+                    line.Append(words[i]);
+                    continue;
+                }
+                bool last = used == maxLines - 1;
+                if (last)
+                {
+                    Ui.Text(g, FitEllipsis(g, line.Length == 0 ? words[i] : line.ToString(), font, width),
+                        font, color, x, y + used * lineH, width);
+                    return;
+                }
+                Ui.Text(g, line.Length == 0 ? words[i] : line.ToString(), font, color, x, y + used * lineH, width);
+                used++;
+                line.Length = 0;
+                line.Append(words[i]);
             }
-            if (sb.Length > 0 && cursorY + lineH <= y + maxHeight)
-                Ui.Text(g, sb.ToString(), font, color, x, cursorY, width);
+            if (line.Length > 0)
+                Ui.Text(g, FitEllipsis(g, line.ToString(), font, width), font, color, x, y + used * lineH, width);
+        }
+
+        /// <summary>A string shortened until it fits the width, with an ellipsis, never over it.</summary>
+        private static string FitEllipsis(Graphics g, string text, Font font, float width)
+        {
+            if (Ui.Measure(g, text, font).Width <= width) return text;
+            const string tail = "\u2026";
+            int cut = text.Length;
+            while (cut > 0 && Ui.Measure(g, text.Substring(0, cut).TrimEnd() + tail, font).Width > width) cut--;
+            return cut <= 0 ? "" : text.Substring(0, cut).TrimEnd() + tail;
         }
     }
 }
