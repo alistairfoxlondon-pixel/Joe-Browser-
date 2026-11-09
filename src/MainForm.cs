@@ -1579,7 +1579,14 @@ namespace JoeBrowser
             using (var dlg = new ToolDialog("Add extension by store link", "Import", "Cancel", 560, 340))
             {
                 dlg.AddNote("Paste a Chrome Web Store link or its 32-character id.");
-                var field = dlg.AddField("CHROME WEB STORE LINK", "", "https://chromewebstore.google.com/detail/...", "link", false, 33);
+                /* The clipboard usually already holds the link the user copied from the store,
+                   and asking them to paste it by hand into an empty field is the step where the
+                   wrong text ends up in the box. Fill it when it really holds a store link. */
+                string clip = "";
+                try { clip = Clipboard.ContainsText() ? (Clipboard.GetText() ?? "").Trim() : ""; } catch { }
+                if (ExtensionCatalog.StoreId(clip).Length == 32) dlg.AddNote("The link on your clipboard is filled in.");
+                else clip = "";
+                var field = dlg.AddField("CHROME WEB STORE LINK", clip, "https://chromewebstore.google.com/detail/...", "link", false, 33);
                 dlg.AddNote("Downloaded into Joe Browser's own extensions folder. No store account needed.");
                 dlg.Validator = delegate
                 {
