@@ -99,6 +99,7 @@ namespace JoeBrowser
                 foreach (var entry in DefaultStoreExtensions)
                 {
                     string id = entry[0];
+                    if (IsRemovedByUser(id)) continue;
                     string target = Path.Combine(ImportedRoot, id);
                     if (!File.Exists(Path.Combine(target, "manifest.json"))) continue;
                     bool listed = false;
@@ -237,6 +238,61 @@ namespace JoeBrowser
 
         /// <summary>Ensures the shipped store extensions are present in the library, once.
         /// Downloads what is missing, so it belongs off the startup path.</summary>
+        /// <summary>
+        /// The store extensions this app ships, and marks to remember that the user removed one.
+        ///
+        /// Two things were wrong with the shipped pair. A removal deleted the folder and the
+        /// entry, and the next launch put both straight back - so the only way to be rid of a
+        /// shipped extension was to keep the browser closed. And a removal that happened while a
+        /// browser had the folder open deleted nothing, so the row came back on the next refresh.
+        /// A mark beside the library fixes both: it survives the folder, survives a re-download,
+        /// and is what the loader and the listing both consult.
+        /// </summary>
+        private static string SkipPath(string id)
+        {
+            return Path.Combine(AppPaths.Extensions, ".removed-" + id);
+        }
+
+        /// <summary>True when the user removed this shipped extension and has not added it back.</summary>
+        public static bool IsRemovedByUser(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return false;
+            try { return File.Exists(SkipPath(id)); } catch { return false; }
+        }
+
+        /// <summary>Records the user's decision to remove a shipped extension, or forgets it.</summary>
+        public static void MarkRemoved(string id, bool removed)
+        {
+            if (string.IsNullOrEmpty(id)) return;
+            try
+            {
+                if (removed)
+                {
+                    Directory.CreateDirectory(AppPaths.Extensions);
+                    File.WriteAllText(SkipPath(id), DateTime.UtcNow.ToString("o"), new UTF8Encoding(false));
+                }
+                else if (File.Exists(SkipPath(id))) File.Delete(SkipPath(id));
+            }
+            catch (Exception ex) { Log.Error("Could not record the extension removal " + id, ex); }
+        }
+
+        /// <summary>The store id of a shipped extension, from its folder path. Empty for anything else.</summary>
+        public static string DefaultIdOf(ExtensionItem item)
+        {
+            if (item == null || string.IsNullOrEmpty(item.Folder)) return "";
+            foreach (var entry in DefaultStoreExtensions)
+            {
+                string id = entry[0];
+                try
+                {
+                    if (item.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase))
+                        return id;
+                }
+                catch { }
+            }
+            return "";
+        }
+
         public static void EnsureDefaults()
         {
             try
@@ -246,6 +302,10 @@ namespace JoeBrowser
                 foreach (var entry in DefaultStoreExtensions)
                 {
                     string id = entry[0];
+                    /* The user removed it. That decision outranks the fact that this app ships
+                       it, and it is the difference between "cannot be removed" and "stays
+                       removed". */
+                    if (IsRemovedByUser(id)) continue;
                     string target = Path.Combine(ImportedRoot, id);
                     bool listed = false;
                     foreach (var e in items)
@@ -316,6 +376,7 @@ namespace JoeBrowser
             var result = new List<string>();
             foreach (var entry in DefaultStoreExtensions)
             {
+                if (IsRemovedByUser(entry[0])) continue;
                 string folder = Path.Combine(ImportedRoot, entry[0]);
                 try
                 {

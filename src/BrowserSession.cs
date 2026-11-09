@@ -1151,9 +1151,13 @@ namespace JoeBrowser
                 else if (greaseBrand != null && name == greaseBrand) greaseFull = ver;
             }
             /* The UA string is reduced to major.0.0.0, so it cannot supply the build number the
-               hints are required to carry. Use the installed browser's real build, then the live
-               hint, and only fall back to a synthesised one if both are missing. */
-            string realFullVersion = IsRealBuild(installedFull) ? installedFull
+               hints are required to carry. The profile's own build comes first: it is the number
+               chosen for this identity when it was made, and using the installed browser's build
+               here is what made every profile on a machine report the same version. The live
+               hint and a synthesised value are the fallbacks, in that order. */
+            string own = fp.BrowserVersion;
+            string realFullVersion = BrowserVersions.IsReal(own) ? own
+                : IsRealBuild(installedFull) ? installedFull
                 : (IsRealBuild(brandFull) ? brandFull : (IsRealBuild(chromiumFull) ? chromiumFull : FingerprintFactory.FullChromiumVersion(null, major)));
             if (!IsRealBuild(chromiumFull)) chromiumFull = realFullVersion;
             if (!IsRealBuild(brandFull)) brandFull = realFullVersion;

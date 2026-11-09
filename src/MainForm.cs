@@ -1591,10 +1591,16 @@ namespace JoeBrowser
                 if (!samePackage && !sameName) continue;
                 if (!samePackage && !string.IsNullOrEmpty(have.StoreId) &&
                     !string.IsNullOrEmpty(item.StoreId)) continue;
+                /* Adding something back is the user changing their mind, so the mark that kept
+                   a shipped extension away is cleared as well. */
+                string replacedId = ExtensionCatalog.DefaultIdOf(item);
+                if (!string.IsNullOrEmpty(replacedId)) ExtensionCatalog.MarkRemoved(replacedId, false);
                 _extensions[i] = item;
                 SaveExtensions();
                 return "replaced";
             }
+            string shippedId = ExtensionCatalog.DefaultIdOf(item);
+            if (!string.IsNullOrEmpty(shippedId)) ExtensionCatalog.MarkRemoved(shippedId, false);
             _extensions.Add(item);
             SaveExtensions();
             return "added";
@@ -1721,6 +1727,11 @@ namespace JoeBrowser
                fixed here: the managed folder is deleted, and an import of something that is
                already listed replaces the entry instead of stacking another. */
             string folder = item.Folder;
+            /* A shipped extension has to be marked, not merely deleted: it is re-listed on every
+               launch from a folder this app ships, so deleting it only worked until the next
+               start. The mark is what makes the user's decision stick. */
+            string shippedId = ExtensionCatalog.DefaultIdOf(item);
+            if (!string.IsNullOrEmpty(shippedId)) ExtensionCatalog.MarkRemoved(shippedId, true);
             _extensions.RemoveAt(index);
             SaveExtensions();
             bool removed = ExtensionCatalog.DeleteFiles(item);
@@ -3373,6 +3384,12 @@ namespace JoeBrowser
             FingerprintIdentity.MakeUnique(p.Fp, "System default", p.Proxy, _profiles, out clash);
             string note;
             KernelDiversity.Assign(p, _profiles, out note);
+            /* And a browser build of its own. This is separate from the kernel: a kernel is a
+               binary that has to be downloaded, while the version a profile reports is chosen
+               here, so a machine with one installed browser still produces profiles that do not
+               all claim that browser's build. */
+            string versionNote;
+            BrowserVersions.Assign(p, _profiles, out versionNote);
             return p;
         }
 
@@ -3563,6 +3580,12 @@ namespace JoeBrowser
             FingerprintIdentity.MakeUnique(copy.Fp, copy.Fp.Os, copy.Proxy, _profiles, out clash);
             string kernelNote;
             bool pinned = KernelDiversity.AssignDifferent(copy, p, _profiles, out kernelNote);
+            /* A copy that kept its source's build number is the same browser as far as any
+               checker is concerned, whatever else changed. */
+            copy.BrowserVersion = "";
+            if (copy.Fp != null) copy.Fp.BrowserVersion = "";
+            string copyVersionNote;
+            BrowserVersions.Assign(copy, _profiles, out copyVersionNote);
             string warning = null;
             if (!pinned) warning = kernelNote;
             else if (clash != null && clash.Relation == FingerprintIdentity.Relation.Linked)

@@ -188,6 +188,22 @@ namespace JoeBrowser
 
         public string UserAgentOverride { get; set; }
 
+        /// <summary>
+        /// The browser build this profile reports, as a real four part version: the one used in
+        /// the user agent, in the client hints and in every probe that asks for a version.
+        ///
+        /// This exists because a profile used to report whatever build was installed on the
+        /// machine, which meant every profile on a PC reported 157.0.8103.38 - the same number
+        /// as the user's own Chrome, in the one string a checker compares first. The value is
+        /// chosen when the profile is made, from a table of real published Chromium builds, and
+        /// it is kept apart from every profile already in the workspace.
+        /// </summary>
+        public string BrowserVersion { get; set; }
+
+        /// <summary>The build a pinned kernel reports; set with KernelVersion when one is used.</summary>
+        [ScriptIgnore]
+        public string KernelFullVersion { get; set; }
+
         public FingerprintConfig()
         {
             Os = "Windows 11";

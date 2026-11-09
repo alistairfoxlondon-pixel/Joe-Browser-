@@ -142,6 +142,68 @@ namespace JoeBrowser
             {
                 Log.Error("Cannot list profiles", ex);
             }
+            /* Every profile made before versions were recorded reports whatever browser is
+               installed, which on the machine this was reported from meant ten profiles and the
+               user's own Chrome all claiming 157.0.8103.38. Repair that on load: each profile
+               that has no build of its own is given one, in creation order so the earliest keeps
+               the build that suits it, and the result is saved. */
+            try
+            {
+                var ordered = list.OrderBy(p => p.Created).ToList();
+                var taken = BrowserVersions.Taken(ordered);
+                var claimed = new HashSet<string>(StringComparer.Ordinal);
+                int repaired = 0;
+                foreach (var p in ordered)
+                {
+                    bool hasOwn = !string.IsNullOrEmpty(p.BrowserVersion) &&
+                                  BrowserVersions.IsReal(p.BrowserVersion);
+                    if (hasOwn && claimed.Add(p.BrowserVersion))
+                    {
+                        if (p.Fp != null && p.Fp.BrowserVersion != p.BrowserVersion)
+                        {
+                            p.Fp.BrowserVersion = p.BrowserVersion;
+                            repaired++;
+                        }
+                        continue;
+                    }
+                    /* A profile with no build, or two that share one, is re-picked here.
+                       The major is only kept when nothing else in the workspace reports it.
+                       Chrome's reduced user agent hides the build, so a workspace of profiles all
+                       on 157 is still a workspace of identical strings - the major has to spread
+                       as well, and it has to spread from the load, because these are the profiles
+                       the user already made. */
+                    int major = BrowserVersions.MajorOf(p.BrowserVersion);
+                    if (major <= 0) major = BrowserVersions.MajorOf(BrowserVersions.FromUserAgent(p.Fp != null ? p.Fp.UserAgent : null));
+                    if (major <= 0) major = 131;
+                    int start = major;
+                    for (int step = 0; step < 14; step++)
+                    {
+                        int candidate = start - step;
+                        if (candidate < BrowserVersions.Oldest + 4) break;
+                        bool used = false;
+                        foreach (string v in claimed)
+                            if (BrowserVersions.MajorOf(v) == candidate) { used = true; break; }
+                        if (!used) { major = candidate; break; }
+                    }
+                    p.BrowserVersion = BrowserVersions.Pick(major, taken);
+                    /* The fingerprint carries the same string, because the client hints and the
+                       in-page probes read it from there. */
+                    if (p.Fp != null) p.Fp.BrowserVersion = p.BrowserVersion;
+                    /* The user agent has to name the same major, or the profile contradicts
+                       itself in one request. */
+                    if (p.Fp != null) FingerprintFactory.ResolveUserAgent(p.Fp, null);
+                    taken.Add(p.BrowserVersion);
+                    claimed.Add(p.BrowserVersion);
+                    repaired++;
+                }
+                if (repaired > 0)
+                {
+                    Log.Info("Gave " + repaired + " profile(s) a browser build of their own");
+                    foreach (var p in ordered) { try { Save(p); } catch (Exception ex) { Log.Error("Could not save " + p.Id, ex); } }
+                }
+            }
+            catch (Exception ex) { Log.Error("Could not assign profile browser versions", ex); }
+
             return list.OrderByDescending(p => p.LastOpened == DateTime.MinValue ? p.Created : p.LastOpened).ToList();
         }
 
