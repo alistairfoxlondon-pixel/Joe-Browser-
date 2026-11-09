@@ -210,7 +210,7 @@ namespace JoeBrowser
 
                 foreach (var r in _rows)
                 {
-                    r.SetBounds(pad, y, inner, Ui.S(84));
+                    r.SetBounds(pad, y, inner, EngineRow.RowH);
                     y += Ui.S(84) + Ui.S(10);
                 }
 
@@ -314,6 +314,16 @@ namespace JoeBrowser
         public void ReStyle() { Invalidate(); }
         protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(Ui.SurfaceColor(this)); }
 
+        /// <summary>A mark, a title, a status line and a description, with the same padding above and below.</summary>
+        public static int RowH
+        {
+            get
+            {
+                int text = Theme.LineHeight(Theme.H3) + Ui.S(4) + Theme.LineHeight(Theme.Caption) * 2;
+                return Math.Max(Ui.S(84), Math.Max(text + Ui.S(24), Ui.S(44) + Ui.S(28)));
+            }
+        }
+
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
@@ -321,8 +331,9 @@ namespace JoeBrowser
             /* The button is kept inside the row: a long translation makes a preferred width
                wider than the row, and the old placement then put its left edge at 8 px while its
                right edge stayed off the card. */
+            int bh = Math.Min(Theme.Field, Math.Max(Ui.S(28), Height - Ui.S(16)));
             int w = Math.Min(Math.Max(Ui.S(96), Width - Ui.S(120)), _action.PreferredWidth(Ui.S(132)));
-            _action.SetBounds(Math.Max(Ui.S(8), Width - Ui.S(16) - w), (Height - Ui.S(31)) / 2, w, Ui.S(31));
+            _action.SetBounds(Math.Max(Ui.S(8), Width - Ui.S(16) - w), (Height - bh) / 2, w, bh);
         }
 
         protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
@@ -343,13 +354,21 @@ namespace JoeBrowser
             float x = mark.Right + Ui.S(16);
             float rightEdge = _action.Left - Ui.S(14);
             float tw = Math.Max(Ui.S(120), rightEdge - x);
-            float mid = Height / 2f;
 
-            Ui.Text(g, Info.Name, Theme.H3, Theme.Text, x, mid - Ui.S(24), tw);
+            /* Three lines, measured and centred as a block. They used to be pinned to the centre
+               with fixed offsets of 24, 6 and 12, which only lines up for one font size: at 150%
+               the description sat on the status line. */
+            float titleH = Theme.LineHeight(Theme.H3);
+            float capH = Theme.LineHeight(Theme.Caption);
+            float blockH = titleH + Ui.S(2) + capH + Ui.S(2) + capH;
+            float top = Math.Max(Ui.S(8), (Height - blockH) / 2f);
+
+            Ui.Text(g, Info.Name, Theme.H3, Theme.Text, x, top, tw);
 
             // status line: a coloured dot, then "Installed · version" or "Not installed"
             float dot = Ui.S(7);
-            var dr = new RectangleF(x, mid + Ui.S(1), dot, dot);
+            float statusY = top + titleH + Ui.S(2);
+            var dr = new RectangleF(x, statusY + (capH - dot) / 2f, dot, dot);
             Color dotColor = Busy ? Theme.Accent : Info.Installed ? Theme.Success : Theme.TextFaint;
             using (var b = new SolidBrush(dotColor)) g.FillEllipse(b, dr);
 
@@ -366,9 +385,9 @@ namespace JoeBrowser
             Color statusInk = Busy ? Theme.Accent
                 : Info.Installed || Info.Checked ? Theme.TextDim
                 : Ui.Blend(Theme.TextDim, Color.FromArgb(0xF2, 0xA8, 0x1B), 0.75f);
-            Ui.Text(g, status, Theme.Caption, statusInk, dr.Right + Ui.S(8), mid - Ui.S(6), tw - dot - Ui.S(8));
+            Ui.Text(g, status, Theme.Caption, statusInk, dr.Right + Ui.S(8), statusY, tw - dot - Ui.S(8));
 
-            Ui.Text(g, Info.Desc, Theme.Caption, Theme.TextFaint, x, mid + Ui.S(12), tw, "left", 1);
+            Ui.Text(g, Info.Desc, Theme.Caption, Theme.TextFaint, x, statusY + capH + Ui.S(2), tw, "left", 1);
         }
 
         /// <summary>Chrome reports a four-part product version; two parts is plenty on one line.</summary>
