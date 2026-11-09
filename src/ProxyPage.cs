@@ -159,15 +159,12 @@ namespace JoeBrowser
                 int pad = Ui.S(28);
                 int inner = Math.Max(Ui.S(200), w - pad * 2);
 
-                int bw1 = _addBtn.PreferredWidth(Ui.S(120));
-                int bw2 = _importBtn.PreferredWidth(Ui.S(110));
-                int bw3 = _checkBtn.PreferredWidth(Ui.S(110));
+                /* Laid out by the shared flow so the three buttons wrap on a narrow window
+                   instead of the third one running past the right edge, which is what the
+                   hand-placed positions above did. */
                 int by = Ui.S(6);
-                _addBtn.SetBounds(pad, by, bw1, Ui.S(33));
-                _importBtn.SetBounds(pad + bw1 + Ui.S(10), by, bw2, Ui.S(33));
-                _checkBtn.SetBounds(pad + bw1 + bw2 + Ui.S(20), by, bw3, Ui.S(33));
-
-                int y = by + Ui.S(33) + Ui.S(22);
+                JBButton[] actions = { _addBtn, _importBtn, _checkBtn };
+                int y = Ui.FlowButtons(actions, pad, by, inner, Ui.S(10), Ui.S(33)) + Ui.S(22);
                 _empty.Visible = Items.Count == 0;
                 _empty.SetBounds(pad, y, inner, Ui.S(96));
                 if (Items.Count == 0) y += Ui.S(96) + Ui.S(18);
@@ -294,8 +291,14 @@ namespace JoeBrowser
 
             float x = cr.Right + Ui.S(14);
             float tableRight = Actions()[0].Left - Ui.S(18);
-            float total = Math.Max(Ui.S(240), tableRight - x);
-            float[] cols = { total * 0.26f, total * 0.27f, total * 0.25f, total * 0.22f };
+            /* On a narrow window the four columns used to be forced to a 240 px minimum and so
+               ran under the action icons on the right. The hint column is the first thing to go,
+               then the remaining three share what is really there. */
+            float total = Math.Max(0f, tableRight - x);
+            bool showHint = total >= Ui.S(260);
+            float[] cols = showHint
+                ? new[] { total * 0.26f, total * 0.27f, total * 0.25f, total * 0.22f }
+                : new[] { total * 0.34f, total * 0.34f, total * 0.32f, 0f };
             float mid = Height / 2f;
 
             string name = string.IsNullOrWhiteSpace(Item.Name) ? Item.Connection : Item.Name;
@@ -314,7 +317,9 @@ namespace JoeBrowser
             Ui.Text(g, state + latency, Theme.Body, stateColor, x + dot + Ui.S(9), mid - Theme.Body.GetHeight(g) / 2f, cols[2] - dot - Ui.S(16));
             x += cols[2];
 
-            Ui.Text(g, "Click row to apply live", Theme.Caption, Theme.TextFaint, x, mid - Theme.Caption.GetHeight(g) / 2f, cols[3] - Ui.S(8));
+            if (showHint)
+                Ui.Text(g, "Click row to apply live", Theme.Caption, Theme.TextFaint, x,
+                    mid - Theme.Caption.GetHeight(g) / 2f, cols[3] - Ui.S(8));
 
             var a = Actions();
             for (int i = 0; i < a.Length; i++)
@@ -356,13 +361,18 @@ namespace JoeBrowser
             Icons.Draw(g, "globe", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
 
             float tx = cr.Right + Ui.S(18);
-            Ui.Text(g, "Static residential proxy", Theme.H2, Theme.Text, tx, Ui.S(20), Width - tx - Ui.S(180));
+            /* The text and the badge share one row, and the text used to reserve a fixed 180 px
+               for the badge. On a narrow window the badge is what ran out of room, so the badge is
+               measured and the text takes what is left. */
+            float bw = Math.Max(Ui.S(96), Ui.Measure(g, "Coming soon", Theme.SmallBold).Width + Ui.S(28));
+            float bh = Ui.S(32);
+            float textW = Math.Max(Ui.S(120), Width - tx - bw - Ui.S(36));
+            Ui.Text(g, "Static residential proxy", Theme.H2, Theme.Text, tx, Ui.S(20), textW);
             Ui.Text(g, "1 proxy  ·  $3.50 / month  ·  clean, dedicated home IP", Theme.Small, Theme.TextDim,
-                tx, Ui.S(50), Width - tx - Ui.S(180));
+                tx, Ui.S(50), textW);
             Ui.Text(g, "Buy direct inside Joe Browser. No third-party checkout, no tracking.",
-                Theme.Caption, Theme.TextFaint, tx, Ui.S(74), Width - tx - Ui.S(180));
+                Theme.Caption, Theme.TextFaint, tx, Ui.S(74), textW);
 
-            float bw = Ui.S(126), bh = Ui.S(32);
             var badge = new RectangleF(Width - Ui.S(20) - bw, (Height - bh) / 2f, bw, bh);
             Ui.Fill(g, badge, Ui.S(6), Theme.AccentOnBg);
             Ui.Stroke(g, badge, Ui.S(6), Theme.AccentBorder, 1f);

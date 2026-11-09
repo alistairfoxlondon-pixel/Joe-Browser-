@@ -116,7 +116,11 @@ namespace JoeBrowser
             int w = ClientSize.Width, h = ClientSize.Height;
             int pad = Ui.S(24);
             _x.SetBounds(w - pad - Ui.S(30), Ui.S(14), Ui.S(30), Ui.S(30));
-            _engines.SetBounds(pad, Ui.S(52), Math.Min(Ui.S(420), w - pad * 2), Ui.S(36));
+            /* Two names side by side at 420 wide is 210 per name, and "Firefox" at 150% needs
+               more than that, so the pair was drawn into each other. Measured, then held inside
+               the window. */
+            int engW = Math.Max(Ui.S(300), Math.Min(_engines.PreferredWidth(Ui.S(140)), Ui.S(520)));
+            _engines.SetBounds(pad, Ui.S(52), Math.Min(engW, Math.Max(Ui.S(200), w - pad * 2)), Ui.S(36));
 
             int top = Ui.S(100);
             int footer = Ui.S(52);
@@ -134,10 +138,16 @@ namespace JoeBrowser
 
             int rw = _refresh.PreferredWidth(Ui.S(110));
             int cwid = _close.PreferredWidth(Ui.S(84));
+            Ui.FitPair(ref rw, ref cwid, Ui.S(8), Math.Max(Ui.S(160), w - pad * 2), Ui.S(72), Ui.S(64));
             _refresh.SetBounds(pad, h - Ui.S(16) - Ui.S(33), rw, Ui.S(33));
             _close.SetBounds(pad + rw + Ui.S(8), h - Ui.S(16) - Ui.S(33), cwid, Ui.S(33));
-            _note.SetBounds(pad + rw + cwid + Ui.S(24), h - Ui.S(16) - Ui.S(30),
-                Math.Max(Ui.S(80), w - pad * 2 - rw - cwid - Ui.S(32)), Ui.S(30));
+            /* The note shares the footer row with two buttons whose widths depend on the
+               language, so the space it is given is clamped at zero rather than allowed to
+               become a negative width that draws nothing at all. */
+            int noteX = pad + rw + cwid + Ui.S(24);
+            int noteW = Math.Max(0, w - pad - noteX);
+            _note.Visible = noteW >= Ui.S(80);
+            if (_note.Visible) _note.SetBounds(noteX, h - Ui.S(16) - Ui.S(30), noteW, Ui.S(30));
         }
 
         private void ClearRows()

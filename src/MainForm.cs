@@ -513,8 +513,27 @@ namespace JoeBrowser
 
         private void OpenUrl(string url)
         {
-            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-            catch (Exception ex) { Log.Error("Open url failed", ex); Toast("Could not open the link", ToastKind.Error); }
+            if (string.IsNullOrWhiteSpace(url)) return;
+            /* A link that does not start with a scheme is handed to the shell as a file name,
+               which is how a store link pasted without "https://" opened nothing at all. */
+            if (!url.Contains("://") && !url.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase))
+                url = "https://" + url;
+            try
+            {
+                /* Where the fetch and the Go shell disagree about a link, the clipboard is the
+                   one place it can still land: a user who copied a store link and got a failed
+                   fetch can paste it into the browser they already have open. */
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Open url failed: " + url, ex);
+                bool copied = false;
+                try { Clipboard.SetText(url); copied = true; } catch { }
+                Toast(copied
+                    ? "No browser would open that link, so it is on your clipboard instead."
+                    : "Could not open the link. Your default browser may not be set.", ToastKind.Error);
+            }
         }
 
         /* ------------------------------------------------------------------ *
@@ -1497,6 +1516,34 @@ namespace JoeBrowser
         /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
         private void BrowserAction(string key, string engine) { Guard("BrowserAction", delegate { return BrowserActionCore(key, engine); }); }
 
+        /// <summary>
+        /// Puts a freshly imported extension in the library, replacing an entry that is the same
+        /// extension rather than adding a second copy of it. Two rows for one extension is a
+        /// list that lies about what is loaded, and only one of the two can win at launch.
+        /// </summary>
+        private string AddExtension(ExtensionItem item)
+        {
+            if (item == null) return "could not be added";
+            for (int i = 0; i < _extensions.Count; i++)
+            {
+                var have = _extensions[i];
+                if (have == null) continue;
+                bool samePackage = !string.IsNullOrEmpty(item.StoreId) &&
+                                   string.Equals(have.StoreId, item.StoreId, StringComparison.OrdinalIgnoreCase);
+                bool sameName = string.Equals((have.Name ?? "").Trim(), (item.Name ?? "").Trim(),
+                                              StringComparison.OrdinalIgnoreCase);
+                if (!samePackage && !sameName) continue;
+                if (!samePackage && !string.IsNullOrEmpty(have.StoreId) &&
+                    !string.IsNullOrEmpty(item.StoreId)) continue;
+                _extensions[i] = item;
+                SaveExtensions();
+                return "replaced";
+            }
+            _extensions.Add(item);
+            SaveExtensions();
+            return "added";
+        }
+
         private void SaveExtensions()
         {
             ExtensionCatalog.Save(_extensions);
@@ -1532,7 +1579,14 @@ namespace JoeBrowser
             using (var dlg = new ToolDialog("Add extension by store link", "Import", "Cancel", 560, 340))
             {
                 dlg.AddNote("Paste a Chrome Web Store link or its 32-character id.");
-                var field = dlg.AddField("CHROME WEB STORE LINK", "", "https://chromewebstore.google.com/detail/...", "link", false, 33);
+                /* The clipboard usually already holds the link the user copied from the store,
+                   and asking them to paste it by hand into an empty field is the step where the
+                   wrong text ends up in the box. Fill it when it really holds a store link. */
+                string clip = "";
+                try { clip = Clipboard.ContainsText() ? (Clipboard.GetText() ?? "").Trim() : ""; } catch { }
+                if (ExtensionCatalog.StoreId(clip).Length == 32) dlg.AddNote("The link on your clipboard is filled in.");
+                else clip = "";
+                var field = dlg.AddField("CHROME WEB STORE LINK", clip, "https://chromewebstore.google.com/detail/...", "link", false, 33);
                 dlg.AddNote("Downloaded into Joe Browser's own extensions folder. No store account needed.");
                 dlg.Validator = delegate
                 {
@@ -1548,9 +1602,7 @@ namespace JoeBrowser
             try
             {
                 var item = await Task.Run(new Func<ExtensionItem>(delegate { return ExtensionCatalog.ImportFromUrl(url); }));
-                _extensions.Add(item);
-                SaveExtensions();
-                Toast(ExtensionNote("\"" + item.Name + "\" added"), ToastKind.Success);
+                Toast(ExtensionNote("\"" + item.Name + "\" " + AddExtension(item)), ToastKind.Success);
             }
             catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
             finally { _extensionPage.SetBusy(false, ""); }
@@ -1572,9 +1624,7 @@ namespace JoeBrowser
                 try
                 {
                     var item = ExtensionCatalog.ImportFromFile(ofd.FileName);
-                    _extensions.Add(item);
-                    SaveExtensions();
-                    Toast(ExtensionNote("\"" + item.Name + "\" added"), ToastKind.Success);
+                    Toast(ExtensionNote("\"" + item.Name + "\" " + AddExtension(item)), ToastKind.Success);
                 }
                 catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
             }
@@ -1588,9 +1638,7 @@ namespace JoeBrowser
                 try
                 {
                     var item = ExtensionCatalog.ImportFromFolder(fbd.SelectedPath);
-                    _extensions.Add(item);
-                    SaveExtensions();
-                    Toast(ExtensionNote("\"" + item.Name + "\" added"), ToastKind.Success);
+                    Toast(ExtensionNote("\"" + item.Name + "\" " + AddExtension(item)), ToastKind.Success);
                 }
                 catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
             }
@@ -1609,17 +1657,35 @@ namespace JoeBrowser
             if (index < 0 || index >= _extensions.Count) return;
             var item = _extensions[index];
             if (!ConfirmForm.Ask(this, "Remove extension", "Remove \"" + item.Name + "\" from Joe Browser?",
-                "The files stay on disk.", "Remove", BtnKind.Danger)) return;
+                "Its files are deleted from Joe Browser's extensions folder.", "Remove", BtnKind.Danger)) return;
+
+            /* The dialog used to promise the files stayed, and they did - in a folder that the
+               page offered no way to reach, one copy per import. Removing an entry therefore
+               left the extension behind for good, and re-importing made a second copy. Both are
+               fixed here: the managed folder is deleted, and an import of something that is
+               already listed replaces the entry instead of stacking another. */
+            string folder = item.Folder;
             _extensions.RemoveAt(index);
             SaveExtensions();
-            Toast(ExtensionNote("Extension removed"), ToastKind.Success);
+            bool removed = ExtensionCatalog.DeleteFiles(item);
+            Toast(ExtensionNote(removed ? "Extension removed" : "Extension removed. Close the browsers it was open in to free its files"),
+                removed ? ToastKind.Success : ToastKind.Info);
         }
 
         private void OpenExtensionStore(int index)
         {
             if (index < 0 || index >= _extensions.Count) return;
-            string url = _extensions[index].StoreUrl;
-            if (string.IsNullOrWhiteSpace(url)) { Toast("This extension was added from a local folder", ToastKind.Info); return; }
+            var item = _extensions[index];
+            string url = item.StoreUrl;
+            /* An extension imported from a file or a folder has no store link stored, but the
+               key inside its manifest names its store id, so the listing can still be opened. */
+            if (string.IsNullOrWhiteSpace(url) && !string.IsNullOrEmpty(item.StoreId))
+                url = ExtensionCatalog.StoreUrlForId(item.StoreId);
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                Toast("This extension has no store listing. Its manifest carries no key.", ToastKind.Info);
+                return;
+            }
             OpenUrl(url);
         }
 
@@ -2382,11 +2448,26 @@ namespace JoeBrowser
             int toolbarRight = w - cw * 3 - Ui.S(14);
             int newW = Math.Min(Ui.S(150), _newBtn.PreferredWidth(Ui.S(132)));
             _newBtn.SetBounds(toolbarRight - newW, Ui.S(17), newW, Ui.S(33));
-            int searchW = Math.Min(Ui.S(250), Math.Max(Ui.S(150),
-                _newBtn.Left - Ui.S(16) - (sb + Ui.S(12)) - _sortBtn.PreferredWidth(Ui.S(110))));
-            _search.SetBounds(_newBtn.Left - Ui.S(8) - searchW, Ui.S(17), searchW, Ui.S(33));
+            /* The toolbar gives way rather than overlapping. The old minimum of 150 px for the
+               search box was applied even when the space left was smaller, so on a narrow window
+               the box was drawn over the sort button and the sort button was pushed off the left
+               edge of the window. Whatever cannot fit is hidden, and it comes back on resize. */
+            const int minSearch = 120;
             int sortW = _sortBtn.PreferredWidth(Ui.S(110));
-            _sortBtn.SetBounds(_search.Left - Ui.S(8) - sortW, Ui.S(17), sortW, Ui.S(33));
+            int room = _newBtn.Left - Ui.S(16) - (sb + Ui.S(12));
+            bool showSort = room - sortW - Ui.S(8) >= minSearch;
+            bool showSearch = room - (showSort ? sortW + Ui.S(8) : 0) - Ui.S(8) >= minSearch;
+            _sortBtn.Visible = showSort && _page == 0;
+            _search.Visible = showSearch && _page == 0;
+            if (showSearch)
+            {
+                int searchW = Math.Min(Ui.S(250),
+                    room - (showSort ? sortW + Ui.S(8) : 0) - Ui.S(8));
+                _search.SetBounds(_newBtn.Left - Ui.S(8) - searchW, Ui.S(17), searchW, Ui.S(33));
+            }
+            if (showSort)
+                _sortBtn.SetBounds((showSearch ? _search.Left : _newBtn.Left) - Ui.S(8) - sortW,
+                    Ui.S(17), sortW, Ui.S(33));
             int saveW = Math.Min(Ui.S(160), _saveSettings.PreferredWidth(Ui.S(140)));
             _saveSettings.SetBounds(toolbarRight - saveW, Ui.S(17), saveW, Ui.S(33));
 
@@ -2432,6 +2513,14 @@ namespace JoeBrowser
                 Math.Max(0, pageH - Ui.S(16)));
             LayoutSettings();
 
+            /* History and Account were missing from this list. Both were created with the
+               default dock of a control that has never been sized, so they kept whatever
+               rectangle they happened to have: the page after a resize was drawn at the old
+               size, with its rows running past the bottom of the window - the overflow and
+               overlap the user sees when switching to either of them from another page. */
+            _historyPage.SetBounds(contentX, headerH, contentW, pageH);
+            _accountPage.SetBounds(contentX, headerH, contentW, pageH);
+
             _toolsPage.SetBounds(contentX, headerH, contentW, pageH);
             _proxyPage.SetBounds(contentX, headerH, contentW, pageH);
             _extensionPage.SetBounds(contentX, headerH, contentW, pageH);
@@ -2440,7 +2529,9 @@ namespace JoeBrowser
             _aboutPage.SetBounds(contentX, headerH, contentW, pageH);
             LayoutAbout();
 
-            int tw = Math.Min(Ui.S(560), Math.Max(Ui.S(240), contentW - Ui.S(64)));
+            /* A wide toast wraps into fewer lines, which is why the cap moved from 560 to 760
+               now that a message is allowed to be five lines tall. */
+            int tw = Math.Min(Ui.S(760), Math.Max(Ui.S(240), contentW - Ui.S(64)));
             _toast.Place(contentX + (contentW - tw) / 2, h - Ui.S(16), tw);
 
             ResumeLayout(false);
@@ -2610,8 +2701,11 @@ namespace JoeBrowser
             int w = _aboutPage.Width, h = _aboutPage.Height;
             _aboutHost.SetBounds(Ui.S(ContentPad), Ui.S(8),
                 Math.Max(Ui.S(160), w - Ui.S(ContentPad) * 2), Math.Max(Ui.S(120), h - Ui.S(16)));
-            int tw = _aboutTelegram.PreferredWidth(Ui.S(190));
-            _aboutTelegram.SetBounds(Math.Max(Ui.S(300), _aboutColumn.Width) - tw - Ui.S(20), Ui.S(47), tw, Ui.S(33));
+            /* The button sits at the right edge of the column, and a narrow window used to push
+               its left edge past that edge and leave it hanging outside the card. */
+            int colW = Math.Max(Ui.S(300), _aboutColumn.Width);
+            int tw = Math.Min(Math.Max(Ui.S(96), colW - Ui.S(60)), _aboutTelegram.PreferredWidth(Ui.S(190)));
+            _aboutTelegram.SetBounds(Math.Max(Ui.S(8), colW - tw - Ui.S(20)), Ui.S(47), tw, Ui.S(33));
             _aboutColumn.Invalidate();
         }
 
@@ -2774,8 +2868,9 @@ namespace JoeBrowser
             if (page == 8) RefreshHistory();
             _accountPage.Visible = page == 9;
             if (page == 9) _accountPage.Reload();
-            _search.Visible = profiles;
-            _sortBtn.Visible = profiles;
+            /* LayoutAll decides whether the toolbar has room for these two, so the page change
+               must not force them visible behind that decision. */
+            if (!profiles) { _search.Visible = false; _sortBtn.Visible = false; }
             _newBtn.Visible = profiles;
             _saveSettings.Visible = page == 4;
             _themeSwitch.Visible = true;
@@ -2839,7 +2934,21 @@ namespace JoeBrowser
                last profile hit the disk twice in a row for no reason. From-disk is the explicit
                signal for "the store may have changed". */
             if (fromDisk || _profiles == null)
+            {
                 _profiles = _store.LoadAll();
+                /* A profile file that cannot be read is not silently dropped any more: it is
+                   reported once per reload, so the user learns why a profile is not on the grid
+                   and where the file is, instead of concluding the app lost it. */
+                var broken = _store.UnreadableFiles;
+                if (broken.Count > 0 && !IsDisposed)
+                {
+                    string first = System.IO.Path.GetFileName(broken[0]);
+                    Toast(broken.Count == 1
+                        ? "One profile file could not be read: " + first + ". It is still in the profiles folder."
+                        : broken.Count + " profile files could not be read. They are still in the profiles folder.",
+                        ToastKind.Warn);
+                }
+            }
             ApplySort();
 
             foreach (var c in _cards.Values) c.Dispose();
@@ -3196,9 +3305,12 @@ namespace JoeBrowser
                 return;
             }
             using (var dlg = new LeakForm(result, p.Name, s)) dlg.ShowDialog(this);
+            /* The report dialog already lists every check with its own verdict, so the bar
+               afterwards is a one line summary and nothing more. It used to repeat the whole
+               verdict sentence, which in the dialog had just been read. */
             if (!string.IsNullOrEmpty(result.Error)) Toast(result.Error, ToastKind.Warn);
             else if (result.Clean) Toast("No leak found in " + result.Total + " checks", ToastKind.Success);
-            else Toast(result.Verdict, ToastKind.Warn);
+            else Toast(result.Verdict + " in the report above", ToastKind.Warn);
         }
 
         /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
@@ -3616,16 +3728,30 @@ namespace JoeBrowser
                     _cards[id].Model = p;
                     _cards[id].Invalidate();
                 }
-                Toast("\u201c" + p.Name + "\u201d is ready", ToastKind.Success);
-                /* A phone profile is the device the page sees, not a phone. Everything the page
-                   can read is emulated and consistent; what cannot be emulated on a Windows PC is
-                   the hardware underneath, so a user testing one should be told once rather than
-                   left to assume a phone is being faked completely. */
-                if (p.Fp != null && FingerprintFactory.IsMobileOs(p.Fp.Os))
-                    Toast("The page sees " + p.Fp.Os + ". The window runs on this PC, so hardware " +
-                          "level checks still belong to it.", ToastKind.Info);
-                if (session.IsFirefox && p.Fp != null && !FingerprintFactory.IsWindowsTarget(p.Fp.Os))
-                    Toast("Firefox cannot spoof " + p.Fp.Os + ". WebGL, timezone and screen stay real.", ToastKind.Error);
+                /* One message, not three. Each of these used to be its own toast on the same
+                   launch, and there is only ever one toast: the caveat replaced "is ready" before
+                   anyone could read it, and the second caveat replaced the first. The launch
+                   notice carries the caveat that applies, and the worst of them decides the
+                   colour. */
+                string ready = "\u201c" + p.Name + "\u201d is ready";
+                ToastKind kind = ToastKind.Success;
+                bool mobile = p.Fp != null && FingerprintFactory.IsMobileOs(p.Fp.Os);
+                bool firefoxForeign = session.IsFirefox && p.Fp != null && !FingerprintFactory.IsWindowsTarget(p.Fp.Os);
+                if (firefoxForeign)
+                {
+                    ready += ". Firefox cannot spoof " + p.Fp.Os + ", so WebGL, timezone and screen stay real";
+                    kind = ToastKind.Error;
+                }
+                else if (mobile)
+                {
+                    /* A phone profile is the device the page sees, not a phone. Everything the
+                       page can read is emulated and consistent; what cannot be emulated on a
+                       Windows PC is the hardware underneath, so a user testing one should be
+                       told once rather than left to assume a phone is being faked completely. */
+                    ready += ". The page sees " + p.Fp.Os + ", the hardware is this PC";
+                    kind = ToastKind.Info;
+                }
+                Toast(ready, kind);
                 Invalidate();
             }
             catch (Exception ex)
@@ -3721,6 +3847,20 @@ namespace JoeBrowser
 
         private static string ShortError(Exception ex)
         {
+            /* A failed download is the most common error on this path and its own message is
+               the one Windows wrote, which tells the user nothing about what to try next. Say
+               what happened and what the two ways forward are. */
+            var web = ex as System.Net.WebException;
+            if (web != null)
+            {
+                string hint = web.Status == System.Net.WebExceptionStatus.Timeout
+                    ? "The store took too long to answer."
+                    : web.Status == System.Net.WebExceptionStatus.NameResolutionFailure ||
+                      web.Status == System.Net.WebExceptionStatus.ConnectFailure
+                        ? "The store could not be reached from this connection."
+                        : "The store did not answer with a package.";
+                return hint + " Try again, or download the .crx and use the file import.";
+            }
             string m = ex.Message ?? "Could not open the profile";
             int i = m.IndexOf("\r\n", StringComparison.Ordinal);
             if (i < 0) i = m.IndexOf('\n');

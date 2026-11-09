@@ -354,11 +354,35 @@ namespace JoeBrowser
                 : ExtensionManager.EnabledFolders(profile.Tools, masterExtensions, customExtensions, proxyOn);
             if (folders.Count > 0)
             {
-                s._extensionsLoaded = true;
-                disableFeatures.Add("DisableLoadExtensionCommandLineSwitch");
-                var paths = string.Join(",", folders.Select(p => p.Replace("\\", "/")).ToArray());
-                args.Add("--disable-extensions-except=\"" + paths + "\"");
-                args.Add("--load-extension=\"" + paths + "\"");
+                /* Every folder is on the command line twice, once for each switch. Duplicates
+                   across the built-in tools and the user's library make Chromium drop the whole
+                   list, and a command line past 32k characters is not passed at all; keep the
+                   list unique and inside the limit rather than losing it silently. */
+                var unique = new List<string>();
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string folder in folders)
+                {
+                    if (string.IsNullOrEmpty(folder)) continue;
+                    if (seen.Add(folder.TrimEnd('\\'))) unique.Add(folder);
+                }
+                var paths = new StringBuilder();
+                int dropped = 0;
+                for (int i = 0; i < unique.Count; i++)
+                {
+                    string part = (paths.Length > 0 ? "," : "") + unique[i].Replace("\\", "/");
+                    // Two switches of the same length, so the budget is spent at twice the size.
+                    if ((paths.Length + part.Length) * 2 > 28000) { dropped = unique.Count - i; break; }
+                    paths.Append(part);
+                }
+                if (dropped > 0)
+                    Log.Info("Left out " + dropped + " extensions: the command line would be too long.");
+                if (paths.Length > 0)
+                {
+                    s._extensionsLoaded = true;
+                    disableFeatures.Add("DisableLoadExtensionCommandLineSwitch");
+                    args.Add("--disable-extensions-except=\"" + paths + "\"");
+                    args.Add("--load-extension=\"" + paths + "\"");
+                }
             }
             if (disableFeatures.Count > 0)
                 args.Add("--disable-features=" + string.Join(",", disableFeatures.ToArray()));

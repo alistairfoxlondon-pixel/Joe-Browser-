@@ -1155,6 +1155,9 @@ namespace JoeBrowser
         {
             _err.Text = text ?? "";
             _err.Visible = text != null && text.Length > 0;
+            /* The line elides at the end, and the end of "…is too long" is the part that says
+               what is wrong. The tooltip carries the whole sentence. */
+            ToolTips.Attach(_err, _err.Text);
             LayoutFooter();
             _err.Invalidate();
         }
@@ -1168,9 +1171,15 @@ namespace JoeBrowser
             int w = ClientSize.Width, h = ClientSize.Height;
             int pad = Ui.S(28);
 
+            /* The tabs are measured, not guessed. At 150% scale the five names needed more room
+               than the cell width the old code assumed, so "Privacy" was drawn under the start of
+               "Proxy" and the tab under the pointer was not the tab that was read. When the window
+               is too narrow for all five names the row keeps its bounds and each name is clipped
+               with an ellipsis, which reads as a shortened name and not as two names in one cell. */
+            int tabNeed = _tabs.PreferredWidth(Ui.S(72));
             _close.SetBounds(w - pad - Ui.S(32), Ui.S(16), Ui.S(32), Ui.S(32));
             _title.SetBounds(pad, Ui.S(16), Math.Max(Ui.S(120), w - pad * 2 - Ui.S(48)), Ui.S(32));
-            _tabs.SetBounds(pad, Ui.S(58), Math.Min(Ui.S(560), w - pad * 2), Ui.S(38));
+            _tabs.SetBounds(pad, Ui.S(58), Math.Min(Math.Max(Ui.S(360), tabNeed), w - pad * 2), Ui.S(38));
 
             int top = Ui.S(108);
             int bodyH = Math.Max(Ui.S(140), h - top - Ui.S(70));
@@ -1199,12 +1208,29 @@ namespace JoeBrowser
             int pad = Ui.S(28);
             int saveW = _save.PreferredWidth(Ui.S(150)), saveH = Ui.S(33);
             int cancelW = _cancel.PreferredWidth(Ui.S(88));
+            /* Both buttons and the error line have to fit in the footer. At a wide scale on a
+               narrow window they did not, and the Cancel button was pushed past the left edge
+               while the error line was drawn from the same place. Shrink the pair in proportion
+               before anything is placed. */
+            int room = Math.Max(Ui.S(160), w - pad * 2);
+            if (saveW + Ui.S(8) + cancelW > room)
+            {
+                int spare = Math.Max(Ui.S(80), room - Ui.S(8));
+                int want = Math.Max(1, saveW + cancelW);
+                saveW = Math.Max(Ui.S(88), spare * saveW / want);
+                cancelW = Math.Max(Ui.S(64), spare - saveW);
+            }
             _save.SetBounds(w - pad - saveW, h - Ui.S(16) - saveH, saveW, saveH);
             _cancel.SetBounds(_save.Left - Ui.S(8) - cancelW, h - Ui.S(16) - saveH, cancelW, saveH);
             /* The label starts at pad+22 (right of the alert glyph), so its width has to be
                measured from that x or the last characters sit under the Cancel button. */
-            int errW = Math.Max(Ui.S(120), _cancel.Left - Ui.S(8) - (pad + Ui.S(22)) - Ui.S(4));
+            /* The error line is one row high and takes whatever the two buttons leave. On a
+               narrow window that used to be negative, so the message was drawn nowhere: the save
+               was refused and nothing said why. It gets a minimum and is allowed to overlap the
+               footer padding rather than vanish. */
+            int errW = Math.Max(Ui.S(80), _cancel.Left - Ui.S(8) - (pad + Ui.S(22)) - Ui.S(4));
             _err.SetBounds(pad + Ui.S(22), h - Ui.S(16) - saveH, errW, saveH);
+            ToolTips.Attach(_err, _err.Text);
             _footerY = h - Ui.S(64);
         }
 
@@ -1325,8 +1351,13 @@ namespace JoeBrowser
             _lblGpu.SetBounds(0, y, cw, lh); y += lh + lg;
             _gpu.SetBounds(0, y, cw, fh); y += fh + rg;
 
-            _regen.SetBounds(0, y, _regen.PreferredWidth(Ui.S(160)), Ui.S(33));
-            _random.SetBounds(_regen.Right + Ui.S(8), y, _random.PreferredWidth(Ui.S(160)), Ui.S(33));
+            /* The pair shares the column: two long labels at a large scale were wider than the
+               page, so the second button hung outside the content and its last word was cut. */
+            int regenW = _regen.PreferredWidth(Ui.S(160));
+            int randomW = _random.PreferredWidth(Ui.S(160));
+            Ui.FitPair(ref regenW, ref randomW, Ui.S(8), Math.Max(Ui.S(200), cw), Ui.S(96), Ui.S(96));
+            _regen.SetBounds(0, y, regenW, Ui.S(33));
+            _random.SetBounds(_regen.Right + Ui.S(8), y, randomW, Ui.S(33));
             y += Ui.S(33) + Ui.S(10);
             UpdateFirefoxWarn(0, y, cw);
             if (_fpWarn.Visible) y += Ui.S(26) + Ui.S(6);
@@ -1348,10 +1379,25 @@ namespace JoeBrowser
             _fontSet.SetBounds(0, y, two ? (cw - cg) / 2 : cw, fh); y += fh + rg;
 
             _lblUa.SetBounds(0, y, cw, lh); y += lh + lg;
-            int uaW = two ? cw - Ui.S(214) - cg : cw;
-            _ua.SetBounds(0, y, uaW, fh);
-            _autoUa.SetBounds(uaW + cg, y, cw - uaW - cg, fh);
-            y += fh + rg;
+            /* The "keep it automatic" button was placed at a fixed 214 px reserve, measured
+               against the English label. A longer translation needs more than that, and the two
+               controls then overlapped across the middle of the row. Its real width is asked
+               for instead, and the field keeps whatever is left. */
+            int autoW = Math.Min(two ? cw / 2 : cw, MeasureToggleWidth(_autoUa));
+            if (two)
+            {
+                int uaW = cw - autoW - cg;
+                _ua.SetBounds(0, y, uaW, fh);
+                _autoUa.SetBounds(uaW + cg, y, autoW, fh);
+                y += fh + rg;
+            }
+            else
+            {
+                _ua.SetBounds(0, y, cw, fh);
+                y += fh + lg;
+                _autoUa.SetBounds(0, y, autoW, fh);
+                y += fh + rg;
+            }
 
             Control[] toggles = { _canvas, _audio, _fonts, _hwNoise, _battery, _dnt, _autoMatch };
             int cols = two ? 2 : 1;
@@ -1376,13 +1422,17 @@ namespace JoeBrowser
             _savedProxy.SetBounds(0, y, cw, fh); y += fh + rg;
 
             _lblType.SetBounds(0, y, cw, lh); y += lh + lg;
-            _proxySeg.SetBounds(0, y, Math.Min(cw, Ui.S(420)), Ui.S(38));
+            /* Four names in 420 pixels is 105 each, which "SOCKS5" at a large scale does not
+               fit, and the name ran into its neighbour. Measured, then capped at the column. */
+            int segW = Math.Max(Ui.S(320), Math.Min(_proxySeg.PreferredWidth(Ui.S(96)), Ui.S(520)));
+            _proxySeg.SetBounds(0, y, Math.Min(cw, segW), Ui.S(38));
             y += Ui.S(38) + rg;
 
             y = Row(_lblHost, _host, _lblPort, _port, y, cw, two, lh, lg, rg, cg, fh, fh);
             y = Row(_lblUser, _user, _lblPass, _pass, y, cw, two, lh, lg, rg, cg, fh, fh);
 
-            _testBtn.SetBounds(0, y, _testBtn.PreferredWidth(Ui.S(150)), fh);
+            int testW = _testBtn.PreferredWidth(Ui.S(150));
+            _testBtn.SetBounds(0, y, Math.Min(cw, testW), fh);
             y += fh + Ui.S(12);
 
             _proxyCard.SetBounds(0, y, cw, Ui.S(52));
@@ -1423,15 +1473,30 @@ namespace JoeBrowser
             _lblCustomExt.SetBounds(0, y, cw, lh); y += lh + lg;
             _customExt.SetBounds(0, y, cw, Ui.S(76)); y += Ui.S(76) + Ui.S(6);
             _lblExtHint.SetBounds(0, y, cw, Ui.S(34)); y += Ui.S(34) + Ui.S(10);
-            int bw = _openExtFolder.PreferredWidth(Ui.S(200));
+            int bw = Math.Min(cw, _openExtFolder.PreferredWidth(Ui.S(200)));
             _openExtFolder.SetBounds(0, y, bw, fh); y += fh + Ui.S(12);
 
             FinishPage(page, host, cw, y);
         }
 
+        /// <summary>Width a toggle needs for its label, plus the switch it draws itself.</summary>
+        private static int MeasureToggleWidth(JBToggle t)
+        {
+            if (t == null) return Ui.S(180);
+            using (var g = System.Drawing.Graphics.FromHwnd(IntPtr.Zero))
+            {
+                float text = Ui.Measure(g, t.Text ?? "", t.Font ?? Theme.Body).Width;
+                return (int)Math.Ceiling(text) + Ui.S(78);
+            }
+        }
+
         private void FinishPage(Panel page, JBScrollHost host, int cw, int height)
         {
-            page.SetBounds(0, 0, cw, Math.Max(height, host.Height));
+            /* The page carries its content plus room for the footer bar, which is not part of the
+               scrolling area: without the allowance the last row of the last tab sat under the
+               Save button and could not be scrolled clear of it. */
+            int bottom = height + Ui.S(24);
+            page.SetBounds(0, 0, cw, Math.Max(bottom, host.Height));
             host.SyncExtent();
         }
 

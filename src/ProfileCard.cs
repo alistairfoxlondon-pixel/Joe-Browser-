@@ -263,8 +263,11 @@ namespace JoeBrowser
             PaintHeader(g, r);
             bool proxyWrapped;
             PaintChips(g, out proxyWrapped);
-            // Tags give the card up to the proxy chip when the width cannot hold both on one line.
-            if (!proxyWrapped) PaintTags(g);
+            /* The tag and meta row used to be skipped outright when the proxy chip wrapped, so a
+               narrow card silently lost the profile's timezone, language and tags to make room
+               for one chip. The row moves down a line instead; the card is tall enough for it and
+               the action bar is anchored to the bottom edge. */
+            PaintTags(g, proxyWrapped ? Ui.S(30) : 0);
             PaintActions(g);
 
             if (Ui.FocusCues(this)) Ui.FocusRing(g, r, rad);
@@ -439,16 +442,16 @@ namespace JoeBrowser
             return x + w;
         }
 
-        private void PaintTags(Graphics g)
+        private void PaintTags(Graphics g, int shift)
         {
             var tags = SplitTags(Model.Tags);
             if (tags.Count == 0 && string.IsNullOrWhiteSpace(Model.Status))
             {
-                PaintMeta(g);
+                PaintMeta(g, shift);
                 return;
             }
 
-            float y = Ui.S(108);
+            float y = Ui.S(108) + shift;
             float h = Ui.S(TagH);
             float x = Ui.S(Pad);
             float right = Width - Ui.S(Pad);
@@ -492,10 +495,10 @@ namespace JoeBrowser
         /// the two fingerprint facts the card does not show anywhere else - timezone and
         /// language - so every card keeps the same height and the row still carries information.
         /// </summary>
-        private void PaintMeta(Graphics g)
+        private void PaintMeta(Graphics g, int shift)
         {
             if (Model.Fp == null) return;
-            float y = Ui.S(108);
+            float y = Ui.S(108) + shift;
             float h = Ui.S(TagH);
             float x = Ui.S(Pad);
             float right = Width - Ui.S(Pad);

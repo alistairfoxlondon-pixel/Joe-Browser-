@@ -516,6 +516,11 @@ namespace JoeBrowser
             if (_fix.Visible)
             {
                 int fw = _fix.PreferredWidth(Ui.S(190));
+                /* Both buttons are measured against the window before either is placed: the
+                   pair used to run past the left edge on a narrow window and the fix button
+                   lost its first word. */
+                Ui.FitPair(ref fw, ref cw2, Ui.S(8), Math.Max(Ui.S(200), w - pad * 2), Ui.S(72), Ui.S(72));
+                _close.SetBounds(w - pad - cw2, by, cw2, bh);
                 _fix.SetBounds(w - pad - cw2 - Ui.S(8) - fw, by, fw, bh);
             }
         }

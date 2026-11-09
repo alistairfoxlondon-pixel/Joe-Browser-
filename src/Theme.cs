@@ -755,6 +755,51 @@ namespace JoeBrowser
             return Theme.Bg;
         }
 
+        /// <summary>
+        /// Places a row of buttons left to right, wrapping onto another line when the next one
+        /// would cross <paramref name="width"/>. Returns the y of the line after the last one, so
+        /// the caller starts the next block below every button it placed.
+        ///
+        /// Three pages used to measure and place their buttons by hand, each with the same
+        /// defect: the position was computed from the right edge one button at a time, so a
+        /// button could be placed on top of the one before it, and a narrow window pushed the
+        /// group past the edge of the page. One implementation means one fix.
+        /// </summary>
+        /// <summary>
+        /// Two measured widths that have to share one row. When the pair is wider than the room
+        /// it gets, both shrink in proportion instead of one being pushed off the edge - which is
+        /// what happened to the left hand button of every footer built this way, at a large text
+        /// scale or in a window someone had narrowed.
+        /// </summary>
+        public static void FitPair(ref int left, ref int right, int gap, int room, int minLeft, int minRight)
+        {
+            if (left < 0) left = 0;
+            if (right < 0) right = 0;
+            if (left + gap + right <= room) return;
+            int spare = Math.Max(minLeft + minRight, room - gap);
+            int total = Math.Max(1, left + right);
+            int a = spare * left / total;
+            left = Math.Max(Math.Min(minLeft, spare), a);
+            right = Math.Max(Math.Min(minRight, spare - left), spare - left);
+        }
+
+        public static int FlowButtons(JBButton[] buttons, int left, int top, int width, int gap, int rowHeight)
+        {
+            if (buttons == null || buttons.Length == 0) return top;
+            int x = left, y = top, used = 0;
+            foreach (var b in buttons)
+            {
+                if (b == null || !b.Visible) continue;
+                int bw = b.PreferredWidth(S(84));
+                if (bw > width) bw = width;
+                if (used > 0 && x + bw > left + width) { x = left; y += rowHeight + gap; used = 0; }
+                b.SetBounds(x, y, bw, rowHeight);
+                x += bw + gap;
+                used++;
+            }
+            return y + rowHeight;
+        }
+
         public static GraphicsPath Round(RectangleF r, float radius)
         {
             var path = new GraphicsPath();
@@ -862,6 +907,37 @@ namespace JoeBrowser
             int h = maxLines <= 1 ? lineH : maxLines * lineH + S(2);
             TextRenderer.DrawText(g, text, font,
                 new Rectangle((int)Math.Round(x), (int)Math.Round(y), w, h), color, f);
+        }
+
+        /// <summary>
+        /// Splits text into lines that fit the width, the way the drawing code will lay them out.
+        /// A centred label that is too narrow for its sentence needs its own height: drawn on one
+        /// line it was cut off with an ellipsis, and the words it dropped were the end of the
+        /// sentence the user needed to read. Wrapping is separate from MeasureText's WordBreak,
+        /// which reports a height for a single batch of text and cannot be asked for the lines.
+        /// </summary>
+        public static List<string> WrapLines(Graphics g, string text, Font font, float maxWidth)
+        {
+            var lines = new List<string>();
+            if (string.IsNullOrEmpty(text)) return lines;
+            if (maxWidth <= 0) { lines.Add(text); return lines; }
+
+            foreach (var para in text.Replace("\r", "").Split('\n'))
+            {
+                var words = para.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (words.Length == 0) { lines.Add(""); continue; }
+                var line = words[0];
+                for (int i = 1; i < words.Length; i++)
+                {
+                    var candidate = line + " " + words[i];
+                    // The two pixel allowance matches Text's own width padding, so a line that
+                    // measures as exactly the width is not reported as one that does not fit.
+                    if (Measure(g, candidate, font).Width <= maxWidth + S(2)) line = candidate;
+                    else { lines.Add(line); line = words[i]; }
+                }
+                lines.Add(line);
+            }
+            return lines;
         }
 
         public static SizeF Measure(Graphics g, string text, Font font)
