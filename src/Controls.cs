@@ -1691,26 +1691,31 @@ namespace JoeBrowser
             float ty = (h - trackH) / 2f;
             var track = new RectangleF(0.5f, ty, trackW, trackH);
 
-            if (_checked) Ui.Fill(g, track, trackH / 2f, Theme.Accent);
+            /* Square, like everything else on the surface: the track is the shape of the app,
+               and the knob is a square that slides. A pill here would be the one rounded thing
+               left on a page of square cards, which is exactly the inconsistency the radius
+               sweep is for. */
+            float rad = Ui.S(Theme.ButtonRadius);
+            if (_checked) Ui.Fill(g, track, rad, Theme.Accent);
             else
             {
-                if (_hover) Ui.Fill(g, track, trackH / 2f, Theme.HoverOverlay);
+                if (_hover) Ui.Fill(g, track, rad, Theme.HoverOverlay);
                 // Only the off state needs an outline; over the filled track a darker hairline
                 // read as a dirty edge rather than a border.
-                Ui.Stroke(g, track, trackH / 2f, Theme.TextDim, 1f);
+                Ui.Stroke(g, track, rad, Theme.TextDim, 1f);
             }
 
-            float knobD = Ui.S(13);
+            float knobD = Ui.S(15);
             float ky = track.Y + (trackH - knobD) / 2f;
             float kx = _checked ? track.Right - knobD - Ui.S(3) : track.X + Ui.S(3);
             using (var b = new SolidBrush(_checked ? Theme.OnAccent : Theme.TextDim))
-                g.FillEllipse(b, kx, ky, knobD, knobD);
+                g.FillRectangle(b, kx, ky, knobD, knobD);
 
             if (!string.IsNullOrEmpty(Text))
                 Ui.Text(g, Text, Font, Enabled ? Theme.Text : Theme.TextFaint, trackW + Ui.S(10), (h - Font.GetHeight(g)) / 2f, Math.Max(0, Width - trackW - Ui.S(10)));
 
             if (Ui.FocusCues(this))
-                Ui.FocusRing(g, track, trackH / 2f);
+                Ui.FocusRing(g, track, Ui.S(Theme.ButtonRadius));
         }
     }
 

@@ -210,7 +210,10 @@ namespace JoeBrowser
             catch { Ui.Scale = 1f; }
             if (Ui.Scale < 1f) Ui.Scale = 1f;
 
-            MinimumSize = new Size(Ui.S(1000), Ui.S(660));
+            /* The floor is derived from what must never be cut: one profile card (320), the
+               page gutters (64) and the navigation rail (280). A narrower window had to clip one
+               of them - at the old 1000 the card grid lost its right-hand gutter. */
+            MinimumSize = new Size(Ui.S(Theme.NavbarWidth + ProfileCard.CardMinW + 64), Ui.S(680));
 
             // The app is a workspace, not a dialog: it opens across the whole working area and
             // remembers the size it was closed at. Nothing is capped at a fixed 1280 box.

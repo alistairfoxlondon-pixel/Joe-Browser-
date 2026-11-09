@@ -392,11 +392,11 @@ namespace JoeBrowser
             // switch
             var sw = SwitchRect;
             bool on = Item.Enabled;
-            Ui.Fill(g, sw, sw.Height / 2f, on ? Theme.Accent : Theme.ButtonBorder);
+            Ui.Fill(g, sw, Ui.S(Theme.ButtonRadius), on ? Theme.Accent : Theme.ButtonBorder);
             float knob = sw.Height - Ui.S(6);
             float kx = on ? sw.Right - knob - Ui.S(3) : sw.X + Ui.S(3);
-            using (var b = new SolidBrush(Theme.OnAccent)) g.FillEllipse(b, kx, sw.Y + Ui.S(3), knob, knob);
-            if (!on) Ui.Stroke(g, sw, sw.Height / 2f, Theme.Line, 1f);
+            using (var b = new SolidBrush(Theme.OnAccent)) g.FillRectangle(b, kx, sw.Y + Ui.S(3), knob, knob);
+            if (!on) Ui.Stroke(g, sw, Ui.S(Theme.ButtonRadius), Theme.Line, 1f);
             if (cues) Ui.FocusRing(g, r, Ui.S(6));
         }
     }

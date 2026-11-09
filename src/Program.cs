@@ -232,6 +232,36 @@ namespace JoeBrowser
                     if (Math.Min(Theme.PxMicro, Theme.PxCaption) < 14) sb.Append(" [text below 14 px is in the scale]");
                     if (Theme.ButtonRadius != 0 || Theme.CardRadius != 0) sb.Append(" [a rounded corner is back in the theme]");
 
+                    /* The layout is measured, so it can be proven: every line of text drawn on a
+                       card or a row has to fit the width it is given, at the new type sizes and
+                       at every scale. These are the fixed strings that used to be cut - the
+                       toast message, the label beside a toggle, a card's description - measured
+                       against the space they really get. */
+                    float keepScale = Ui.Scale;
+                    foreach (float scale in new[] { 1f, 1.25f, 1.5f })
+                    {
+                        Ui.Scale = scale;
+                        Theme.ClearFontCache();
+                        using (var g = System.Drawing.Graphics.FromHwnd(IntPtr.Zero))
+                        {
+                            /* A row's two lines: the title at H3 and the caption under it must
+                               both fit the row's inner width at the narrowest card. */
+                            float rowW = Ui.S(ProfileCard.CardMinW) - Ui.S(36);
+                            if (Ui.Measure(g, "Firefox a browser profile with a long name here", Theme.H3).Width > rowW)
+                                sb.Append(" [a row title does not fit at " + scale + "]");
+                            /* The longest caption the interface draws, wrapped in a card column:
+                               it is allowed three lines, so the block it lives in is sized for
+                               three. If it needs a fourth at some scale, that block is a clipped
+                               block - which is the defect being fixed. */
+                            float three = 3f * Theme.LineHeight(Theme.Small);
+                            float need = Theme.MeasureWrapped(g, L10n.T("acct.pin.off.state"), Theme.Small, rowW, 99);
+                            if (need > three + 1f)
+                                sb.Append(" [a card caption needs more than three lines at " + scale + "]");
+                        }
+                    }
+                    Ui.Scale = keepScale;
+                    Theme.ClearFontCache();
+
                     /* The reported defect of this round: every profile on a machine claimed the
                        installed browser's build, so a workspace of ten profiles reported one
                        number, the same one as the user's own Chrome. Asserted here the way the
