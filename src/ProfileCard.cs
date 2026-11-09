@@ -342,8 +342,11 @@ namespace JoeBrowser
         {
             string kind = BrowserMark.LabelFor(BrowserMark.KindFor(Model));
             string group = string.IsNullOrWhiteSpace(Model.Group) ? "" : Model.Group.Trim();
-            if (group.Length == 0) return kind;
-            return kind + "  ·  " + group;
+            /* A profile that wipes itself on close says so on its face. It is a promise about the
+               session, and a user who cannot see which profiles make it will not trust it. */
+            string fresh = Model.FreshSession ? "  ·  fresh" : "";
+            if (group.Length == 0) return kind + fresh;
+            return kind + "  ·  " + group + fresh;
         }
 
         /// <summary>

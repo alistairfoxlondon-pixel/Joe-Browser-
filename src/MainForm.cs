@@ -2492,6 +2492,9 @@ namespace JoeBrowser
 
         private void ToggleTheme()
         {
+            /* SetMode delivers the change to every open window, and each of them applies it in
+               one frozen repaint (see JBForm.ApplyModeChange). Restyling again from here would
+               run the walk twice and paint the intermediate state - the flash. */
             Theme.SetMode(_themeSwitch.Checked);
             if (_settings != null)
             {
@@ -2499,11 +2502,6 @@ namespace JoeBrowser
                 try { _store.SaveSettings(_settings); } catch { }
             }
             _themeSwitch.Invalidate();
-            /* Pages paint from Theme.* live, but their BackColor and a few cached brushes are
-               captured at construction, so a theme flip has to walk the tree once. */
-            Theme.Restyle(this);
-            LayoutAll();
-            Invalidate();
         }
 
         protected override void OnPaint(PaintEventArgs e)

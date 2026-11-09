@@ -1692,6 +1692,11 @@ namespace JoeBrowser
             try { if (_relay != null) _relay.Dispose(); } catch { }
             try { if (_proc != null) _proc.Dispose(); } catch { }
             try { if (_dirLock != null) { _dirLock.Close(); _dirLock = null; } } catch { }
+            /* A profile marked as a fresh session is wiped here, on the way out, not when the
+               next one starts: the data must not survive the window that created it. It runs on
+               the closing path so the user sees no delay before the browser disappears. */
+            if (Profile != null && Profile.FreshSession && !string.IsNullOrEmpty(DataDir))
+                ProfileStore.WipeSessionData(DataDir);
             var handler = Closed;
             if (handler != null) { try { handler(this); } catch { } }
         }

@@ -307,6 +307,43 @@ namespace JoeBrowser
 
         private readonly EventHandler _onModeChanged;
 
+        /// <summary>
+        /// Applies a theme change to this window in one step: repainting is stopped over the
+        /// whole window, every control is re-styled, the layout is redone and one paint follows.
+        /// Controls that invalidate themselves during the walk are therefore not painted against
+        /// a palette the next control is about to change - which is what the flash was.
+        /// </summary>
+        private void ApplyModeChange()
+        {
+            bool frozen = false;
+            try
+            {
+                if (IsHandleCreated)
+                {
+                    try { Native.SendMessage(Handle, 0x000B, IntPtr.Zero, IntPtr.Zero); frozen = true; } catch { }
+                }
+                ReStyle();
+                Theme.Restyle(this);
+            }
+            finally
+            {
+                if (frozen && IsHandleCreated)
+                {
+                    try { Native.SendMessage(Handle, 0x000B, (IntPtr)1, IntPtr.Zero); } catch { }
+                }
+                /* The caption bar and the scrollbars of a themed dialog are Windows' own, so the
+                   DWM attributes have to be re-applied on a mode change or the window keeps a dark
+                   border and a light body until it is reopened. */
+                if (IsHandleCreated)
+                {
+                    try { Native.WindowBorderColor(Handle, Theme.Line); } catch { }
+                    try { Native.ImmersiveDarkMode(Handle, Theme.Dark); } catch { }
+                }
+                Invalidate(true);
+                Update();
+            }
+        }
+
         public JBForm()
         {
             FormBorderStyle = FormBorderStyle.None;
@@ -320,7 +357,7 @@ namespace JoeBrowser
             Icon = AppIcon.Window;
             ShowIcon = true;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
-            _onModeChanged = delegate { ReStyle(); };
+            _onModeChanged = delegate { ApplyModeChange(); };
             Theme.ModeChanged += _onModeChanged;
             Disposed += delegate { Theme.ModeChanged -= _onModeChanged; };
         }

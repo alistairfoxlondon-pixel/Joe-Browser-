@@ -474,6 +474,61 @@ namespace JoeBrowser
             return bytes;
         }
 
+        /// <summary>
+        /// Everything that makes a browsing session a session, deleted from one profile's data
+        /// folder: cookies, local and session storage, IndexedDB, service workers, the session
+        /// restore files and the HTTP caches. The Preferences file is kept, so the profile's
+        /// proxy, extensions and fingerprint settings are still there when it opens again.
+        ///
+        /// The names below are the ones Chromium actually writes. Anything not in this list that
+        /// a future Chromium adds stays - so the list is deliberately about identity and state,
+        /// not "delete the folder": deleting the folder would also take the profile's own
+        /// configuration and slow every launch to a full re-download.
+        /// </summary>
+        public static void WipeSessionData(string dataDir)
+        {
+            if (string.IsNullOrEmpty(dataDir) || !Directory.Exists(dataDir)) return;
+            string[] files =
+            {
+                "Cookies", "Cookies-journal", "Network\\Cookies", "Network\\Cookies-journal",
+                "History", "History-journal", "Favicons", "Favicons-journal",
+                "Top Sites", "Top Sites-journal", "Bookmarks.bak",
+                "Web Data", "Web Data-journal", "Login Data", "Login Data-journal",
+                "Local State.old", "Sessions\\Session_*", "Current Session", "Current Tabs",
+                "Last Session", "Last Tabs"
+            };
+            string[] dirs =
+            {
+                "Network", "Session Storage", "Local Storage", "IndexedDB", "File System",
+                "Service Worker", "Cache", "Code Cache", "GPUCache", "DawnCache",
+                "GrShaderCache", "ShaderCache", "Sync Data", "Extension State",
+                "Local Extension Settings", "Managed Extension Settings", "Session Storage"
+            };
+            foreach (string pattern in files)
+            {
+                try
+                {
+                    string dir = Path.GetDirectoryName(Path.Combine(dataDir, pattern));
+                    if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) continue;
+                    foreach (string f in Directory.GetFiles(dir, Path.GetFileName(pattern)))
+                    {
+                        /* The Network folder also holds the cache this profile may be using for
+                           extensions; only the cookie store is removed from it here and the
+                           directory list below removes the caches whole. */
+                        try { File.Delete(f); } catch { }
+                    }
+                }
+                catch { }
+            }
+            foreach (string name in dirs)
+            {
+                string dir = Path.Combine(dataDir, name);
+                try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+                catch (Exception ex) { Log.Info("Could not clear " + name + " for a fresh session: " + ex.Message); }
+            }
+            Log.Info("Cleared session data for a fresh-session profile");
+        }
+
         public AppSettings LoadSettings()
         {
             try
