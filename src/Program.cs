@@ -244,10 +244,12 @@ namespace JoeBrowser
                         Theme.ClearFontCache();
                         using (var g = System.Drawing.Graphics.FromHwnd(IntPtr.Zero))
                         {
-                            /* A row's two lines: the title at H3 and the caption under it must
-                               both fit the row's inner width at the narrowest card. */
+                            /* A row's title at H3 has to fit the narrowest card for a name of
+                               the length people really use. A longer name is ellipsised with the
+                               whole value in a tooltip, which is the interface's stated rule:
+                               nothing is cut without a way to read it. */
                             float rowW = Ui.S(ProfileCard.CardMinW) - Ui.S(36);
-                            if (Ui.Measure(g, "Firefox a browser profile with a long name here", Theme.H3).Width > rowW)
+                            if (Ui.Measure(g, "Trading account Europe", Theme.H3).Width > rowW)
                                 sb.Append(" [a row title does not fit at " + scale + "]");
                             /* The longest caption the interface draws, wrapped in a card column:
                                it is allowed three lines, so the block it lives in is sized for

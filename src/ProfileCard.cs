@@ -50,6 +50,8 @@ namespace JoeBrowser
         private const double KebabSize = 30;
 
         private bool _hover, _kebabHover, _openHover, _checkHover;
+        /// <summary>Set once, on the first paint whose name had to be ellipsised.</summary>
+        private bool _nameTip;
         private ContextMenuStrip _menu;
 
         /// <summary>
@@ -317,10 +319,17 @@ namespace JoeBrowser
 
             string name = string.IsNullOrWhiteSpace(Model.Name) ? "Untitled profile" : Model.Name;
             float avail = Math.Max(Ui.S(40), nameRight - tx);
+            /* A name longer than the header is ellipsised into a tooltip rather than vanished
+               into it: the card says "it is called something longer", and hovering says what. */
+            if (!_nameTip && Model != null && Ui.Measure(g, name, Theme.H2).Width > avail + Ui.S(2))
+            {
+                _nameTip = true;
+                ToolTips.Attach(this, name);
+            }
             Ui.Text(g, name, Theme.H2, Theme.Text, tx, Ui.S(18), avail);
 
             string sub = HeaderSub();
-            Ui.Text(g, sub, Theme.Caption, Theme.TextFaint, tx, Ui.S(42), avail);
+            Ui.Text(g, sub, Theme.Caption, Theme.TextFaint, tx, Ui.S(18) + Theme.LineHeight(Theme.H2) + Ui.S(4), avail);
 
             Ui.Fill(g, pill, Ui.S(Theme.ButtonRadius), Theme.Panel2);
             using (var b = new SolidBrush(statusColor))
