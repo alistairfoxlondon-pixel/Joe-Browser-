@@ -358,7 +358,7 @@ namespace JoeBrowser
                 float track = Height;
                 float thumb = Math.Max(Ui.S(36), track * track / (track + _maxScroll));
                 float ty = (track - thumb) * (_scroll / (float)_maxScroll);
-                Ui.Fill(g, new RectangleF(Width - Ui.S(9), ty, Ui.S(Theme.ButtonRadius), thumb), Ui.S(2.5f), Theme.HoverStrong);
+                Ui.Fill(g, new RectangleF(Width - Ui.S(9), ty, Ui.S(3f), thumb), Ui.S(1.5f), Theme.HoverStrong);
             }
 
             // The keyboard cursor is drawn after the transform is reset so the ring is never
@@ -367,7 +367,7 @@ namespace JoeBrowser
             {
                 var fr = _tiles[_focusIndex].Rect;
                 var box = new RectangleF(fr.X + 0.5f, fr.Y + 0.5f - _scroll, fr.Width - 1.5f, fr.Height - 1.5f);
-                if (box.Bottom > 0 && box.Top < Height) Ui.FocusRing(g, box, Ui.S(8));
+                if (box.Bottom > 0 && box.Top < Height) Ui.FocusRing(g, box, Ui.S(Theme.ButtonRadius));
             }
         }
 

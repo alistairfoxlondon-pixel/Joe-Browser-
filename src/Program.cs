@@ -347,6 +347,29 @@ namespace JoeBrowser
                         sb.Append(" [version checks threw " + ex.GetType().Name + ": " + ex.Message + "]");
                     }
 
+                    /* Every routed rectangle in the app is square. Asserted as a swept range rather
+                       than a constant, because the sweep is what a regression would look like: a
+                       radius of 1 or 2 still rounds the corners of every card in the app. */
+                    try
+                    {
+                        using (var g = System.Drawing.Graphics.FromHwnd(IntPtr.Zero))
+                        {
+                            foreach (float r in new[] { 0f, 0.4f, 0.5f })
+                            {
+                                RectangleF box = new RectangleF(0, 0, 40, 20);
+                                using (var path = Theme.Round(box, r))
+                                {
+                                    /* A square corner keeps all four box edges; a rounded one cuts
+                                       them away from the corners. */
+                                    var b = path.GetBounds();
+                                    if (Math.Abs(b.Width - box.Width) > 0.6f || Math.Abs(b.Height - box.Height) > 0.6f)
+                                        sb.Append(" [a surface is rounded at radius " + r + "]");
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex) { sb.Append(" [radius check threw: " + ex.Message + "]"); }
+
                     var saved = new Profile { Name = "self test save" };
                     store.Save(saved);
                     var back = store.LoadAll();

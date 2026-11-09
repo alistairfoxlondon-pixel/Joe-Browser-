@@ -384,8 +384,8 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(10), _hover ? Theme.PanelHover : Theme.Card);
-            Ui.Stroke(g, r, Ui.S(10), _hover ? Theme.AccentBorder : Theme.Line);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), _hover ? Theme.PanelHover : Theme.Card);
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), _hover ? Theme.AccentBorder : Theme.Line);
 
             float x = Ui.S(16);
             float tw = Math.Max(Ui.S(80), _action.Left - x - Ui.S(12));

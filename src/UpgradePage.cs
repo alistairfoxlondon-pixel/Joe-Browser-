@@ -68,9 +68,9 @@ namespace JoeBrowser
 
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             Color fill = Selected ? Theme.AccentOnBg : _hover ? Theme.PanelHover : Theme.Card;
-            Ui.Fill(g, r, Ui.S(6), fill);
-            Ui.Stroke(g, r, Ui.S(6), Selected ? Theme.AccentBorder : Theme.Line, Selected ? 1.4f : 1f);
-            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(6));
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), fill);
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), Selected ? Theme.AccentBorder : Theme.Line, Selected ? 1.4f : 1f);
+            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(Theme.ButtonRadius));
 
             float pad = Ui.S(10);
             float box = Ui.S(22);
@@ -187,8 +187,8 @@ namespace JoeBrowser
             if (string.IsNullOrEmpty(Message) || Width < Ui.S(60)) return;
 
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(6), Ui.Blend(BackColor, Amber, Theme.Dark ? 0.15f : 0.10f));
-            Ui.Stroke(g, r, Ui.S(6), Ui.Blend(BackColor, Amber, Theme.Dark ? 0.45f : 0.35f), 1f);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Ui.Blend(BackColor, Amber, Theme.Dark ? 0.15f : 0.10f));
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), Ui.Blend(BackColor, Amber, Theme.Dark ? 0.45f : 0.35f), 1f);
 
             float pad = Ui.S(10);
             float ic = Ui.S(15);
@@ -587,8 +587,8 @@ namespace JoeBrowser
             float w = _plan.Width;
             bool pro = Plan.IsPro;
             var r = new RectangleF(0.5f, 0.5f, w - 1.5f, _plan.Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(10), Theme.Card);
-            Ui.Stroke(g, r, Ui.S(10), pro ? Theme.AccentBorder : Theme.Line);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Theme.Card);
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), pro ? Theme.AccentBorder : Theme.Line);
 
             /* Icon chip, title block, state pill - the same three-part shape as a settings row.
                The plan is a state, not three loose lines of text, and it should read that way
@@ -596,7 +596,7 @@ namespace JoeBrowser
             float chip = Ui.S(42);
             var cr = new RectangleF(Ui.S(18), Ui.S(17), chip, chip);
             Color tint = pro ? Theme.Accent : Theme.TextDim;
-            Ui.Fill(g, cr, Ui.S(10), Ui.Blend(Theme.Card, tint, Theme.Dark ? 0.24f : 0.13f));
+            Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Ui.Blend(Theme.Card, tint, Theme.Dark ? 0.24f : 0.13f));
             float ic = Ui.S(22);
             Icons.Draw(g, pro ? "crown" : "sparkle",
                 new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), tint);
@@ -663,8 +663,8 @@ namespace JoeBrowser
             Ui.Quality(g);
             float w = _termsPanel.Width;
             var r = new RectangleF(0.5f, 0.5f, w - 1.5f, _termsPanel.Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(10), Theme.Card);
-            Ui.Stroke(g, r, Ui.S(10), Theme.Line);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Theme.Card);
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), Theme.Line);
 
             float x = Ui.S(20), y = Ui.S(16);
             Ui.Text(g, "Before you pay", Theme.H3, Theme.Text, x, y, w - Ui.S(40));

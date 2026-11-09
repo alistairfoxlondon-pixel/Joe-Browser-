@@ -161,9 +161,9 @@ namespace JoeBrowser
             {
                 int scoreW = Ui.S(96);
                 var bar = new RectangleF(w - pad - scoreW, Ui.S(46), scoreW, Ui.S(6));
-                Ui.Fill(g, bar, Ui.S(3), Theme.Panel2);
+                Ui.Fill(g, bar, Ui.S(Theme.ButtonRadius), Theme.Panel2);
                 float frac = _result.Score / 100f;
-                Ui.Fill(g, new RectangleF(bar.X, bar.Y, bar.Width * frac, bar.Height), Ui.S(3),
+                Ui.Fill(g, new RectangleF(bar.X, bar.Y, bar.Width * frac, bar.Height), Ui.S(Theme.ButtonRadius),
                     _result.Clean ? Theme.Success : Theme.Accent);
                 Ui.Text(g, _result.Score + "%", Theme.Caption, Theme.TextDim, w - pad - scoreW,
                     Ui.S(56), scoreW, "right");
@@ -193,8 +193,8 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(10), Theme.Card);
-            Ui.Stroke(g, r, Ui.S(10), Theme.Line);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Theme.Card);
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), Theme.Line);
 
             float ic = Ui.S(15);
             float cy = Height / 2f;

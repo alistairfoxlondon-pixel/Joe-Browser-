@@ -447,7 +447,7 @@ namespace JoeBrowser
             float kx = on ? sw.Right - knob - Ui.S(3) : sw.X + Ui.S(3);
             using (var b = new SolidBrush(Theme.OnAccent)) g.FillRectangle(b, kx, sw.Y + Ui.S(3), knob, knob);
             if (!on) Ui.Stroke(g, sw, Ui.S(Theme.ButtonRadius), Theme.Line, 1f);
-            if (cues) Ui.FocusRing(g, r, Ui.S(6));
+            if (cues) Ui.FocusRing(g, r, Ui.S(Theme.ButtonRadius));
         }
     }
 
@@ -579,7 +579,7 @@ namespace JoeBrowser
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), _hover ? Theme.PanelHover : Theme.Panel);
             Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), _hover ? Theme.AccentBorder : Theme.Line, 1f);
-            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(8));
+            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(Theme.ButtonRadius));
 
             float chip = Ui.S(34);
             var cr = new RectangleF(Ui.S(14), (Height - chip) / 2f, chip, chip);
