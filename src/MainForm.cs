@@ -3203,22 +3203,35 @@ namespace JoeBrowser
             if (_pickAnchor != null && !_cards.ContainsKey(_pickAnchor)) _pickAnchor = null;
         }
 
+        /// <summary>How many cards were visible at the last grid layout.</summary>
+        private int _visibleCards = -1;
+
         private void ApplyFilter()
         {
-            string q = _filter.ToLowerInvariant();
+            /* Lowercased once per card, not five times per card. This runs on every keystroke in
+               the search box, so on a workspace of sixty profiles it was three hundred string
+               allocations per character typed. */
+            string q = (_filter ?? "").ToLowerInvariant();
             int shown = 0;
+            int visible = 0;
             foreach (var kv in _cards)
             {
                 var p = kv.Value.Model;
-                bool hit = q.Length == 0
-                    || (p.Name ?? "").ToLowerInvariant().Contains(q)
-                    || (p.Fp != null && (p.Fp.Os ?? "").ToLowerInvariant().Contains(q))
-                    || (p.Fp != null && (p.Fp.Timezone ?? "").ToLowerInvariant().Contains(q))
-                    || (p.Fp != null && ((p.Fp.Language ?? "").ToLowerInvariant().Contains(q)
-                        || FingerprintFactory.LanguageName(p.Fp.Language).ToLowerInvariant().Contains(q)))
-                    || (p.Proxy != null && (p.Proxy.Host ?? "").ToLowerInvariant().Contains(q));
+                bool hit;
+                if (q.Length == 0) hit = true;
+                else
+                {
+                    string name = (p.Name ?? "").ToLowerInvariant();
+                    string os = p.Fp == null ? "" : (p.Fp.Os ?? "").ToLowerInvariant();
+                    string tz = p.Fp == null ? "" : (p.Fp.Timezone ?? "").ToLowerInvariant();
+                    string lang = p.Fp == null ? "" : (p.Fp.Language ?? "").ToLowerInvariant();
+                    string langName = p.Fp == null ? "" : FingerprintFactory.LanguageName(p.Fp.Language).ToLowerInvariant();
+                    string host = p.Proxy == null ? "" : (p.Proxy.Host ?? "").ToLowerInvariant();
+                    hit = name.Contains(q) || os.Contains(q) || tz.Contains(q)
+                        || lang.Contains(q) || langName.Contains(q) || host.Contains(q);
+                }
                 kv.Value.Visible = hit;
-                if (hit) shown++;
+                if (hit) { shown++; visible++; }
             }
             /* Only selections that are still on screen survive a filter change. A pick whose
                card has been unloaded is dropped too, rather than trusted - see PrunePicks. */
@@ -3235,8 +3248,14 @@ namespace JoeBrowser
                top of the first card whenever a filter emptied and then refilled the list. */
             if (_emptyPanel.Visible) _emptyPanel.BringToFront();
             else if (shown > 0 && _page == 0) _host.BringToFront();
-            _grid.LayoutGrid();
-            _host.SyncExtent();
+            /* The grid only has a layout to recompute when the count of visible cards changed:
+               a keystroke that hides nothing used to re-place every card on the page. */
+            if (visible != _visibleCards)
+            {
+                _visibleCards = visible;
+                _grid.LayoutGrid();
+                _host.SyncExtent();
+            }
             Restack();
             _emptyPanel.Invalidate();
             Invalidate();

@@ -13,7 +13,7 @@ namespace JoeBrowser
     internal static class Installation
     {
         public const string AppName = "Joe Browser";
-        public const string AppVersion = "1.5.22";
+        public const string AppVersion = "1.5.23";
         public const string Publisher = "Joe Goldberg";
         public const string AppId = "JoeBrowser.Browser.1.2";
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\JoeBrowser";
