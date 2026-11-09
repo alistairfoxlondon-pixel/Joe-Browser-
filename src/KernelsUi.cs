@@ -61,11 +61,11 @@ namespace JoeBrowser
             _note.Wrap = true;
             Controls.Add(_note);
 
-            _refresh = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = "Refresh", Radius = 4, Height = Ui.S(33) };
+            _refresh = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = "Refresh", Radius = 6, Height = Theme.Field };
             _refresh.Click += delegate { LoadAsync(); };
             Controls.Add(_refresh);
 
-            _close = new JBButton { Kind = BtnKind.Ghost, Text = "Close", Radius = 4, Height = Ui.S(33) };
+            _close = new JBButton { Kind = BtnKind.Ghost, Text = "Close", Radius = 6, Height = Theme.Field };
             _close.Click += delegate { Close(); };
             Controls.Add(_close);
 
@@ -307,7 +307,7 @@ namespace JoeBrowser
             Install = install;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             Ui.Opaque(this);
-            _action = new JBButton { Radius = 4, Height = Ui.S(29) };
+            _action = new JBButton { Radius = 6, Height = Ui.S(30) };
             _action.Click += delegate { if (!_busy) { var h = ActionRequested; if (h != null) h(this, EventArgs.Empty); } };
             Controls.Add(_action);
             Apply();

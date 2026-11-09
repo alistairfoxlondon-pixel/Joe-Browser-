@@ -103,7 +103,7 @@ namespace JoeBrowser
 
         private static JBButton Button(string text, string icon, BtnKind kind)
         {
-            return new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 4, Height = Ui.S(33) };
+            return new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 6, Height = Theme.Field };
         }
 
         private HistoryStore.Entry SelectedEntry

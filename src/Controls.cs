@@ -9,7 +9,7 @@ namespace JoeBrowser
 {
     internal enum BtnKind { Primary, Ghost, Soft, Danger, Nav }
     internal enum ToastKind { Success, Info, Warn, Error }
-    internal enum LabelRole { Title, Body, Dim, Faint, Accent, Strong, Mono }
+    internal enum LabelRole { Title, Body, Dim, Faint, Accent, Strong, Mono, Section, Caption }
 
     /// <summary>Label that remembers its role so a theme flip restores the right contrast.</summary>
     internal sealed class JBLabel : Label, IReStyle
@@ -84,6 +84,11 @@ namespace JoeBrowser
                 case LabelRole.Dim: Font = Theme.Small; ForeColor = Theme.TextFaint; break;
                 case LabelRole.Faint: Font = Theme.Caption; ForeColor = Theme.TextFaint; break;
                 case LabelRole.Accent: Font = Theme.SmallBold; ForeColor = Theme.TextDim; break;
+                /* Row titles and the eyebrow above a group are two roles the pages need and
+                   the list had no name for, so every page painted them by hand with its own
+                   size. Named here they cannot drift apart. */
+                case LabelRole.Section: Font = Theme.H2; ForeColor = Theme.Text; break;
+                case LabelRole.Caption: Font = Theme.Caption; ForeColor = Theme.TextFaint; break;
                 case LabelRole.Mono: Font = Theme.MonoBody; ForeColor = Theme.Text; break;
             }
             Invalidate();
@@ -428,7 +433,16 @@ namespace JoeBrowser
         protected override void OnDpiChanged(DpiChangedEventArgs e)
         {
             base.OnDpiChanged(e);
-            Ui.Scale = Math.Max(1f, e.DeviceDpiNew / 96f);
+            float scale = Math.Max(1f, e.DeviceDpiNew / 96f);
+            /* Text is now measured in device units (see Theme.F), so a window that moved to a
+               different monitor has to be laid out again with its new scale or every measured
+               width would still describe the old screen. */
+            scale = (float)(Math.Round(scale * 4f) / 4f);
+            if (Math.Abs(scale - Ui.Scale) > 0.001f)
+            {
+                Theme.ClearFontCache();
+                Ui.Scale = scale;
+            }
             FitToWorkArea();
             OnScaleChanged();
             Invalidate();
@@ -727,7 +741,9 @@ namespace JoeBrowser
         public string Icon;
         public string BrandIcon;
         public bool Selected;
-        public int Radius = 4;
+        /// <summary>A control radius, not a card radius: the rounded rectangle Windows itself
+        /// uses for a push button. Corners sharper than this read as a 2010 form.</summary>
+        public int Radius = 6;
         private string _tip = "";
         public string Tip { get { return _tip; } set { _tip = value ?? ""; ToolTips.Attach(this, _tip); } }
         private bool _hover, _down;
@@ -808,8 +824,8 @@ namespace JoeBrowser
                     break;
 
                 case BtnKind.Nav:
-                    bg = Selected || _hover ? Theme.HoverStrong : Color.Transparent;
-                    fg = Theme.Text;
+                    bg = Selected ? Theme.AccentOnBg : _hover ? Theme.HoverOverlay : Color.Transparent;
+                    fg = Selected ? Theme.Text : Theme.TextDim;
                     break;
 
                 default:
@@ -821,24 +837,33 @@ namespace JoeBrowser
             if (bg != Color.Transparent) Ui.Fill(g, r, rad, bg);
             if (showBorder) Ui.Stroke(g, r, rad, border, 1f);
 
-            if (Kind == BtnKind.Nav && Selected)
-                Ui.Fill(g, new RectangleF(0, (Height - Ui.S(20)) / 2f, Ui.S(3), Ui.S(20)), Ui.S(1.5f), Theme.Accent);
-
             bool hasText = !string.IsNullOrEmpty(Text);
             bool hasIcon = !string.IsNullOrEmpty(Icon) || !string.IsNullOrEmpty(BrandIcon);
 
             if (Kind == BtnKind.Nav)
             {
-                // windows-ui navbar row: 15px padding, 22px icon, 10px gap, 15px label.
-                float navIcon = Ui.S(22);
+                /* A navigation row is a tall rounded row with a 20 px icon and its label, and the
+                   selected one carries a soft accent fill plus a short accent bar on the left.
+                   Drawn as a bare text line on the rail it read as a link in a list rather than
+                   the page you are on, which is the one piece of state a shell must show. */
+                float navIcon = Ui.S(20);
+                float iconX = Ui.S(14);
                 if (hasIcon)
                 {
-                    var box = new RectangleF(Ui.S(15), (Height - navIcon) / 2f, navIcon, navIcon);
+                    var box = new RectangleF(iconX, (Height - navIcon) / 2f, navIcon, navIcon);
                     if (BrandIcon != null) BrandIcons.Draw(g, BrandIcon, box);
-                    else Icons.Draw(g, Icon, box, fg);
+                    else Icons.Draw(g, Icon, box, Selected ? Theme.AccentText : fg);
                 }
                 Font navFont = Selected ? Theme.BodyBold : Theme.Body;
-                Ui.Text(g, Text, navFont, fg, Ui.S(47), (Height - navFont.GetHeight(g)) / 2f, Width - Ui.S(60));
+                Color navFg = Selected ? Theme.Text : Theme.TextDim;
+                float labelX = iconX + navIcon + Ui.S(12);
+                Ui.Text(g, Text, navFont, navFg, labelX,
+                    (Height - navFont.GetHeight(g)) / 2f, Math.Max(Ui.S(20), Width - labelX - Ui.S(12)));
+                if (Selected)
+                {
+                    float barH = Height - Ui.S(16);
+                    Ui.Fill(g, new RectangleF(0, Ui.S(8), Ui.S(3), barH), Ui.S(1.5f), Theme.Accent);
+                }
             }
             else
             {
@@ -857,10 +882,24 @@ namespace JoeBrowser
                         else Icons.Draw(g, Icon, box, fg);
                         x += iconSize + (hasText ? gap : 0);
                     }
-                    if (hasText) Ui.Text(g, Text, Font, fg, x, (Height - Font.GetHeight(g)) / 2f);
+                    if (hasText)
+                    {
+                        /* The label gets the room that is actually left inside the fill. Drawn
+                           at its measured width it could run under the border and be cut by the
+                           rounded corner, which reads as a clipped word rather than a shortened
+                           one. */
+                        float room = Math.Max(Ui.S(8), Width - x - Ui.S(10));
+                        Ui.Text(g, Text, Font, fg, x, (Height - Font.GetHeight(g)) / 2f, room);
+                        if (textW > room + 1f) ToolTips.Attach(this, Text);
+                    }
                 }
             }
 
+            /* A button that is wider than its label does not centre it: the label sits at the
+               left padding and the rest of the button is empty, which is what a "broken layout"
+               looks like at a glance. Only the icon and label pair are centred, and only when
+               they fit; otherwise the text is clipped with an ellipsis instead of overflowing
+               the fill and being cut by the border. */
             if (Focused && Ui.FocusCues(this))
             {
                 /* A text-coloured ring drawn on top of a filled accent button is nearly

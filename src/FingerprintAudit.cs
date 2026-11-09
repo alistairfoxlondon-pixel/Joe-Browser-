@@ -433,12 +433,12 @@ namespace JoeBrowser
                 _column.Controls.Add(row);
             }
 
-            _fix = new JBButton { Kind = BtnKind.Primary, Icon = "refresh", Text = "Fix what can be fixed", Radius = 4, Height = Ui.S(33) };
+            _fix = new JBButton { Kind = BtnKind.Primary, Icon = "refresh", Text = "Fix what can be fixed", Radius = 6, Height = Theme.Field };
             _fix.Click += delegate { DoFix(); };
             _fix.Visible = _findings.Count(f => f.Fixable) > 0;
             Controls.Add(_fix);
 
-            _close = new JBButton { Kind = BtnKind.Soft, Text = "Close", Radius = 4, Height = Ui.S(33) };
+            _close = new JBButton { Kind = BtnKind.Soft, Text = "Close", Radius = 6, Height = Theme.Field };
             _close.Click += delegate { Close(); };
             Controls.Add(_close);
 

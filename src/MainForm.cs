@@ -13,9 +13,13 @@ namespace JoeBrowser
 {
     internal sealed class MainForm : JBForm
     {
-        private const int SidebarW = 280;
-        private const int HeaderH = 68;
-        private const int ContentPad = 28;
+        /* The window is a workspace, so the shell metrics are generous: a 264 rail holds the
+           longest navigation label at 150% without an ellipsis, and a 72 header band gives the
+           page title and its one line of state room to breathe instead of sitting on the rule
+           below them. */
+        private const int SidebarW = 268;
+        private const int HeaderH = 76;
+        private const int ContentPad = 32;
 
         private readonly ProfileStore _store = new ProfileStore();
         private AppSettings _settings;
@@ -236,16 +240,21 @@ namespace JoeBrowser
 
         private JBButton Nav(string text, string icon, EventHandler click)
         {
-            var b = new JBButton { Kind = BtnKind.Nav, Icon = icon, Text = text, Radius = 4, Height = Ui.S(40) };
+            var b = new JBButton { Kind = BtnKind.Nav, Icon = icon, Text = text, Radius = 8, Height = Ui.S(42) };
             b.Click += click;
             return b;
         }
 
-        /// <summary>Small caption above a cluster of navigation items.</summary>
+        /// <summary>
+        /// Small caption above a cluster of navigation items. Letter spaced the way a real
+        /// section label is, because uppercase Segoe at 12 px without tracking reads as cramped.
+        /// </summary>
         private JBLabel NavGroup(string text)
         {
             var l = new JBLabel(LabelRole.Faint, text.ToUpperInvariant());
             l.AutoEllipsis = false;
+            l.Font = Theme.Micro;
+            l.ForeColor = Theme.TextFaint;
             return l;
         }
 
@@ -279,19 +288,19 @@ namespace JoeBrowser
                 ApplyFilter();
             };
 
-            _newBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("btn.new"), Radius = 4, Height = Ui.S(33) };
+            _newBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("btn.new"), Radius = 6, Height = Ui.S(34) };
             _newBtn.Click += delegate { NewProfile(); };
 
-            _sortBtn = new JBButton { Text = "Sort: recent", Radius = 4, Height = Ui.S(33), Tip = "Change the order of the list (Ctrl+O)" };
+            _sortBtn = new JBButton { Text = "Sort: recent", Radius = 6, Height = Theme.Field, Tip = "Change the order of the list (Ctrl+O)" };
             _sortBtn.Click += delegate { CycleSort(); };
 
             _bulk = new JBPanel { Visible = false };
             _bulkCount = new Label { AutoSize = true, Font = Theme.H3, ForeColor = Theme.Text, BackColor = Color.Transparent };
-            _bulkOpen = new JBButton { Kind = BtnKind.Primary, Icon = "play", Text = L10n.T("btn.openall"), Radius = 4, Height = Ui.S(31) };
-            _bulkStop = new JBButton { Kind = BtnKind.Soft, Icon = "power", Text = L10n.T("btn.stop"), Radius = 4, Height = Ui.S(31) };
-            _bulkDup = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = L10n.T("btn.duplicate"), Radius = 4, Height = Ui.S(31) };
-            _bulkDel = new JBButton { Kind = BtnKind.Danger, Icon = "trash", Text = L10n.T("btn.delete"), Radius = 4, Height = Ui.S(31) };
-            _bulkCancel = new JBButton { Kind = BtnKind.Ghost, Icon = "close", Radius = 4, Height = Ui.S(31), Tip = "Clear selection (Esc)" };
+            _bulkOpen = new JBButton { Kind = BtnKind.Primary, Icon = "play", Text = L10n.T("btn.openall"), Radius = 6, Height = Ui.S(32) };
+            _bulkStop = new JBButton { Kind = BtnKind.Soft, Icon = "power", Text = L10n.T("btn.stop"), Radius = 6, Height = Ui.S(32) };
+            _bulkDup = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = L10n.T("btn.duplicate"), Radius = 6, Height = Ui.S(32) };
+            _bulkDel = new JBButton { Kind = BtnKind.Danger, Icon = "trash", Text = L10n.T("btn.delete"), Radius = 6, Height = Ui.S(32) };
+            _bulkCancel = new JBButton { Kind = BtnKind.Ghost, Icon = "close", Radius = 6, Height = Ui.S(32), Tip = "Clear selection (Esc)" };
             _bulkOpen.Click += delegate { BulkOpen(); };
             _bulkStop.Click += delegate { BulkStop(); };
             _bulkDup.Click += delegate { BulkDuplicate(); };
@@ -304,7 +313,7 @@ namespace JoeBrowser
             _bulk.Controls.Add(_bulkDel);
             _bulk.Controls.Add(_bulkCancel);
 
-            _saveSettings = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = L10n.T("btn.save"), Radius = 4, Height = Ui.S(33) };
+            _saveSettings = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = L10n.T("btn.save"), Radius = 6, Height = Ui.S(34) };
             _saveSettings.Click += delegate { SaveSettings(); };
 
             _minBtn = new JBIconButton { Icon = "min", IconSize = 11, Caption = true, Tip = "Minimize" };
@@ -314,18 +323,26 @@ namespace JoeBrowser
             _maxBtn.Click += delegate { ToggleMaximize(); };
             _closeBtn.Click += delegate { Close(); };
 
-            _grid = new JBGrid { MinCell = 360, CellHeight = 200, Gap = 16 };
+            /* The cell is the size of the card it has to hold, plus the gap it is placed with.
+               A 360 x 200 cell for a card that became 224 tall left the last row clipped by the
+               scroll host; the two numbers now come from one place. */
+            _grid = new JBGrid
+            {
+                MinCell = ProfileCard.PreferredMinWidth(),
+                CellHeight = ProfileCard.PreferredHeight() + Ui.S(18),
+                Gap = 18
+            };
             _host = new JBScrollHost(_grid);
 
             _emptyPanel = new Panel { BackColor = Theme.Bg, Visible = false };
             _emptyPanel.Paint += EmptyPaint;
-            _emptyBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("empty.action"), Radius = 4, Height = Ui.S(33) };
+            _emptyBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("empty.action"), Radius = 6, Height = Ui.S(34) };
             _emptyBtn.Click += delegate
             {
                 if (_filter.Length > 0) { ClearSearch(); }
                 else NewProfile();
             };
-            _clearFilter = new JBButton { Kind = BtnKind.Soft, Icon = "close", Text = "Clear search", Radius = 4, Height = Ui.S(33), Visible = false };
+            _clearFilter = new JBButton { Kind = BtnKind.Soft, Icon = "close", Text = "Clear search", Radius = 6, Height = Theme.Field, Visible = false };
             _clearFilter.Click += delegate { ClearSearch(); };
             _emptyPanel.Controls.Add(_emptyBtn);
             _emptyPanel.Controls.Add(_clearFilter);
@@ -389,7 +406,7 @@ namespace JoeBrowser
             _aboutColumn = new Panel { BackColor = Theme.Bg };
             _aboutColumn.Paint += AboutPaint;
             _aboutHost = new JBScrollHost(_aboutColumn);
-            _aboutTelegram = new JBButton { Kind = BtnKind.Soft, BrandIcon = "telegram", Text = "@joegoldberg2025", Radius = 4, Height = Ui.S(33) };
+            _aboutTelegram = new JBButton { Kind = BtnKind.Soft, BrandIcon = "telegram", Text = "@joegoldberg2025", Radius = 6, Height = Ui.S(34) };
             _aboutTelegram.Click += delegate { OpenUrl("https://t.me/joegoldberg2025"); };
             _aboutColumn.Controls.Add(_aboutTelegram);
             _aboutPage.Controls.Add(_aboutHost);
@@ -1711,14 +1728,14 @@ namespace JoeBrowser
 
             _setBrowserPath = Field("Automatic (recommended)");
             _setBrowserPath.Value = _settings.BrowserPath ?? "";
-            _setBrowse = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.browse"), Radius = 4, Height = Ui.S(33) };
-            _setDetect = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = L10n.T("btn.detect"), Radius = 4, Height = Ui.S(33) };
+            _setBrowse = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.browse"), Radius = 6, Height = Ui.S(34) };
+            _setDetect = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = L10n.T("btn.detect"), Radius = 6, Height = Ui.S(34) };
             _setStartUrl = Field(Profile.FingerprintTestUrl);
             _setDefaultGroup = Field(L10n.T("set.group.hint"));
             _setDefaultGroup.Value = _settings.DefaultGroup ?? "";
-            _setOpenData = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.opendata"), Radius = 4, Height = Ui.S(33) };
-            _setDownload = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.download"), Radius = 4, Height = Ui.S(33) };
-            _setClearCache = new JBButton { Kind = BtnKind.Soft, Icon = "sync", Text = L10n.T("btn.clean"), Radius = 4, Height = Ui.S(33) };
+            _setOpenData = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.opendata"), Radius = 6, Height = Ui.S(34) };
+            _setDownload = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.download"), Radius = 6, Height = Ui.S(34) };
+            _setClearCache = new JBButton { Kind = BtnKind.Soft, Icon = "sync", Text = L10n.T("btn.clean"), Radius = 6, Height = Ui.S(34) };
             _setClearCache.Click += delegate { ClearCaches(); };
 
             /* Interface language: circular flag + full language name, never a bare code. */
@@ -1788,13 +1805,13 @@ namespace JoeBrowser
             Row(storage, "set.row.build", new[] { Ui.S(110) }, _setDownload);
             /* History off means nothing new is recorded; what is already there stays until the
                user clears it, because turning recording off should not quietly delete evidence. */
-            _setClearHistory = new JBButton { Kind = BtnKind.Soft, Icon = "trash", Text = L10n.T("set.clearhistory"), Radius = 4, Height = Ui.S(33) };
+            _setClearHistory = new JBButton { Kind = BtnKind.Soft, Icon = "trash", Text = L10n.T("set.clearhistory"), Radius = 6, Height = Ui.S(34) };
             _setClearHistory.Click += delegate { ClearAllHistory(); };
             Row(storage, "set.row.history", new[] { Ui.S(46), Ui.S(120) }, _setHistory, _setClearHistory);
 
             /* The one line to the developer when anything looks wrong. It opens Telegram with
                the user's own words; the technical details ride on the clipboard. */
-            _setReport = new JBButton { Kind = BtnKind.Soft, Icon = "error", Text = L10n.T("btn.report"), Radius = 4, Height = Ui.S(33) };
+            _setReport = new JBButton { Kind = BtnKind.Soft, Icon = "error", Text = L10n.T("btn.report"), Radius = 6, Height = Ui.S(34) };
             _setReport.Click += delegate { Report.OpenForm(this, ""); };
             Row(storage, "set.row.report", new[] { Ui.S(96) }, _setReport);
 
@@ -1811,15 +1828,15 @@ namespace JoeBrowser
             _setGoogleSecret = Field("GOCSPX-…  (optional)");
             _setGoogleSecret.Value = string.IsNullOrWhiteSpace(_settings.GoogleClientSecret)
                 ? GoogleSignIn.DefaultClientSecret : _settings.GoogleClientSecret;
-            _setSecurity = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.security"), Radius = 4, Height = Ui.S(33) };
+            _setSecurity = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.security"), Radius = 6, Height = Ui.S(34) };
             /* The Google client id is the only setting that cannot be pre-filled by the app,
                so it gets a guided setup and a button that actually runs the flow and reports
                what Google said. Without those two, a wrong id just looks like a dead button. */
-            _setGoogleGuide = new JBButton { Kind = BtnKind.Soft, Icon = "help", Text = "Set up", Radius = 4, Height = Ui.S(33), Tip = L10n.T("set.google.hint") };
-            _setGoogleTest = new JBButton { Kind = BtnKind.Soft, Icon = "check", Text = "Test", Radius = 4, Height = Ui.S(33), Tip = "Run the real Google sign-in now" };
+            _setGoogleGuide = new JBButton { Kind = BtnKind.Soft, Icon = "help", Text = "Set up", Radius = 6, Height = Theme.Field, Tip = L10n.T("set.google.hint") };
+            _setGoogleTest = new JBButton { Kind = BtnKind.Soft, Icon = "check", Text = "Test", Radius = 6, Height = Theme.Field, Tip = "Run the real Google sign-in now" };
             _setGoogleGuide.Click += delegate { GoogleSetupHelp(); };
             _setGoogleTest.Click += delegate { TestGoogleSignIn(); };
-            _setSignOut = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("set.row.signout"), Radius = 4, Height = Ui.S(33) };
+            _setSignOut = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("set.row.signout"), Radius = 6, Height = Ui.S(34) };
             _setSecurity.Click += delegate
             {
                 if (Session.Current == null) { Toast("Sign in first.", ToastKind.Error); return; }
@@ -2354,16 +2371,24 @@ namespace JoeBrowser
 
             g.Clear(Theme.Bg);
 
-            // ---- navbar: windows-ui #202020 sidebar, 280px ----
+            /* The rail is a surface of its own, separated by a hairline rather than by a colour
+               step alone: on a cheap panel two dark neutrals that close look like one, and the
+               whole window then reads as one undivided sheet. */
             using (var b = new SolidBrush(Theme.Sidebar)) g.FillRectangle(b, 0, 0, sb, h);
+            using (var p = new Pen(Theme.Line, Ui.Hair))
+                g.DrawLine(p, sb - 0.5f, 0, sb - 0.5f, h);
 
-            float logoSize = Ui.S(24);
-            var logoBox = new RectangleF(Ui.S(20), Ui.S(16), logoSize, logoSize);
+            /* Brand: the mark, the name and the one line that says what the app is. The old
+               header was a logo and a name at 24 px with the rest of the rail starting 100 px
+               below it, which left a hole where a designed app puts its title block. */
+            float logoSize = Ui.S(26);
+            var logoBox = new RectangleF(Ui.S(20), Ui.S(20), logoSize, logoSize);
             Logo.Draw(g, logoBox);
-            Ui.Text(g, "Joe Browser", Theme.BodyBold, Theme.Text, Ui.S(52), Ui.S(18), sb - Ui.S(70));
+            Ui.Text(g, "Joe Browser", Theme.H3, Theme.Text, Ui.S(54), Ui.S(18), sb - Ui.S(66));
+            Ui.Text(g, "Anti detect workspace", Theme.Caption, Theme.TextFaint, Ui.S(54), Ui.S(38), sb - Ui.S(66));
 
-            using (var p = new Pen(Theme.Line))
-                g.DrawLine(p, Ui.S(20), Ui.S(114), sb - Ui.S(20), Ui.S(114));
+            using (var p = new Pen(Theme.Line, Ui.Hair))
+                g.DrawLine(p, Ui.S(18), Ui.S(HeaderH + Ui.S(34)), sb - Ui.S(18), Ui.S(HeaderH + Ui.S(34)));
 
             // ---- page header band ----
             string title, sub;
@@ -2396,12 +2421,23 @@ namespace JoeBrowser
                 default: title = L10n.T("header.about"); sub = L10n.T("sub.about"); break;
             }
 
-            Ui.Text(g, title, Theme.H1, Theme.Text, sb + Ui.S(ContentPad), Ui.S(12), w - sb - Ui.S(ContentPad) - Ui.S(180));
-            Ui.Text(g, sub, Theme.Small, Theme.TextDim, sb + Ui.S(ContentPad), Ui.S(36), w - sb - Ui.S(ContentPad) - Ui.S(180));
+            /* The header text is measured so the toolbar that floats over this band can never
+               be drawn on top of it: the title gets the width that is actually left, and the
+               subtitle is trimmed with an ellipsis instead of running under the buttons. */
+            int textX = sb + Ui.S(ContentPad);
+            int textW = Math.Max(Ui.S(120), w - textX - Ui.S(ContentPad) - _toolbarReserve);
+            Ui.Text(g, title, Theme.H1, Theme.Text, textX, Ui.S(14), textW);
+            Ui.Text(g, sub, Theme.Small, Theme.TextDim, textX, Ui.S(42), textW);
 
-            using (var p = new Pen(Theme.Line))
-                g.DrawLine(p, sb, headerH, w, headerH);
+            using (var p = new Pen(Theme.Line, Ui.Hair))
+                g.DrawLine(p, sb, headerH - 0.5f, w, headerH - 0.5f);
         }
+
+        /// <summary>
+        /// Width the page header has to leave for the toolbar (and the caption buttons above
+        /// it), kept up to date by the layout so the paint pass and the layout agree.
+        /// </summary>
+        private int _toolbarReserve = 320;
 
         private int ShownCount()
         {
@@ -2418,58 +2454,100 @@ namespace JoeBrowser
             int sb = Ui.S(SidebarW);
             int headerH = Ui.S(HeaderH);
 
-            // navbar rows, grouped the way a workspace actually reads: day-to-day work first,
-            // configuration second.
-            int navX = Ui.S(10), navW = sb - Ui.S(20);
-            /* The theme switch belongs with the app chrome, not with navigation: at the top of
-               the rail it competed with the primary destinations for attention. */
-            _themeSwitch.SetBounds(navX, h - Ui.S(54), navW, Ui.S(38));
-            int navY = Ui.S(130), navStep = Ui.S(44);
-            _navGroupWorkspace.SetBounds(navX + Ui.S(8), Ui.S(112), navW, Ui.S(16));
-            _navProfiles.SetBounds(navX, navY, navW, Ui.S(40));
-            _navHistory.SetBounds(navX, navY + navStep, navW, Ui.S(40));
-            _navAccount.SetBounds(navX, navY + navStep * 2, navW, Ui.S(40));
-            _navProxies.SetBounds(navX, navY + navStep * 3, navW, Ui.S(40));
-            _navExtensions.SetBounds(navX, navY + navStep * 4, navW, Ui.S(40));
-            _navBrowsers.SetBounds(navX, navY + navStep * 5, navW, Ui.S(40));
-            _navGroupSystem.SetBounds(navX + Ui.S(8), navY + navStep * 6 + Ui.S(2), navW, Ui.S(16));
-            _navSettings.SetBounds(navX, navY + navStep * 6 + Ui.S(22), navW, Ui.S(40));
-            _navTools.SetBounds(navX, navY + navStep * 7 + Ui.S(22), navW, Ui.S(40));
-            _navAbout.SetBounds(navX, navY + navStep * 8 + Ui.S(22), navW, Ui.S(40));
-            _navPlan.SetBounds(navX, navY + navStep * 9 + Ui.S(22), navW, Ui.S(40));
+            /* The rail is laid out from one running y instead of eleven hand computed offsets.
+               The old version spaced rows by a fixed 44 and broke the System group out with a
+               further +22, so at 150% the last row (Plan) sat under the theme switch, and the
+               rail's content height depended on arithmetic that had to be edited whenever a
+               destination was added. */
+            int navX = Ui.S(12), navW = sb - Ui.S(24);
+            int navRow = Ui.S(42), navGap = Ui.S(4);
+            int navY = Ui.S(HeaderH + Ui.S(34)) + Ui.S(18);
+            _themeSwitch.SetBounds(navX, h - Ui.S(58), navW, Ui.S(40));
+
+            _navGroupWorkspace.SetBounds(navX + Ui.S(10), navY, navW, Theme.Row);
+            navY += Theme.Row + Ui.S(6);
+            _navProfiles.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navHistory.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navAccount.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navProxies.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navExtensions.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navBrowsers.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+
+            navY += Ui.S(10);
+            _navGroupSystem.SetBounds(navX + Ui.S(10), navY, navW, Theme.Row);
+            navY += Theme.Row + Ui.S(6);
+            _navSettings.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navTools.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navPlan.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+            _navAbout.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
+
+            /* On a short window the rail cannot hold every row above the theme switch. The
+               destinations are more important than the switch, which is also in Settings, so the
+               switch is hidden rather than allowed to overlap the last row. */
+            bool railFits = navY <= _themeSwitch.Top - Ui.S(8);
+            _themeSwitch.Visible = railFits;
+            if (!railFits)
+            {
+                int spare = Math.Max(0, (_themeSwitch.Top - Ui.S(8)) - Ui.S(HeaderH + Ui.S(34)) - Ui.S(18));
+                int rows = 10;
+                navGap = Math.Max(0, (spare - rows * navRow) / Math.Max(1, rows + 2));
+            }
 
             // caption buttons, flush with the top right corner
-            int cw = Ui.S(46), ch = Ui.S(32);
+            int cw = Ui.S(46), ch = Ui.S(34);
             _closeBtn.SetBounds(w - cw, 0, cw, ch);
             _maxBtn.SetBounds(w - cw * 2, 0, cw, ch);
             _minBtn.SetBounds(w - cw * 3, 0, cw, ch);
 
-            // toolbar sits left of the caption area so nothing overlaps
-            int toolbarRight = w - cw * 3 - Ui.S(14);
-            int newW = Math.Min(Ui.S(150), _newBtn.PreferredWidth(Ui.S(132)));
-            _newBtn.SetBounds(toolbarRight - newW, Ui.S(17), newW, Ui.S(33));
-            /* The toolbar gives way rather than overlapping. The old minimum of 150 px for the
-               search box was applied even when the space left was smaller, so on a narrow window
-               the box was drawn over the sort button and the sort button was pushed off the left
-               edge of the window. Whatever cannot fit is hidden, and it comes back on resize. */
-            const int minSearch = 120;
-            int sortW = _sortBtn.PreferredWidth(Ui.S(110));
-            int room = _newBtn.Left - Ui.S(16) - (sb + Ui.S(12));
-            bool showSort = room - sortW - Ui.S(8) >= minSearch;
-            bool showSearch = room - (showSort ? sortW + Ui.S(8) : 0) - Ui.S(8) >= minSearch;
-            _sortBtn.Visible = showSort && _page == 0;
-            _search.Visible = showSearch && _page == 0;
-            if (showSearch)
-            {
-                int searchW = Math.Min(Ui.S(250),
-                    room - (showSort ? sortW + Ui.S(8) : 0) - Ui.S(8));
-                _search.SetBounds(_newBtn.Left - Ui.S(8) - searchW, Ui.S(17), searchW, Ui.S(33));
-            }
+            /* One toolbar row, laid out from the right edge inwards, and every control on it is
+               placed before anything is shown: the row is measured, whatever does not fit is
+               hidden, and only then are the bounds set. That is what stops a button being drawn
+               under another at a narrow width, which is the single most reported fault. */
+            int toolbarRight = w - cw * 3 - Ui.S(16);
+            int toolbarY = (headerH - Ui.S(34)) / 2 - Ui.S(4);
+            int newW = Math.Min(Ui.S(148), Math.Max(Ui.S(96), _newBtn.PreferredWidth(Ui.S(124))));
+            bool profilesPage = _page == 0;
+            _newBtn.Visible = profilesPage;
+            _sortBtn.Visible = profilesPage;
+            _search.Visible = profilesPage;
+            _saveSettings.Visible = _page == 4;
+
+            int cursor = toolbarRight;
+            if (profilesPage) cursor -= newW + Ui.S(10);
+            int sortW = _sortBtn.PreferredWidth(Ui.S(108));
+            int searchMin = Ui.S(150);
+            int leftEdge = sb + Ui.S(ContentPad);
+            bool showSort = profilesPage && cursor - Ui.S(8) - sortW >= leftEdge + searchMin + Ui.S(10);
+            if (showSort) cursor -= sortW + Ui.S(8);
+            bool showSearch = profilesPage && cursor - Ui.S(8) >= leftEdge + searchMin;
+            int searchW = showSearch ? Math.Min(Ui.S(280), cursor - Ui.S(8) - leftEdge) : 0;
+            if (showSearch) cursor -= searchW + Ui.S(8);
+
+            _sortBtn.Visible = showSort;
+            _search.Visible = showSearch;
+            if (profilesPage) _newBtn.SetBounds(toolbarRight - newW, toolbarY, newW, Ui.S(34));
             if (showSort)
-                _sortBtn.SetBounds((showSearch ? _search.Left : _newBtn.Left) - Ui.S(8) - sortW,
-                    Ui.S(17), sortW, Ui.S(33));
-            int saveW = Math.Min(Ui.S(160), _saveSettings.PreferredWidth(Ui.S(140)));
-            _saveSettings.SetBounds(toolbarRight - saveW, Ui.S(17), saveW, Ui.S(33));
+                _sortBtn.SetBounds(_newBtn.Left - Ui.S(8) - sortW, toolbarY, sortW, Ui.S(34));
+            if (showSearch)
+                _search.SetBounds(cursor, toolbarY, searchW, Ui.S(34));
+
+            /* What the toolbar occupies on the right, so the page title above it is drawn into
+               the space that is left instead of under the buttons. */
+            /* The title sits on the row above the buttons, so what it has to clear is the
+               narrowest thing on the toolbar - not the whole row. Using the full width of the
+               row reserved half a window for a title that had room, which is the wasted space
+               the old header showed. */
+            int searchLeft = profilesPage
+                ? (showSearch ? _search.Left : showSort ? _sortBtn.Left : _newBtn.Left)
+                : toolbarRight;
+            _toolbarReserve = Math.Max(Ui.S(180), toolbarRight - searchLeft + Ui.S(24));
+
+            if (_page == 4)
+            {
+                int saveW = Math.Min(Ui.S(170), _saveSettings.PreferredWidth(Ui.S(140)));
+                _saveSettings.SetBounds(toolbarRight - saveW, toolbarY, saveW, Ui.S(34));
+                _toolbarReserve = Math.Max(Ui.S(200), saveW + Ui.S(40));
+            }
 
             int contentX = sb;
             int contentW = Math.Max(Ui.S(200), w - sb);

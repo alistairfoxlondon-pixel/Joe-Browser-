@@ -46,16 +46,16 @@ namespace JoeBrowser
                 _column.Controls.Add(row);
             }
 
-            _close = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = "Done", Radius = 4, Height = Ui.S(33) };
+            _close = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = "Done", Radius = 6, Height = Theme.Field };
             _close.Click += delegate { Close(); };
             Controls.Add(_close);
 
             /* The two pages people actually use to judge a profile. Opening them inside this
                session is the only way the result describes this profile and not the desktop. */
-            _browserScan = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "browserscan.net", Radius = 4, Height = Ui.S(33) };
+            _browserScan = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "browserscan.net", Radius = 6, Height = Theme.Field };
             _browserScan.Click += delegate { Open("https://www.browserscan.net/"); };
             Controls.Add(_browserScan);
-            _ipFighter = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "ipfighter.com", Radius = 4, Height = Ui.S(33) };
+            _ipFighter = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "ipfighter.com", Radius = 6, Height = Theme.Field };
             _ipFighter.Click += delegate { Open("https://ipfighter.com/"); };
             Controls.Add(_ipFighter);
             bool canOpen = session != null && session.IsRunning;
@@ -64,7 +64,7 @@ namespace JoeBrowser
 
             /* A failed check is exactly when a user wants a human: one button, the report is
                pre-filled with the failed lines so the message needs no technical wording. */
-            _report = new JBButton { Kind = BtnKind.Soft, Icon = "error", Text = "Report", Radius = 4, Height = Ui.S(33), Tip = "Tell the developer on Telegram" };
+            _report = new JBButton { Kind = BtnKind.Soft, Icon = "error", Text = "Report", Radius = 6, Height = Theme.Field, Tip = "Tell the developer on Telegram" };
             _report.Click += delegate
             {
                 var bad = new List<string>();

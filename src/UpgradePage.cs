@@ -283,13 +283,13 @@ namespace JoeBrowser
             _status = new JBLabel(LabelRole.Faint, "");
             _status.Wrap = true;
 
-            _copy = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy address", Radius = 4, Height = Ui.S(33) };
+            _copy = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy address", Radius = 6, Height = Theme.Field };
             /* The amount is the other half of a crypto transfer and it used to have to be read
                off the screen and retyped: one wrong digit sends the money nowhere. */
-            _copyAmount = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy amount", Radius = 4, Height = Ui.S(33) };
-            _check = new JBButton { Kind = BtnKind.Primary, Icon = "refresh", Text = "I have paid", Radius = 4, Height = Ui.S(33) };
-            _restore = new JBButton { Kind = BtnKind.Ghost, Text = "Restore a purchase", Radius = 4, Height = Ui.S(33) };
-            _termsLink = new JBButton { Kind = BtnKind.Ghost, Text = "Terms", Radius = 4, Height = Ui.S(33) };
+            _copyAmount = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy amount", Radius = 6, Height = Theme.Field };
+            _check = new JBButton { Kind = BtnKind.Primary, Icon = "refresh", Text = "I have paid", Radius = 6, Height = Theme.Field };
+            _restore = new JBButton { Kind = BtnKind.Ghost, Text = "Restore a purchase", Radius = 6, Height = Theme.Field };
+            _termsLink = new JBButton { Kind = BtnKind.Ghost, Text = "Terms", Radius = 6, Height = Theme.Field };
 
             _copy.Click += delegate { Raise("copy"); };
             _copyAmount.Click += delegate { Raise("copyamount"); };
@@ -302,8 +302,8 @@ namespace JoeBrowser
 
             _sectionInvite = new StepHeader(0, "INVITE") { IconName = "gift" };
             _inviteLine = new JBLabel(LabelRole.Faint, "");
-            _copyInvite = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy invite", Radius = 4, Height = Ui.S(32) };
-            _claim = new JBButton { Kind = BtnKind.Soft, Text = "Claim a receipt", Radius = 4, Height = Ui.S(32) };
+            _copyInvite = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy invite", Radius = 6, Height = Ui.S(33) };
+            _claim = new JBButton { Kind = BtnKind.Soft, Text = "Claim a receipt", Radius = 6, Height = Ui.S(33) };
             _copyInvite.Click += delegate { Raise("invite"); };
             _claim.Click += delegate { Raise("claim"); };
             _column.Controls.Add(_sectionInvite);
@@ -315,8 +315,8 @@ namespace JoeBrowser
             _termsPanel.Paint += PaintTerms;
             _column.Controls.Add(_termsPanel);
 
-            _readTerms = new JBButton { Kind = BtnKind.Soft, Text = "Read the terms", Radius = 4, Height = Ui.S(32) };
-            _acceptTerms = new JBButton { Kind = BtnKind.Primary, Text = "I accept", Radius = 4, Height = Ui.S(32) };
+            _readTerms = new JBButton { Kind = BtnKind.Soft, Text = "Read the terms", Radius = 6, Height = Ui.S(33) };
+            _acceptTerms = new JBButton { Kind = BtnKind.Primary, Text = "I accept", Radius = 6, Height = Ui.S(33) };
             _readTerms.Click += delegate { Raise("terms"); };
             _acceptTerms.Click += delegate { AcceptTerms(); };
             /* Children of the card, not siblings of it. As siblings they depended on z-order to

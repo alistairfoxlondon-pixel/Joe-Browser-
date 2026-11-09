@@ -297,6 +297,12 @@ namespace JoeBrowser
                     Ui.Scale = Math.Max(1f, g.DpiX / 96f);
             }
             catch { Ui.Scale = 1f; }
+            /* A display between 100% and the next whole step rounds its layout to the nearest
+               quarter, because a half scaled 15 point font and a half scaled row height disagree
+               about where a baseline sits. The quarter is what the eye is comparing when it says
+               the text looks soft rather than the box looking wrong. */
+            Ui.Scale = (float)(Math.Round(Ui.Scale * 4f) / 4f);
+            Log.Info("Display scale " + Ui.Scale.ToString("0.##"));
 
             Theme.LoadFonts();
 

@@ -65,11 +65,11 @@ namespace JoeBrowser
             _body = new JBScrollHost(_content) { BackColor = Theme.Bg };
             Controls.Add(_body);
 
-            Primary = new JBButton { Kind = BtnKind.Primary, Text = _primaryText, Radius = 4, Height = Ui.S(33) };
+            Primary = new JBButton { Kind = BtnKind.Primary, Text = _primaryText, Radius = 6, Height = Theme.Field };
             Primary.Click += delegate { OnPrimary(); };
             Controls.Add(Primary);
 
-            Secondary = new JBButton { Kind = BtnKind.Ghost, Text = secondaryText ?? "Cancel", Radius = 4, Height = Ui.S(33) };
+            Secondary = new JBButton { Kind = BtnKind.Ghost, Text = secondaryText ?? "Cancel", Radius = 6, Height = Theme.Field };
             Secondary.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(Secondary);
         }
@@ -193,7 +193,7 @@ namespace JoeBrowser
 
         public JBButton AddAction(string text, string icon, EventHandler click)
         {
-            var b = new JBButton { Kind = BtnKind.Soft, Text = text, Icon = icon, Radius = 4, Height = Ui.S(33) };
+            var b = new JBButton { Kind = BtnKind.Soft, Text = text, Icon = icon, Radius = 6, Height = Theme.Field };
             b.Click += click;
             AddRow(null, b, Ui.S(33));
             return b;

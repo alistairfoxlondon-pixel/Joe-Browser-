@@ -34,16 +34,20 @@ namespace JoeBrowser
         public event EventHandler LeakTestRequested;
         public event EventHandler HistoryRequested;
 
-        // CSS pixel metrics for the whole card.
-        public const double CardH = 200;
-        public const double CardMinW = 300;
-        private const double Pad = 18;
-        private const double CheckSize = 18;
-        private const double LogoSize = 44;
-        private const double ChipH = 28;
-        private const double TagH = 22;
-        private const double BtnH = 34;
-        private const double KebabSize = 28;
+        /* Card metrics, derived from the type scale rather than guessed. The card was 200 tall
+           with the action bar 14 px from the bottom edge and a 28 px chip row that started at
+           y=72: at the raised type scale the name, its subtitle and the status pill no longer
+           fitted between the top edge and the first chip, which is the overcrowding that reads
+           as a broken layout. Each band below is a line of type plus its padding. */
+        public const double CardH = 224;
+        public const double CardMinW = 320;
+        private const double Pad = 20;
+        private const double CheckSize = 20;
+        private const double LogoSize = 46;
+        private const double ChipH = 30;
+        private const double TagH = 24;
+        private const double BtnH = 36;
+        private const double KebabSize = 30;
 
         private bool _hover, _kebabHover, _openHover, _checkHover;
         private ContextMenuStrip _menu;
@@ -99,7 +103,7 @@ namespace JoeBrowser
             get
             {
                 float s = Ui.S(CheckSize);
-                return new RectangleF(Ui.S(Pad), Ui.S(16 + LogoSize / 2 - CheckSize / 2), s, s);
+                return new RectangleF(Ui.S(Pad), Ui.S(18 + LogoSize / 2 - CheckSize / 2), s, s);
             }
         }
 
@@ -108,7 +112,7 @@ namespace JoeBrowser
             get
             {
                 float s = Ui.S(LogoSize);
-                return new RectangleF(CheckRect.Right + Ui.S(12), Ui.S(16), s, s);
+                return new RectangleF(CheckRect.Right + Ui.S(12), Ui.S(18), s, s);
             }
         }
 
@@ -117,7 +121,7 @@ namespace JoeBrowser
             get
             {
                 float s = Ui.S(KebabSize);
-                float oy = Height - Ui.S(14) - Ui.S(BtnH);
+                float oy = Height - Ui.S(16) - Ui.S(BtnH);
                 return new RectangleF(Width - Ui.S(Pad) - s, oy + (Ui.S(BtnH) - s) / 2f, s, s);
             }
         }
@@ -129,7 +133,7 @@ namespace JoeBrowser
                 float h = Ui.S(BtnH);
                 float right = Width - Ui.S(Pad) - Ui.S(KebabSize) - Ui.S(10);
                 float w = Math.Max(Ui.S(72), right - Ui.S(Pad));
-                return new RectangleF(right - w, Height - Ui.S(14) - h, w, h);
+                return new RectangleF(right - w, Height - Ui.S(16) - h, w, h);
             }
         }
 
@@ -253,12 +257,17 @@ namespace JoeBrowser
             Ui.Quality(g);
             if (Model == null) return;
 
-            float rad = Ui.S(8);
+            float rad = Ui.S(10);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
 
-            if (Running) Ui.Shadow(g, r, rad, 1, Theme.Dark);
+            /* A card is a surface, not a border: the fill carries it and the hairline is only
+               there to keep two adjacent cards apart on a wide window. A running card lifts by
+               one step and an accent hairline, which is a state you can see from across the
+               grid instead of only in the status pill. */
+            if (Running) Ui.Shadow(g, r, rad, 2, Theme.Dark);
             Ui.Fill(g, r, rad, Picked ? Theme.AccentOnBg : (_hover ? Theme.PanelHover : Theme.Card));
-            Ui.Stroke(g, r, rad, Picked ? Theme.AccentBorder : (_hover ? Theme.HoverStrong : Theme.Line), 1f);
+            Ui.Stroke(g, r, rad,
+                Picked ? Theme.AccentBorder : Running ? Theme.AccentBorder : (_hover ? Theme.HoverStrong : Theme.Line));
 
             PaintHeader(g, r);
             bool proxyWrapped;
@@ -303,15 +312,15 @@ namespace JoeBrowser
             float statusTextW = Ui.Measure(g, status, Theme.Micro).Width;
             float pillW = Ui.S(10) + dot + Ui.S(6) + statusTextW + Ui.S(10);
             float pillH = Ui.S(20);
-            var pill = new RectangleF(nameRight - pillW, Ui.S(18), pillW, pillH);
+            var pill = new RectangleF(nameRight - pillW, Ui.S(20), pillW, pillH);
             nameRight = pill.Left - Ui.S(10);
 
             string name = string.IsNullOrWhiteSpace(Model.Name) ? "Untitled profile" : Model.Name;
             float avail = Math.Max(Ui.S(40), nameRight - tx);
-            Ui.Text(g, name, Theme.H2, Theme.Text, tx, Ui.S(17), avail);
+            Ui.Text(g, name, Theme.H2, Theme.Text, tx, Ui.S(18), avail);
 
             string sub = HeaderSub();
-            Ui.Text(g, sub, Theme.Caption, Theme.TextFaint, tx, Ui.S(40), avail);
+            Ui.Text(g, sub, Theme.Caption, Theme.TextFaint, tx, Ui.S(42), avail);
 
             Ui.Fill(g, pill, Ui.S(10), Theme.Panel2);
             using (var b = new SolidBrush(statusColor))
@@ -339,8 +348,8 @@ namespace JoeBrowser
             float h = Ui.S(ChipH);
             float x = Ui.S(Pad);
             float right = Width - Ui.S(Pad);
-            float lineA = Ui.S(72);
-            float lineB = Ui.S(108);
+            float lineA = Ui.S(84);
+            float lineB = Ui.S(120);
 
             string os = Model.Fp != null ? (Model.Fp.Os ?? "") : "";
             if (string.IsNullOrWhiteSpace(os)) os = "Windows";
@@ -451,7 +460,7 @@ namespace JoeBrowser
                 return;
             }
 
-            float y = Ui.S(108) + shift;
+            float y = Ui.S(120) + shift;
             float h = Ui.S(TagH);
             float x = Ui.S(Pad);
             float right = Width - Ui.S(Pad);
@@ -498,7 +507,7 @@ namespace JoeBrowser
         private void PaintMeta(Graphics g, int shift)
         {
             if (Model.Fp == null) return;
-            float y = Ui.S(108) + shift;
+            float y = Ui.S(120) + shift;
             float h = Ui.S(TagH);
             float x = Ui.S(Pad);
             float right = Width - Ui.S(Pad);
@@ -554,14 +563,21 @@ namespace JoeBrowser
                 g.DrawLine(p, Ui.S(Pad), dy, Width - Ui.S(Pad), dy);
             }
 
+            /* A pressed card's action is a button outline; the same action on a stopped card is
+               the filled primary. That contrast is the single clearest signal of what clicking
+               the card will do, and it costs no text. */
             var or = OpenRect;
             bool enabled = !Launching;
-            if (enabled && _openHover) Ui.Fill(g, or, Ui.S(4), Theme.HoverOverlay);
-            Ui.Stroke(g, or, Ui.S(4), Theme.ButtonBorder, 1f);
+            float rad = Ui.S(6);
+            if (Running || Locked) Ui.Fill(g, or, rad, _openHover ? Theme.PanelHover : Theme.Panel2);
+            else Ui.Fill(g, or, rad, Launching ? Theme.Panel2 : _openHover ? Theme.AccentHi : Theme.Accent);
+            if (!Running && !Locked && !Launching && _openHover) { /* accent fill already brightened */ }
+            if (Running || Locked) Ui.Stroke(g, or, rad, _openHover ? Theme.HoverStrong : Theme.ButtonBorder);
 
-            string openLabel = Launching ? "Starting…" : Running ? "Focus window" :
+            string openLabel = Launching ? "Starting" : Running ? "Focus window" :
                                Locked ? "Renew to open" : "Open profile";
-            Color openFg = enabled ? Theme.Text : Theme.TextFaint;
+            Color openFg = Locked || Launching ? Theme.TextFaint
+                : Running ? Theme.Text : Theme.OnAccent;
             float ic = Ui.S(13);
             float ow = Ui.Measure(g, openLabel, Theme.SmallBold).Width;
             float content = (enabled ? ic + Ui.S(6) : 0) + ow;
@@ -575,7 +591,11 @@ namespace JoeBrowser
             Ui.Text(g, openLabel, Theme.SmallBold, openFg, ox,
                 or.Y + (or.Height - Theme.SmallBold.GetHeight(g)) / 2f);
 
-            if (_kebabHover) Ui.Fill(g, KebabRect, Ui.S(4), Theme.HoverOverlay);
+            if (_kebabHover)
+            {
+                Ui.Fill(g, KebabRect, Ui.S(6), Theme.HoverOverlay);
+                Ui.Stroke(g, KebabRect, Ui.S(6), Theme.Line);
+            }
             float kd = Ui.S(16);
             Icons.Draw(g, "dots", new RectangleF(KebabRect.X + (KebabRect.Width - kd) / 2f,
                 KebabRect.Y + (KebabRect.Height - kd) / 2f, kd, kd), _kebabHover ? Theme.Text : Theme.TextDim);

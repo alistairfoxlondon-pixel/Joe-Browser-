@@ -38,7 +38,7 @@ namespace JoeBrowser
         public static string VersionText()
         {
             try { return Application.ProductVersion; }
-            catch { return "1.4.12"; }
+            catch { return "1.5.0"; }
         }
 
         /// <summary>Everything a developer needs: build, plan, browsers found, kernels, log tail.</summary>
@@ -180,11 +180,11 @@ namespace JoeBrowser
             if (!string.IsNullOrEmpty(preset)) _what.Value = preset;
             Controls.Add(_what);
 
-            _send = new JBButton { Kind = BtnKind.Primary, Icon = "arrow-right", Text = "Open Telegram", Radius = 4, Height = Ui.S(33) };
+            _send = new JBButton { Kind = BtnKind.Primary, Icon = "arrow-right", Text = "Open Telegram", Radius = 6, Height = Theme.Field };
             _send.Click += delegate { Send(); };
             Controls.Add(_send);
 
-            _copy = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy details", Radius = 4, Height = Ui.S(33), Tip = "App version, browser, plan and the last log lines" };
+            _copy = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy details", Radius = 6, Height = Theme.Field, Tip = "App version, browser, plan and the last log lines" };
             _copy.Click += delegate
             {
                 Report.CopyDetails(_what.Value);

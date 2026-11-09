@@ -89,7 +89,7 @@ namespace JoeBrowser
 
         private static JBButton MakeButton(string text, string icon, BtnKind kind)
         {
-            return new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 4, Height = Ui.S(33) };
+            return new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 6, Height = Theme.Field };
         }
 
         /// <summary>Re-reads the account store and the plan, then rebuilds.</summary>

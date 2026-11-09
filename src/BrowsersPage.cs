@@ -81,7 +81,7 @@ namespace JoeBrowser
 
         private JBButton MakeButton(string text, string icon, BtnKind kind, string key)
         {
-            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 4, Height = Ui.S(33) };
+            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 6, Height = Theme.Field };
             b.Click += delegate { Raise(key, null); };
             return b;
         }
@@ -262,7 +262,7 @@ namespace JoeBrowser
             Info = info;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             Ui.Opaque(this);
-            _action = new JBButton { Radius = 4, Height = Ui.S(31) };
+            _action = new JBButton { Radius = 6, Height = Ui.S(32) };
             _action.Click += delegate { var h = ActionRequested; if (h != null) h(this, EventArgs.Empty); };
             Controls.Add(_action);
             Apply();
