@@ -11,7 +11,7 @@ namespace JoeBrowser
     /// reads like a trail rather than a table, and the hops that never reached the address bar
     /// are marked as such.
     /// </summary>
-    internal sealed class HistoryPage : Panel, IReStyle
+    internal sealed class HistoryPage : Panel, IReStyle, ISyncLayout
     {
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
@@ -250,6 +250,9 @@ namespace JoeBrowser
         }
 
         protected override void OnResize(EventArgs e) { base.OnResize(e); LayoutCore(); }
+
+        /// <summary>One more pass once the scroll host has fixed its width.</summary>
+        public void LayoutAtWidth() { LayoutCore(); }
 
         private void LayoutCore()
         {

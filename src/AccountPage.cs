@@ -13,7 +13,7 @@ namespace JoeBrowser
     /// and nothing else, so there was no way to see which accounts existed, when each last
     /// signed in, whether a PIN or 2FA was set, or to switch, sign out or delete one.
     /// </summary>
-    internal sealed class AccountPage : Panel, IReStyle
+    internal sealed class AccountPage : Panel, IReStyle, ISyncLayout
     {
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
@@ -150,6 +150,9 @@ namespace JoeBrowser
         }
 
         protected override void OnResize(EventArgs e) { base.OnResize(e); LayoutCore(); }
+
+        /// <summary>One more pass once the scroll host has fixed its width.</summary>
+        public void LayoutAtWidth() { LayoutCore(); }
 
         private void LayoutCore()
         {

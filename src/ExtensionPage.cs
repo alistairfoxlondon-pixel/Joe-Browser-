@@ -18,7 +18,7 @@ namespace JoeBrowser
     /// unpacked folder, switched on or off here, and every enabled one is loaded into all
     /// Chrome / Chromium / Brave / Edge profiles on their next launch.
     /// </summary>
-    internal sealed class ExtensionPage : Panel, IReStyle
+    internal sealed class ExtensionPage : Panel, IReStyle, ISyncLayout
     {
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
@@ -189,6 +189,9 @@ namespace JoeBrowser
 
         protected override void OnResize(EventArgs e) { base.OnResize(e); LayoutCore(); }
         protected override void OnLayout(LayoutEventArgs e) { base.OnLayout(e); LayoutCore(); }
+
+        /// <summary>One more pass once the scroll host has fixed its width.</summary>
+        public void LayoutAtWidth() { LayoutCore(); }
 
         private void LayoutCore()
         {

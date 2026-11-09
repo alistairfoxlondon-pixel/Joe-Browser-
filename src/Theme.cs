@@ -751,6 +751,16 @@ namespace JoeBrowser
         }
     }
 
+    /// <summary>
+    /// A page that lays its column out from the host's content width. Implementing this lets
+    /// JBScrollHost ask for one more pass once that width is final, which is what makes a resize
+    /// land correctly on the first paint instead of after the next event.
+    /// </summary>
+    internal interface ISyncLayout
+    {
+        void LayoutAtWidth();
+    }
+
     internal interface IReStyle
     {
         void ReStyle();

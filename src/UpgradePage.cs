@@ -208,7 +208,7 @@ namespace JoeBrowser
     /// a token on the wrong chain destroys it, so the network is never inferred from the coin -
     /// the same USDT exists on three chains here and only the user knows which one they hold.
     /// </summary>
-    internal sealed class UpgradePage : Panel, IReStyle
+    internal sealed class UpgradePage : Panel, IReStyle, ISyncLayout
     {
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
@@ -709,6 +709,9 @@ namespace JoeBrowser
             catch { }
             return need;
         }
+
+        /// <summary>One more pass once the scroll host has fixed its width.</summary>
+        public void LayoutAtWidth() { LayoutCore(); }
 
         private void LayoutCore()
         {

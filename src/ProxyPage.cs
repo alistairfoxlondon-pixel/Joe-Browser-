@@ -17,7 +17,7 @@ namespace JoeBrowser
     /// profile is created. A running profile can also be re-pointed at a different proxy
     /// without closing its browser tab.
     /// </summary>
-    internal sealed class ProxyPage : Panel, IReStyle
+    internal sealed class ProxyPage : Panel, IReStyle, ISyncLayout
     {
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
@@ -147,6 +147,9 @@ namespace JoeBrowser
 
         protected override void OnResize(EventArgs e) { base.OnResize(e); LayoutCore(); }
         protected override void OnLayout(LayoutEventArgs e) { base.OnLayout(e); LayoutCore(); }
+
+        /// <summary>One more pass once the scroll host has fixed its width.</summary>
+        public void LayoutAtWidth() { LayoutCore(); }
 
         private void LayoutCore()
         {

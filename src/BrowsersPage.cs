@@ -18,7 +18,7 @@ namespace JoeBrowser
     /// where it lives, and a Download button that fetches the official installer without
     /// leaving the app. Reached from the sidebar so a user never has to hunt through Settings.
     /// </summary>
-    internal sealed class BrowsersPage : Panel, IReStyle
+    internal sealed class BrowsersPage : Panel, IReStyle, ISyncLayout
     {
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
@@ -186,6 +186,9 @@ namespace JoeBrowser
 
         protected override void OnResize(EventArgs e) { base.OnResize(e); LayoutCore(); }
         protected override void OnLayout(LayoutEventArgs e) { base.OnLayout(e); LayoutCore(); }
+
+        /// <summary>One more pass once the scroll host has fixed its width.</summary>
+        public void LayoutAtWidth() { LayoutCore(); }
 
         private void LayoutCore()
         {

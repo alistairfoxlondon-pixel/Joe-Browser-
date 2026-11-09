@@ -1939,6 +1939,8 @@ namespace JoeBrowser
         /// <summary>Re-clamps the offset after the content changed size.</summary>
         private bool _syncing;
 
+        private int _syncPasses;
+
         public void SyncExtent()
         {
             /* LayoutContent resizes the content, and the content's own Layout event calls back
@@ -1950,9 +1952,30 @@ namespace JoeBrowser
             {
                 LayoutContent();
                 ScrollToQuiet(_offset);
+                /* A page that computes its column width from ContentWidth only settles on the
+                   second pass: the first runs against the previous width, which is what left a
+                   page laid out for the size it had before the resize. One more pass once the
+                   width is final fixes that, and the counter keeps a page from recursing. */
+                if (_syncPasses < 1)
+                {
+                    _syncPasses++;
+                    try
+                    {
+                        /* The page owns the layout method, not the column it scrolls: ask the
+                           nearest ancestor that knows how to lay this column out. */
+                        Control owner = _content.Parent;
+                        while (owner != null)
+                        {
+                            var sync = owner as ISyncLayout;
+                            if (sync != null) { sync.LayoutAtWidth(); break; }
+                            owner = owner.Parent;
+                        }
+                    }
+                    catch { }
+                }
                 Invalidate();
             }
-            finally { _syncing = false; }
+            finally { _syncPasses = 0; _syncing = false; }
         }
 
         public void ScrollTo(int value)
@@ -2125,10 +2148,13 @@ namespace JoeBrowser
         }
 
         public void ReStyle() { BackColor = Theme.Bg; Invalidate(); }
+
+        /// <summary>One more pass once the scroll host has fixed the width it scrolls.</summary>
+        public void LayoutAtWidth() { LayoutGrid(); }
     }
 
     /// <summary>Responsive card grid: columns are chosen from the available width, cells stretch to fill.</summary>
-    internal sealed class JBGrid : Panel, IReStyle
+    internal sealed class JBGrid : Panel, IReStyle, ISyncLayout
     {
         public int MinCell = 360;
         public int CellHeight = 200;
