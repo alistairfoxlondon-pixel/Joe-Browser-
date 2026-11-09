@@ -124,15 +124,21 @@ namespace JoeBrowser
         {
             var g = e.Graphics;
             Ui.Quality(g);
+            /* The empty panel is 96 tall and put its two lines at 28 and 52 from the top, which
+               is arithmetic for one font size; the pair is measured and centred with the chip
+               now. */
             float w = _empty.Width;
             float chip = Ui.S(44);
-            var cr = new RectangleF(Ui.S(22), (Ui.S(96) - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(8), Theme.AccentOnBg);
+            var cr = new RectangleF(Ui.S(22), (Height - chip) / 2f, chip, chip);
+            Ui.Fill(g, cr, Ui.S(10), Theme.AccentOnBg);
             float ic = Ui.S(22);
             Icons.Draw(g, "proxy", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
-            Ui.Text(g, "No proxies saved yet", Theme.H3, Theme.Text, cr.Right + Ui.S(16), Ui.S(28), w - cr.Right - Ui.S(30));
+            float h3 = Theme.LineHeight(Theme.H3);
+            float sm = Theme.LineHeight(Theme.Small);
+            float top = Math.Max(Ui.S(6), (Height - (h3 + Ui.S(2) + sm)) / 2f);
+            Ui.Text(g, "No proxies saved yet", Theme.H3, Theme.Text, cr.Right + Ui.S(16), top, w - cr.Right - Ui.S(30));
             Ui.Text(g, "Add one to use it in profiles.",
-                Theme.Small, Theme.TextDim, cr.Right + Ui.S(16), Ui.S(52), w - cr.Right - Ui.S(30), "left", 2);
+                Theme.Small, Theme.TextDim, cr.Right + Ui.S(16), top + h3 + Ui.S(2), w - cr.Right - Ui.S(30), "left", 1);
         }
 
         public void ReStyle()
@@ -382,7 +388,7 @@ namespace JoeBrowser
 
             float chip = Ui.S(46);
             var cr = new RectangleF(Ui.S(20), (Height - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(9), Theme.AccentOnBg);
+            Ui.Fill(g, cr, Ui.S(10), Theme.AccentOnBg);
             float ic = Ui.S(24);
             Icons.Draw(g, "globe", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
 
