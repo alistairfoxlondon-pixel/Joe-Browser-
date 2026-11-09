@@ -189,20 +189,10 @@ namespace JoeBrowser
         public string UserAgentOverride { get; set; }
 
         /// <summary>
-        /// The browser build this profile reports, as a real four part version: the one used in
-        /// the user agent, in the client hints and in every probe that asks for a version.
-        ///
-        /// This exists because a profile used to report whatever build was installed on the
-        /// machine, which meant every profile on a PC reported 157.0.8103.38 - the same number
-        /// as the user's own Chrome, in the one string a checker compares first. The value is
-        /// chosen when the profile is made, from a table of real published Chromium builds, and
-        /// it is kept apart from every profile already in the workspace.
+        /// The build the profile reports, mirrored here because the injected script and the client
+        /// hints read the fingerprint. Kept in step by BrowserVersions.Assign and on load.
         /// </summary>
         public string BrowserVersion { get; set; }
-
-        /// <summary>The build a pinned kernel reports; set with KernelVersion when one is used.</summary>
-        [ScriptIgnore]
-        public string KernelFullVersion { get; set; }
 
         public FingerprintConfig()
         {
@@ -285,6 +275,22 @@ namespace JoeBrowser
         /// BrowserKind is used; otherwise this profile always opens this exact version.</summary>
         public string KernelEngine { get; set; }
         public string KernelVersion { get; set; }
+
+        /// <summary>
+        /// The browser build this profile reports, as a real four part version, used by the user
+        /// agent, the client hints and every probe that asks for a version.
+        ///
+        /// This exists because a profile used to report whatever build was installed on the
+        /// machine, so every profile on a PC reported 157.0.8103.38 - the same number as the
+        /// user's own Chrome, in the one string a checker reads first. The value is chosen when
+        /// the profile is made, from a table of real published Chromium branches, and it is kept
+        /// apart from every build already in the workspace.
+        /// </summary>
+        public string BrowserVersion { get; set; }
+
+        /// <summary>The full build a pinned kernel reports. Set together with KernelVersion.</summary>
+        [ScriptIgnore]
+        public string KernelFullVersion { get; set; }
         /// <summary>Folder-style grouping, as in AdsPower / Dolphin Anty.</summary>
         public string Group { get; set; }
         /// <summary>Comma separated labels, searchable and shown on the card.</summary>
