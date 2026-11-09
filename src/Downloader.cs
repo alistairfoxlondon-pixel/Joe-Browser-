@@ -380,11 +380,11 @@ namespace JoeBrowser
             BackColor = Theme.Bg;
             ClientSize = new Size(Ui.S(460), Ui.S(158));
 
-            _cancel = new JBButton { Kind = BtnKind.Soft, Text = "Cancel", Height = Ui.S(33) };
+            _cancel = new JBButton { Kind = BtnKind.Soft, Text = "Cancel", Height = Ui.S(Theme.ControlHeight) };
             _cancel.Click += delegate { _cts.Cancel(); _status = "Cancelling\u2026"; _cancel.Enabled = false; Invalidate(); };
             Controls.Add(_cancel);
             int cw = _cancel.PreferredWidth(Ui.S(88));
-            _cancel.SetBounds(ClientSize.Width - Ui.S(24) - cw, ClientSize.Height - Ui.S(24) - Ui.S(33), cw, Ui.S(33));
+            _cancel.SetBounds(ClientSize.Width - Ui.S(24) - cw, ClientSize.Height - Ui.S(24) - Ui.S(Theme.ControlHeight), cw, Ui.S(Theme.ControlHeight));
 
             /* Esc cancels, and says so: closing the dialog with the download still running
                would leave a half-fetched engine on disk with nothing to explain it. */

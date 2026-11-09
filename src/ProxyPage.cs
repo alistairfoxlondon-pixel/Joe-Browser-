@@ -62,7 +62,7 @@ namespace JoeBrowser
 
         private JBButton MakeButton(string text, string icon, BtnKind kind, string key)
         {
-            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 6, Height = Theme.Field };
+            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = Theme.ButtonRadius, Height = Theme.Field };
             b.Click += delegate { Raise(key, -1); };
             return b;
         }
@@ -130,7 +130,7 @@ namespace JoeBrowser
             float w = _empty.Width;
             float chip = Ui.S(44);
             var cr = new RectangleF(Ui.S(22), (Height - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(10), Theme.AccentOnBg);
+            Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
             float ic = Ui.S(22);
             Icons.Draw(g, "proxy", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
             float h3 = Theme.LineHeight(Theme.H3);
@@ -173,7 +173,7 @@ namespace JoeBrowser
                    hand-placed positions above did. */
                 int by = Ui.S(6);
                 JBButton[] actions = { _addBtn, _importBtn, _checkBtn };
-                int y = Ui.FlowButtons(actions, pad, by, inner, Ui.S(10), Ui.S(33)) + Ui.S(22);
+                int y = Ui.FlowButtons(actions, pad, by, inner, Ui.S(10), Ui.S(Theme.ControlHeight)) + Ui.S(22);
                 _empty.Visible = Items.Count == 0;
                 _empty.SetBounds(pad, y, inner, Ui.S(96));
                 if (Items.Count == 0) y += Ui.S(96) + Ui.S(18);
@@ -292,13 +292,13 @@ namespace JoeBrowser
             /* A row is a surface with a hairline, and it lifts under the pointer: on a list of
                twenty proxies the hovered row is how a person knows which one a click will hit. */
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(10), _hover >= 0 || _rowHover ? Theme.PanelHover : Theme.Card);
-            Ui.Stroke(g, r, Ui.S(10), _hover >= 0 || _rowHover ? Theme.HoverStrong : Theme.Line);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), _hover >= 0 || _rowHover ? Theme.PanelHover : Theme.Card);
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), _hover >= 0 || _rowHover ? Theme.HoverStrong : Theme.Line);
 
             float pad = Ui.S(16);
             float chip = Ui.S(36);
             var cr = new RectangleF(pad, (Height - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(7), Theme.AccentOnBg);
+            Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
             float ic = Ui.S(18);
             Icons.Draw(g, "proxy", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
 
@@ -342,7 +342,7 @@ namespace JoeBrowser
             var a = Actions();
             for (int i = 0; i < a.Length; i++)
             {
-                if (_hover == i) { Ui.Fill(g, a[i], Ui.S(7), Theme.HoverOverlay); Ui.Stroke(g, a[i], Ui.S(7), Theme.Line); }
+                if (_hover == i) { Ui.Fill(g, a[i], Ui.S(Theme.ButtonRadius), Theme.HoverOverlay); Ui.Stroke(g, a[i], Ui.S(Theme.ButtonRadius), Theme.Line); }
                 float s = Ui.S(15);
                 Icons.Draw(g, ActionKeys[i],
                     new RectangleF(a[i].X + (a[i].Width - s) / 2f, a[i].Y + (a[i].Height - s) / 2f, s, s),
@@ -383,12 +383,12 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(10), Theme.Panel);
-            Ui.Stroke(g, r, Ui.S(10), Theme.Line);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Theme.Panel);
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), Theme.Line);
 
             float chip = Ui.S(46);
             var cr = new RectangleF(Ui.S(20), (Height - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(10), Theme.AccentOnBg);
+            Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
             float ic = Ui.S(24);
             Icons.Draw(g, "globe", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
 
@@ -412,8 +412,8 @@ namespace JoeBrowser
                 Theme.Caption, Theme.TextFaint, tx, blockTop + h2 + sm + Ui.S(4), textW);
 
             var badge = new RectangleF(Width - Ui.S(20) - bw, (Height - bh) / 2f, bw, bh);
-            Ui.Fill(g, badge, Ui.S(6), Theme.AccentOnBg);
-            Ui.Stroke(g, badge, Ui.S(6), Theme.AccentBorder);
+            Ui.Fill(g, badge, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
+            Ui.Stroke(g, badge, Ui.S(Theme.ButtonRadius), Theme.AccentBorder);
             Ui.Text(g, "Coming soon", Theme.SmallBold, Theme.AccentText, badge.X,
                 badge.Y + (bh - Theme.SmallBold.GetHeight(g)) / 2f, bw, "center");
         }

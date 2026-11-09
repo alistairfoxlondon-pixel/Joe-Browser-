@@ -83,6 +83,12 @@ namespace JoeBrowser
             Add("net", "wifi", "tools.net", "tools.net.desc", "btn.check");
             Add("cookies", "cookie", "tools.cookies", "tools.cookies.desc", "btn.open");
             Add("ext", "apps", "tools.ext", "tools.ext.desc", "btn.open");
+            /* The tools the user could not find: all three live inside a profile, so they were
+               nowhere in the app's own navigation - which reads as "the app does not have them".
+               They are listed here with what they do and the exact gesture that uses them. */
+            Add("human", "clipboard", "tools.human", "tools.human.desc", "btn.how");
+            Add("pastehelp", "copy", "tools.rightclick", "tools.rightclick.desc", "btn.how");
+            Add("watcher", "route", "tools.watch", "tools.watch.desc", "btn.how");
             Add("trash", "trash", "tools.trash", "tools.trash.desc", "btn.restore");
             Add("shortcuts", "command", "tools.shortcuts", "tools.shortcuts.desc", "btn.view");
             Add("clean", "sync", "tools.clean", "tools.clean.desc", "btn.clean");
@@ -352,7 +358,7 @@ namespace JoeBrowser
                 float track = Height;
                 float thumb = Math.Max(Ui.S(36), track * track / (track + _maxScroll));
                 float ty = (track - thumb) * (_scroll / (float)_maxScroll);
-                Ui.Fill(g, new RectangleF(Width - Ui.S(9), ty, Ui.S(5), thumb), Ui.S(2.5f), Theme.HoverStrong);
+                Ui.Fill(g, new RectangleF(Width - Ui.S(9), ty, Ui.S(Theme.ButtonRadius), thumb), Ui.S(2.5f), Theme.HoverStrong);
             }
 
             // The keyboard cursor is drawn after the transform is reset so the ring is never
@@ -370,7 +376,7 @@ namespace JoeBrowser
             var r = t.Rect;
             if (r.Bottom < _scroll || r.Top > _scroll + Height) return;
 
-            float rad = Ui.S(8);
+            float rad = Ui.S(Theme.ButtonRadius);
             var box = new RectangleF(r.X + 0.5f, r.Y + 0.5f, r.Width - 1.5f, r.Height - 1.5f);
             Ui.Fill(g, box, rad, t.Hover ? Theme.PanelHover : Theme.Card);
             Ui.Stroke(g, box, rad, t.Hover ? Theme.HoverStrong : Theme.Line, 1f);
@@ -381,7 +387,7 @@ namespace JoeBrowser
             /* A 14% wash on a white card is nearly invisible and the glyph then reads as a grey
                smudge. The chip carries a visible tint and the glyph is pulled 15% toward the text
                colour so it keeps its contrast against it. */
-            Ui.Fill(g, cr, Ui.S(7), Ui.Blend(Theme.Card, tint, Theme.Dark ? 0.30f : 0.18f));
+            Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Ui.Blend(Theme.Card, tint, Theme.Dark ? 0.30f : 0.18f));
             Color ink = Theme.Dark ? tint : Ui.Blend(tint, Theme.Text, 0.15f);
             float ic = Ui.S(20);
             Icons.Draw(g, t.Icon, new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), ink);
@@ -407,8 +413,8 @@ namespace JoeBrowser
             var b = t.Button;
             /* In dark the secondary fill has to sit above the card, not below it: Panel2 is darker
                than a card, so the pill read as a hole punched in the tile. */
-            Ui.Fill(g, b, Ui.S(4), t.Hover ? Theme.AccentOnBg : (Theme.Dark ? Theme.ButtonBg : Theme.Panel2));
-            Ui.Stroke(g, b, Ui.S(4), t.Hover ? Theme.AccentBorder : Theme.Line, 1f);
+            Ui.Fill(g, b, Ui.S(Theme.ButtonRadius), t.Hover ? Theme.AccentOnBg : (Theme.Dark ? Theme.ButtonBg : Theme.Panel2));
+            Ui.Stroke(g, b, Ui.S(Theme.ButtonRadius), t.Hover ? Theme.AccentBorder : Theme.Line, 1f);
             Ui.Text(g, btn, Theme.SmallBold, t.Hover ? Theme.AccentText : Theme.TextDim,
                 b.X, b.Y + (b.Height - Theme.SmallBold.GetHeight(g)) / 2f, b.Width, "center");
 

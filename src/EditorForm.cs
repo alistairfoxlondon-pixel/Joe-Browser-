@@ -48,6 +48,10 @@ namespace JoeBrowser
         private JBToggle _canvas, _audio, _fonts, _dnt, _battery, _autoMatch, _autoUa;
         private JBButton _regen, _browse, _testBtn, _save, _cancel, _getBrowser, _openExtFolder, _random;
         private JBToggle _toolHumanPaste, _toolProxyWatch, _toolRightClick, _toolAllowShift;
+        /* One line under the switches that says how to use the two tools a user cannot find by
+           clicking around: the paste that waits in the clipboard, and the menu that a page had
+           taken away. It is a label rather than a paragraph, and it changes with the switches. */
+        private JBLabel _toolHow;
         private JBSelect _toolSpeed, _toolInterval;
         private JBLabel _browserNote;
         private JBLabel _fpWarn;
@@ -181,7 +185,7 @@ namespace JoeBrowser
             _title = new JBLabel(LabelRole.Title, _isNew ? "New profile" : "Edit profile");
             Controls.Add(_title);
 
-            _close = new JBIconButton { Icon = "close", Danger = true, IconSize = 14, Tip = "Close" };
+            _close = new JBIconButton { Icon = "close", Danger = true, IconSize = 17, Tip = "Close" };
             _close.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(_close);
 
@@ -273,7 +277,7 @@ namespace JoeBrowser
             _lblKind = Lbl(_tabGeneral, "BROWSER");
             _browserKind = Pick(_tabGeneral, "window");
             BuildBrowserOptions();
-            _browserKind.SetBounds(0, 0, Ui.S(210), Ui.S(33));
+            _browserKind.SetBounds(0, 0, Ui.S(210), Ui.S(Theme.ControlHeight));
 
             _lblPath = Lbl(_tabGeneral, "CUSTOM PATH (OPTIONAL)");
             _browserPath = Txt(_tabGeneral, _profile.BrowserKind == "custom" ? _profile.BrowserPath : "",
@@ -886,6 +890,10 @@ namespace JoeBrowser
             _toolProxyWatch = new JBToggle { Text = "Proxy IP change & offline alerts", Checked = _tools.ProxyWatch };
             _toolRightClick = new JBToggle { Text = "Enable right click & copy", Checked = _tools.EnableRightClick };
             _toolAllowShift = new JBToggle { Text = "Also unlock text selection", Checked = _tools.UnlockSelection };
+            _toolHow = new JBLabel(LabelRole.Faint, "");
+            _toolHow.Wrap = true;
+            _toolHow.TextAlign = ContentAlignment.TopLeft;
+            _tabTools.Controls.Add(_toolHow);
             _tabTools.Controls.Add(_toolHumanPaste);
             _tabTools.Controls.Add(_toolProxyWatch);
             _tabTools.Controls.Add(_toolRightClick);
@@ -927,8 +935,32 @@ namespace JoeBrowser
             _toolRightClick.CheckedChanged += delegate
             {
                 _toolAllowShift.Visible = _toolRightClick.Checked;
+                UpdateToolHow();
                 LayoutAll();
             };
+            _toolHumanPaste.CheckedChanged += delegate { UpdateToolHow(); LayoutAll(); };
+            _toolProxyWatch.CheckedChanged += delegate { UpdateToolHow(); LayoutAll(); };
+            UpdateToolHow();
+        }
+
+        /// <summary>
+        /// What the user has to do to use what the switches just turned on. Reported twice as
+        /// "the feature is missing" when it was in fact working and undocumented: a paste tool
+        /// that only runs on Ctrl+V, and a right-click guard whose only sign of life is the
+        /// context menu a blocked site hid in the first place.
+        /// </summary>
+        private void UpdateToolHow()
+        {
+            if (_toolHow == null) return;
+            var lines = new List<string>();
+            if (_toolHumanPaste.Checked)
+                lines.Add("Paste as human: copy as usual, then press Ctrl+V in the page - or right-click a text box and pick \"Paste as human\".");
+            if (_toolRightClick.Checked)
+                lines.Add("Right click & copy: the menu and text selection work again on sites that block them, and copy is never stopped.");
+            if (_toolProxyWatch.Checked)
+                lines.Add("IP change & offline alerts: checked in the page while a profile is open, and the browser shows a notification when your exit IP changes.");
+            _toolHow.Text = string.Join("\r\n", lines.ToArray());
+            _toolHow.Visible = lines.Count > 0;
         }
 
         private void ToggleReveal()
@@ -1206,7 +1238,7 @@ namespace JoeBrowser
         {
             int w = ClientSize.Width, h = ClientSize.Height;
             int pad = Ui.S(28);
-            int saveW = _save.PreferredWidth(Ui.S(150)), saveH = Ui.S(33);
+            int saveW = _save.PreferredWidth(Ui.S(150)), saveH = Ui.S(Theme.ControlHeight);
             int cancelW = _cancel.PreferredWidth(Ui.S(88));
             /* Both buttons and the error line have to fit in the footer. At a wide scale on a
                narrow window they did not, and the Cancel button was pushed past the left edge
@@ -1237,7 +1269,7 @@ namespace JoeBrowser
         private void LayoutGeneral(Panel page, JBScrollHost host, int cw)
         {
             int y = Ui.S(4);
-            int lh = Ui.S(18), fh = Ui.S(33), lg = Ui.S(6), rg = Ui.S(16);
+            int lh = Theme.LineHeight(Theme.Caption), fh = Ui.S(Theme.ControlHeight), lg = Ui.S(6), rg = Ui.S(16);
             int browseW = _browse.PreferredWidth(Ui.S(76));
 
             _lblName.SetBounds(0, y, cw, lh); y += lh + lg;
@@ -1331,7 +1363,7 @@ namespace JoeBrowser
 
         private void LayoutFingerprint(Panel page, JBScrollHost host, int cw)
         {
-            int lh = Ui.S(18), fh = Ui.S(33), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
+            int lh = Theme.LineHeight(Theme.Caption), fh = Ui.S(Theme.ControlHeight), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
             bool two = cw >= Ui.S(560);
 
             int y = Ui.S(4);
@@ -1356,9 +1388,9 @@ namespace JoeBrowser
             int regenW = _regen.PreferredWidth(Ui.S(160));
             int randomW = _random.PreferredWidth(Ui.S(160));
             Ui.FitPair(ref regenW, ref randomW, Ui.S(8), Math.Max(Ui.S(200), cw), Ui.S(96), Ui.S(96));
-            _regen.SetBounds(0, y, regenW, Ui.S(33));
-            _random.SetBounds(_regen.Right + Ui.S(8), y, randomW, Ui.S(33));
-            y += Ui.S(33) + Ui.S(10);
+            _regen.SetBounds(0, y, regenW, Ui.S(Theme.ControlHeight));
+            _random.SetBounds(_regen.Right + Ui.S(8), y, randomW, Ui.S(Theme.ControlHeight));
+            y += Ui.S(Theme.ControlHeight) + Ui.S(10);
             UpdateFirefoxWarn(0, y, cw);
             if (_fpWarn.Visible) y += Ui.S(26) + Ui.S(6);
 
@@ -1367,7 +1399,7 @@ namespace JoeBrowser
 
         private void LayoutPrivacy(Panel page, JBScrollHost host, int cw)
         {
-            int lh = Ui.S(18), fh = Ui.S(33), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
+            int lh = Theme.LineHeight(Theme.Caption), fh = Ui.S(Theme.ControlHeight), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
             bool two = cw >= Ui.S(560);
 
             int y = Ui.S(4);
@@ -1414,7 +1446,7 @@ namespace JoeBrowser
 
         private void LayoutProxy(Panel page, JBScrollHost host, int cw)
         {
-            int lh = Ui.S(18), fh = Ui.S(33), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
+            int lh = Theme.LineHeight(Theme.Caption), fh = Ui.S(Theme.ControlHeight), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
             bool two = cw >= Ui.S(520);
 
             int y = Ui.S(4);
@@ -1444,7 +1476,7 @@ namespace JoeBrowser
 
         private void LayoutTools(Panel page, JBScrollHost host, int cw)
         {
-            int lh = Ui.S(18), fh = Ui.S(33), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
+            int lh = Theme.LineHeight(Theme.Caption), fh = Ui.S(Theme.ControlHeight), lg = Ui.S(6), rg = Ui.S(16), cg = Ui.S(12);
             bool two = cw >= Ui.S(560);
             int y = Ui.S(4);
 
@@ -1466,7 +1498,15 @@ namespace JoeBrowser
                 t.SetBounds((placed % cols) * (colW + gap), y + (placed / cols) * (th + Ui.S(6)), colW, th);
                 placed++;
             }
-            y += ((placed + cols - 1) / cols) * (th + Ui.S(6)) + Ui.S(8);
+            y += ((placed + cols - 1) / cols) * (th + Ui.S(6)) + Ui.S(2);
+
+            if (_toolHow != null && _toolHow.Visible)
+            {
+                int howH = HowHeight(cw);
+                _toolHow.SetBounds(0, y, cw, howH);
+                y += howH + Ui.S(10);
+            }
+            else if (_toolHow != null) _toolHow.SetBounds(0, y, 0, 0);
 
             y = Row(_lblSpeed, _toolSpeed, _lblInterval, _toolInterval, y, cw, two, lh, lg, rg, cg, fh, fh);
 
@@ -1477,6 +1517,19 @@ namespace JoeBrowser
             _openExtFolder.SetBounds(0, y, bw, fh); y += fh + Ui.S(12);
 
             FinishPage(page, host, cw, y);
+        }
+
+        /// <summary>The measured height of the tools explanation at this width, so nothing after
+        /// it can overlap it when the window is narrow.</summary>
+        private int HowHeight(int cw)
+        {
+            if (_toolHow == null || string.IsNullOrEmpty(_toolHow.Text)) return 0;
+            using (var g = System.Drawing.Graphics.FromHwnd(IntPtr.Zero))
+            {
+                var size = TextRenderer.MeasureText(g, _toolHow.Text, _toolHow.Font,
+                    new Size(Math.Max(Ui.S(120), cw), int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
+                return Math.Max(Ui.S(16), size.Height + Ui.S(2));
+            }
         }
 
         /// <summary>Width a toggle needs for its label, plus the switch it draws itself.</summary>
@@ -1908,7 +1961,7 @@ namespace JoeBrowser
                 int mh = MeasureLines(g, msg, Theme.Body, textW);
                 int dh = _detail.Visible ? MeasureLines(g, det, Theme.Caption, textW) : 0;
                 int bottom = bodyTop + mh + (dh > 0 ? Ui.S(8) + dh : 0) + Ui.S(24);
-                int height = bottom + Ui.S(33) + pad;
+                int height = bottom + Ui.S(Theme.ControlHeight) + pad;
                 int minButtons = textX + Ui.S(60) + saveW + cancelW + Ui.S(10);
                 if (width < minButtons) width = Math.Min(minButtons, screenMax.Width);
                 if (height > screenMax.Height) height = screenMax.Height;
@@ -1921,8 +1974,8 @@ namespace JoeBrowser
                     _title.SetBounds(textX, pad + Ui.S(2), ClientSize.Width - textX - pad, Ui.S(32));
                     _message.SetBounds(textX, bodyTop, textW, mh);
                     _detail.SetBounds(textX, bodyTop + mh + Ui.S(8), textW, dh);
-                    _ok.SetBounds(ClientSize.Width - pad - saveW, finalBottom, saveW, Ui.S(33));
-                    _cancel.SetBounds(_ok.Left - Ui.S(8) - cancelW, finalBottom, cancelW, Ui.S(33));
+                    _ok.SetBounds(ClientSize.Width - pad - saveW, finalBottom, saveW, Ui.S(Theme.ControlHeight));
+                    _cancel.SetBounds(_ok.Left - Ui.S(8) - cancelW, finalBottom, cancelW, Ui.S(Theme.ControlHeight));
                 });
             }
             Invalidate();

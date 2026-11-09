@@ -81,7 +81,7 @@ namespace JoeBrowser
 
         private JBButton MakeButton(string text, string icon, BtnKind kind, string key)
         {
-            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 6, Height = Theme.Field };
+            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = Theme.ButtonRadius, Height = Theme.Field };
             b.Click += delegate { Raise(key, null); };
             return b;
         }
@@ -204,7 +204,7 @@ namespace JoeBrowser
                    running off the right edge of the page. */
                 int by = Ui.S(6);
                 JBButton[] actions = { _rescan, _openFolder, _kernels };
-                int y = Ui.FlowButtons(actions, pad, by, inner, Ui.S(10), Ui.S(33)) + Ui.S(24);
+                int y = Ui.FlowButtons(actions, pad, by, inner, Ui.S(10), Ui.S(Theme.ControlHeight)) + Ui.S(24);
                 _section.SetBounds(pad, y, inner, Ui.S(18));
                 y += Ui.S(18) + Ui.S(12);
 
@@ -265,7 +265,7 @@ namespace JoeBrowser
             Info = info;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             Ui.Opaque(this);
-            _action = new JBButton { Radius = 6, Height = Ui.S(32) };
+            _action = new JBButton { Radius = Theme.ButtonRadius, Height = Ui.S(32) };
             _action.Click += delegate { var h = ActionRequested; if (h != null) h(this, EventArgs.Empty); };
             Controls.Add(_action);
             Apply();
@@ -344,8 +344,8 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(8), _hover ? Theme.PanelHover : Theme.Card);
-            Ui.Stroke(g, r, Ui.S(8), _hover ? Theme.AccentBorder : Theme.Line, 1f);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), _hover ? Theme.PanelHover : Theme.Card);
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), _hover ? Theme.AccentBorder : Theme.Line, 1f);
 
             float d = Ui.S(44);
             var mark = new RectangleF(Ui.S(18), (Height - d) / 2f, d, d);

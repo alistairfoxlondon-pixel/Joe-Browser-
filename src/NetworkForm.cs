@@ -84,15 +84,15 @@ namespace JoeBrowser
             _empty.Wrap = true;
             _column.Controls.Add(_empty);
 
-            _run = new JBButton { Kind = BtnKind.Primary, Icon = "wifi", Text = "Check", Radius = 6, Height = Theme.Field };
+            _run = new JBButton { Kind = BtnKind.Primary, Icon = "wifi", Text = "Check", Radius = Theme.ButtonRadius, Height = Theme.Field };
             _run.Click += delegate { RunCheck(); };
             Controls.Add(_run);
 
-            _close = new JBButton { Kind = BtnKind.Ghost, Text = "Close", Radius = 6, Height = Theme.Field };
+            _close = new JBButton { Kind = BtnKind.Ghost, Text = "Close", Radius = Theme.ButtonRadius, Height = Theme.Field };
             _close.Click += delegate { Close(); };
             Controls.Add(_close);
 
-            _x = new JBIconButton { Icon = "close", Danger = true, IconSize = 13, Tip = "Close" };
+            _x = new JBIconButton { Icon = "close", Danger = true, IconSize = 16, Tip = "Close" };
             _x.Click += delegate { Close(); };
             Controls.Add(_x);
 
@@ -201,7 +201,7 @@ namespace JoeBrowser
             int w = ClientSize.Width, h = ClientSize.Height;
             int pad = Ui.S(24);
             _x.SetBounds(w - pad - Ui.S(30), Ui.S(14), Ui.S(30), Ui.S(30));
-            _target.SetBounds(pad, Ui.S(64), Math.Min(Ui.S(320), w - pad * 2), Ui.S(33));
+            _target.SetBounds(pad, Ui.S(64), Math.Min(Ui.S(320), w - pad * 2), Ui.S(Theme.ControlHeight));
 
             int top = Ui.S(112);
             int footer = Ui.S(56);
@@ -237,8 +237,8 @@ namespace JoeBrowser
             /* Both buttons share the footer width; a long pair used to run off the right edge,
                where the second button was clipped by the dialog border. */
             Ui.FitPair(ref rw, ref cwid, Ui.S(8), Math.Max(Ui.S(160), w - pad * 2), Ui.S(72), Ui.S(64));
-            _run.SetBounds(pad, h - Ui.S(16) - Ui.S(33), rw, Ui.S(33));
-            _close.SetBounds(pad + rw + Ui.S(8), h - Ui.S(16) - Ui.S(33), cwid, Ui.S(33));
+            _run.SetBounds(pad, h - Ui.S(16) - Ui.S(Theme.ControlHeight), rw, Ui.S(Theme.ControlHeight));
+            _close.SetBounds(pad + rw + Ui.S(8), h - Ui.S(16) - Ui.S(Theme.ControlHeight), cwid, Ui.S(Theme.ControlHeight));
         }
 
         private static int EstimateLines(string text, int width, Font font)

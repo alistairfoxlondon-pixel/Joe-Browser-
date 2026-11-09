@@ -224,6 +224,120 @@ namespace JoeBrowser
                     Ui.Scale = wasScale;
                     Theme.ClearFontCache();
 
+                    /* The type scale is a promise now, not a preference, so it is asserted
+                       rather than eyeballed: body text at 16 px or more and nothing anywhere
+                       below 14 px at 100%. "The font is too small" has come back once; a build
+                       that reintroduces it should fail here instead of in a screenshot. */
+                    if (Theme.PxBody < 16) sb.Append(" [body text is below 16 px]");
+                    if (Math.Min(Theme.PxMicro, Theme.PxCaption) < 14) sb.Append(" [text below 14 px is in the scale]");
+                    if (Theme.ButtonRadius != 0 || Theme.CardRadius != 0) sb.Append(" [a rounded corner is back in the theme]");
+
+                    /* The layout is measured, so it can be proven: every line of text drawn on a
+                       card or a row has to fit the width it is given, at the new type sizes and
+                       at every scale. These are the fixed strings that used to be cut - the
+                       toast message, the label beside a toggle, a card's description - measured
+                       against the space they really get. */
+                    float keepScale = Ui.Scale;
+                    foreach (float scale in new[] { 1f, 1.25f, 1.5f })
+                    {
+                        Ui.Scale = scale;
+                        Theme.ClearFontCache();
+                        using (var g = System.Drawing.Graphics.FromHwnd(IntPtr.Zero))
+                        {
+                            /* A row's title at H3 has to fit the narrowest card for a name of
+                               the length people really use. A longer name is ellipsised with the
+                               whole value in a tooltip, which is the interface's stated rule:
+                               nothing is cut without a way to read it. */
+                            float rowW = Ui.S(ProfileCard.CardMinW) - Ui.S(36);
+                            if (Ui.Measure(g, "Trading account Europe", Theme.H3).Width > rowW)
+                                sb.Append(" [a row title does not fit at " + scale + "]");
+                            /* The longest caption the interface draws, wrapped in a card column:
+                               it is allowed three lines, so the block it lives in is sized for
+                               three. If it needs a fourth at some scale, that block is a clipped
+                               block - which is the defect being fixed. */
+                            float three = 3f * Theme.LineHeight(Theme.Small);
+                            float need = Ui.MeasureWrapped(g, L10n.T("acct.pin.off.state"), Theme.Small, rowW, 99);
+                            if (need > three + 1f)
+                                sb.Append(" [a card caption needs more than three lines at " + scale + "]");
+                        }
+                    }
+                    Ui.Scale = keepScale;
+                    Theme.ClearFontCache();
+
+                    /* The reported defect of this round: every profile on a machine claimed the
+                       installed browser's build, so a workspace of ten profiles reported one
+                       number, the same one as the user's own Chrome. Asserted here the way the
+                       grid makes them: each profile through the same path, then the user agents
+                       and the hint builds compared. Chrome's reduced user agent hides the build,
+                       so the major is what has to differ between any two profiles. */
+                    Func<Dictionary<string, int>, string, int> Count = delegate(Dictionary<string, int> map, string key)
+                    {
+                        int n;
+                        map.TryGetValue(key ?? "", out n);
+                        map[key ?? ""] = n + 1;
+                        return n + 1;
+                    };
+                    try
+                    {
+                        var workspace = new List<Profile>();
+                        for (int i = 0; i < 12; i++)
+                        {
+                            var p = new Profile { Name = "version test " + (i + 1) };
+                            FingerprintIdentity.Comparison c;
+                            FingerprintIdentity.MakeUnique(p.Fp, "System default", p.Proxy, workspace, out c);
+                            string vnote;
+                            BrowserVersions.Assign(p, workspace, out vnote);
+                            FingerprintFactory.ResolveUserAgent(p.Fp, new BrowserInfo
+                            {
+                                Name = "self test",
+                                Version = "157.0.8103.38",
+                                MajorVersion = 157,
+                                Path = System.IO.Path.Combine(sandbox, "chrome.exe")
+                            });
+                            workspace.Add(p);
+                        }
+                        var majors = new Dictionary<string, int>(StringComparer.Ordinal);
+                        var builds = new Dictionary<string, int>(StringComparer.Ordinal);
+                        var agents = new Dictionary<string, int>(StringComparer.Ordinal);
+                        foreach (var p in workspace)
+                        {
+                            if (!BrowserVersions.IsReal(p.BrowserVersion))
+                                sb.Append(" [a profile reports " + (p.BrowserVersion ?? "no build") + ", which is not a build a browser shipped]");
+                            if (p.Fp.BrowserVersion != p.BrowserVersion)
+                                sb.Append(" [the profile and its fingerprint name different builds]");
+                            string uaBuild = BrowserVersions.FromUserAgent(p.Fp.UserAgent);
+                            /* The reduced user agent carries the major and nothing else, which
+                               is exactly what a checker prints. */
+                            int uaMajor = BrowserVersions.MajorFromUserAgent(p.Fp.UserAgent);
+                            if (uaMajor != BrowserVersions.MajorOf(p.BrowserVersion))
+                                sb.Append(" [a profile's user agent says " + uaMajor + " but it reports " + p.BrowserVersion + "]");
+                            if (p.Fp.UserAgent != null && p.Fp.UserAgent.IndexOf("157.0.0.0", StringComparison.Ordinal) >= 0)
+                                sb.Append(" [a profile still claims the installed browser's major]");
+                            Count(majors, BrowserVersions.MajorOf(p.BrowserVersion).ToString());
+                            Count(builds, p.BrowserVersion);
+                            Count(agents, p.Fp.UserAgent ?? "");
+                        }
+                        if (majors.Count < 10) sb.Append(" [12 profiles only cover " + majors.Count + " majors]");
+                        if (builds.Count != 12) sb.Append(" [12 profiles share builds: " + builds.Count + " distinct]");
+                        if (agents.Count != 12) sb.Append(" [12 profiles share user agents: " + agents.Count + " distinct]");
+
+                        /* And a removal of a shipped extension has to survive the next start. */
+                        string shipped = ExtensionCatalog.DefaultStoreExtensions[0][0];
+                        bool wasRemoved = ExtensionCatalog.IsRemovedByUser(shipped);
+                        ExtensionCatalog.MarkRemoved(shipped, true);
+                        if (!ExtensionCatalog.IsRemovedByUser(shipped))
+                            sb.Append(" [removing a shipped extension was not recorded]");
+                        var folders = ExtensionCatalog.DefaultFolders();
+                        foreach (string f in folders)
+                            if (f.EndsWith(shipped, StringComparison.OrdinalIgnoreCase))
+                                sb.Append(" [a removed shipped extension is still loaded]");
+                        if (wasRemoved) ExtensionCatalog.MarkRemoved(shipped, false);
+                    }
+                    catch (Exception ex)
+                    {
+                        sb.Append(" [version checks threw " + ex.GetType().Name + ": " + ex.Message + "]");
+                    }
+
                     var saved = new Profile { Name = "self test save" };
                     store.Save(saved);
                     var back = store.LoadAll();

@@ -283,13 +283,13 @@ namespace JoeBrowser
             _status = new JBLabel(LabelRole.Faint, "");
             _status.Wrap = true;
 
-            _copy = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy address", Radius = 6, Height = Theme.Field };
+            _copy = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy address", Radius = Theme.ButtonRadius, Height = Theme.Field };
             /* The amount is the other half of a crypto transfer and it used to have to be read
                off the screen and retyped: one wrong digit sends the money nowhere. */
-            _copyAmount = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy amount", Radius = 6, Height = Theme.Field };
-            _check = new JBButton { Kind = BtnKind.Primary, Icon = "refresh", Text = "I have paid", Radius = 6, Height = Theme.Field };
-            _restore = new JBButton { Kind = BtnKind.Ghost, Text = "Restore a purchase", Radius = 6, Height = Theme.Field };
-            _termsLink = new JBButton { Kind = BtnKind.Ghost, Text = "Terms", Radius = 6, Height = Theme.Field };
+            _copyAmount = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy amount", Radius = Theme.ButtonRadius, Height = Theme.Field };
+            _check = new JBButton { Kind = BtnKind.Primary, Icon = "refresh", Text = "I have paid", Radius = Theme.ButtonRadius, Height = Theme.Field };
+            _restore = new JBButton { Kind = BtnKind.Ghost, Text = "Restore a purchase", Radius = Theme.ButtonRadius, Height = Theme.Field };
+            _termsLink = new JBButton { Kind = BtnKind.Ghost, Text = "Terms", Radius = Theme.ButtonRadius, Height = Theme.Field };
 
             _copy.Click += delegate { Raise("copy"); };
             _copyAmount.Click += delegate { Raise("copyamount"); };
@@ -302,8 +302,8 @@ namespace JoeBrowser
 
             _sectionInvite = new StepHeader(0, "INVITE") { IconName = "gift" };
             _inviteLine = new JBLabel(LabelRole.Faint, "");
-            _copyInvite = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy invite", Radius = 6, Height = Ui.S(33) };
-            _claim = new JBButton { Kind = BtnKind.Soft, Text = "Claim a receipt", Radius = 6, Height = Ui.S(33) };
+            _copyInvite = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy invite", Radius = Theme.ButtonRadius, Height = Ui.S(Theme.ControlHeight) };
+            _claim = new JBButton { Kind = BtnKind.Soft, Text = "Claim a receipt", Radius = Theme.ButtonRadius, Height = Ui.S(Theme.ControlHeight) };
             _copyInvite.Click += delegate { Raise("invite"); };
             _claim.Click += delegate { Raise("claim"); };
             _column.Controls.Add(_sectionInvite);
@@ -315,8 +315,8 @@ namespace JoeBrowser
             _termsPanel.Paint += PaintTerms;
             _column.Controls.Add(_termsPanel);
 
-            _readTerms = new JBButton { Kind = BtnKind.Soft, Text = "Read the terms", Radius = 6, Height = Ui.S(33) };
-            _acceptTerms = new JBButton { Kind = BtnKind.Primary, Text = "I accept", Radius = 6, Height = Ui.S(33) };
+            _readTerms = new JBButton { Kind = BtnKind.Soft, Text = "Read the terms", Radius = Theme.ButtonRadius, Height = Ui.S(Theme.ControlHeight) };
+            _acceptTerms = new JBButton { Kind = BtnKind.Primary, Text = "I accept", Radius = Theme.ButtonRadius, Height = Ui.S(Theme.ControlHeight) };
             _readTerms.Click += delegate { Raise("terms"); };
             _acceptTerms.Click += delegate { AcceptTerms(); };
             /* Children of the card, not siblings of it. As siblings they depended on z-order to
@@ -817,16 +817,16 @@ namespace JoeBrowser
                        a second row rather than crossing into the QR code's space. The second
                        button used to be placed at a fixed offset with no check at all, so on a
                        narrow window it was drawn on top of the code. */
-                    _copy.SetBounds(pad, by, w1, Ui.S(33));
+                    _copy.SetBounds(pad, by, w1, Ui.S(Theme.ControlHeight));
                     bool secondRow = pad + w1 + Ui.S(10) + wa > pad + textW;
                     _copyAmount.SetBounds(secondRow ? pad : pad + w1 + Ui.S(10),
-                        secondRow ? by + Ui.S(43) : by, wa, Ui.S(33));
+                        secondRow ? by + Ui.S(43) : by, wa, Ui.S(Theme.ControlHeight));
 
                     int paidY = secondRow ? by + Ui.S(86) : by;
                     int paidX = secondRow ? pad : pad + w1 + wa + Ui.S(20);
                     bool thirdRow = paidX + w2 > pad + textW;
                     if (thirdRow) { paidX = pad; paidY += Ui.S(43); }
-                    _check.SetBounds(paidX, paidY, w2, Ui.S(33));
+                    _check.SetBounds(paidX, paidY, w2, Ui.S(Theme.ControlHeight));
 
                     _qr.SetBounds(pad + inner - qr, y, qr, qr);
 
@@ -840,7 +840,7 @@ namespace JoeBrowser
                 JBButton[] bottomActions = TermsAccepted
                     ? new[] { _restore, _termsLink }
                     : new[] { _restore };
-                y = Ui.FlowButtons(bottomActions, pad, y, inner, Ui.S(10), Ui.S(33)) + Ui.S(26);
+                y = Ui.FlowButtons(bottomActions, pad, y, inner, Ui.S(10), Ui.S(Theme.ControlHeight)) + Ui.S(26);
 
                 _sectionInvite.SetBounds(pad, y, inner, Ui.S(22));
                 y += Ui.S(22) + Ui.S(6);

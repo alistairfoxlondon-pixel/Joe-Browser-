@@ -46,16 +46,16 @@ namespace JoeBrowser
                 _column.Controls.Add(row);
             }
 
-            _close = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = "Done", Radius = 6, Height = Theme.Field };
+            _close = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = "Done", Radius = Theme.ButtonRadius, Height = Theme.Field };
             _close.Click += delegate { Close(); };
             Controls.Add(_close);
 
             /* The two pages people actually use to judge a profile. Opening them inside this
                session is the only way the result describes this profile and not the desktop. */
-            _browserScan = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "browserscan.net", Radius = 6, Height = Theme.Field };
+            _browserScan = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "browserscan.net", Radius = Theme.ButtonRadius, Height = Theme.Field };
             _browserScan.Click += delegate { Open("https://www.browserscan.net/"); };
             Controls.Add(_browserScan);
-            _ipFighter = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "ipfighter.com", Radius = 6, Height = Theme.Field };
+            _ipFighter = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "ipfighter.com", Radius = Theme.ButtonRadius, Height = Theme.Field };
             _ipFighter.Click += delegate { Open("https://ipfighter.com/"); };
             Controls.Add(_ipFighter);
             bool canOpen = session != null && session.IsRunning;
@@ -64,7 +64,7 @@ namespace JoeBrowser
 
             /* A failed check is exactly when a user wants a human: one button, the report is
                pre-filled with the failed lines so the message needs no technical wording. */
-            _report = new JBButton { Kind = BtnKind.Soft, Icon = "error", Text = "Report", Radius = 6, Height = Theme.Field, Tip = "Tell the developer on Telegram" };
+            _report = new JBButton { Kind = BtnKind.Soft, Icon = "error", Text = "Report", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = "Tell the developer on Telegram" };
             _report.Click += delegate
             {
                 var bad = new List<string>();
@@ -73,7 +73,7 @@ namespace JoeBrowser
             };
             Controls.Add(_report);
 
-            _x = new JBIconButton { Icon = "close", Danger = true, IconSize = 13, Tip = "Close" };
+            _x = new JBIconButton { Icon = "close", Danger = true, IconSize = 16, Tip = "Close" };
             _x.Click += delegate { Close(); };
             Controls.Add(_x);
 
@@ -124,7 +124,7 @@ namespace JoeBrowser
             _host.SyncExtent();
 
             int bw = _close.PreferredWidth(Ui.S(96));
-            _close.SetBounds(w - pad - bw, h - Ui.S(16) - Ui.S(33), bw, Ui.S(33));
+            _close.SetBounds(w - pad - bw, h - Ui.S(16) - Ui.S(Theme.ControlHeight), bw, Ui.S(Theme.ControlHeight));
 
             /* The footer buttons used to be laid out from the left with no regard for Close on
                the right, so on a narrow window the report button was drawn under it. They flow
@@ -133,7 +133,7 @@ namespace JoeBrowser
                 ? new[] { _browserScan, _ipFighter, _report }
                 : new[] { _report };
             int avail = Math.Max(Ui.S(120), _close.Left - Ui.S(8) - pad);
-            Ui.FlowButtons(footer, pad, h - Ui.S(16) - Ui.S(33), avail, Ui.S(8), Ui.S(33));
+            Ui.FlowButtons(footer, pad, h - Ui.S(16) - Ui.S(Theme.ControlHeight), avail, Ui.S(8), Ui.S(Theme.ControlHeight));
         }
 
         private void Open(string url)

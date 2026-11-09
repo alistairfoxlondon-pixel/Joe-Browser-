@@ -53,7 +53,7 @@ namespace JoeBrowser
             _title = new JBLabel(LabelRole.Title, title);
             Controls.Add(_title);
 
-            _close = new JBIconButton { Icon = "close", Danger = true, IconSize = 13, Tip = "Close" };
+            _close = new JBIconButton { Icon = "close", Danger = true, IconSize = 16, Tip = "Close" };
             _close.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(_close);
 
@@ -65,11 +65,11 @@ namespace JoeBrowser
             _body = new JBScrollHost(_content) { BackColor = Theme.Bg };
             Controls.Add(_body);
 
-            Primary = new JBButton { Kind = BtnKind.Primary, Text = _primaryText, Radius = 6, Height = Theme.Field };
+            Primary = new JBButton { Kind = BtnKind.Primary, Text = _primaryText, Radius = Theme.ButtonRadius, Height = Theme.Field };
             Primary.Click += delegate { OnPrimary(); };
             Controls.Add(Primary);
 
-            Secondary = new JBButton { Kind = BtnKind.Ghost, Text = secondaryText ?? "Cancel", Radius = 6, Height = Theme.Field };
+            Secondary = new JBButton { Kind = BtnKind.Ghost, Text = secondaryText ?? "Cancel", Radius = Theme.ButtonRadius, Height = Theme.Field };
             Secondary.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(Secondary);
         }
@@ -193,9 +193,9 @@ namespace JoeBrowser
 
         public JBButton AddAction(string text, string icon, EventHandler click)
         {
-            var b = new JBButton { Kind = BtnKind.Soft, Text = text, Icon = icon, Radius = 6, Height = Theme.Field };
+            var b = new JBButton { Kind = BtnKind.Soft, Text = text, Icon = icon, Radius = Theme.ButtonRadius, Height = Theme.Field };
             b.Click += click;
-            AddRow(null, b, Ui.S(33));
+            AddRow(null, b, Ui.S(Theme.ControlHeight));
             return b;
         }
 
@@ -298,9 +298,9 @@ namespace JoeBrowser
                 pw = Math.Max(Ui.S(72), spare * wantP / total);
                 sw = Math.Max(0, spare - pw);
             }
-            Primary.SetBounds(w - pad - pw, h - Ui.S(16) - Ui.S(33), pw, Ui.S(33));
+            Primary.SetBounds(w - pad - pw, h - Ui.S(16) - Ui.S(Theme.ControlHeight), pw, Ui.S(Theme.ControlHeight));
             if (Secondary.Visible)
-                Secondary.SetBounds(Math.Max(pad, Primary.Left - gap - sw), h - Ui.S(16) - Ui.S(33), sw, Ui.S(33));
+                Secondary.SetBounds(Math.Max(pad, Primary.Left - gap - sw), h - Ui.S(16) - Ui.S(Theme.ControlHeight), sw, Ui.S(Theme.ControlHeight));
             ResumeLayout(false);
             Invalidate();
         }

@@ -103,7 +103,7 @@ namespace JoeBrowser
 
         private static JBButton Button(string text, string icon, BtnKind kind)
         {
-            return new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 6, Height = Theme.Field };
+            return new JBButton { Kind = kind, Icon = icon, Text = text, Radius = Theme.ButtonRadius, Height = Theme.Field };
         }
 
         private HistoryStore.Entry SelectedEntry
@@ -409,8 +409,8 @@ namespace JoeBrowser
                 g.Clear(Theme.Bg);
                 bool sel = _page._selected == _index;
                 var r = new RectangleF(0.5f, 0.5f, Width - 1f, Height - 1f);
-                if (sel) { Ui.Fill(g, r, Ui.S(8), Theme.AccentOnBg); Ui.Stroke(g, r, Ui.S(8), Theme.AccentBorder); }
-                else if (_hover) { Ui.Fill(g, r, Ui.S(8), Theme.HoverOverlay); Ui.Stroke(g, r, Ui.S(8), Theme.Line); }
+                if (sel) { Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg); Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), Theme.AccentBorder); }
+                else if (_hover) { Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Theme.HoverOverlay); Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), Theme.Line); }
 
                 /* A hop is marked with a small arrow instead of a word: the list is scanned, not
                    read, and a label repeated on half the rows is noise. */

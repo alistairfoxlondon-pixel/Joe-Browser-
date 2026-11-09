@@ -1050,7 +1050,15 @@ namespace JoeBrowser
                the cached string meant a profile created before a Chrome update kept advertising
                the old version - the exact "different browser version" mismatch scanners print. */
 
-            int major = browser != null && browser.MajorVersion > 0 ? browser.MajorVersion : 131;
+            /* The build the profile reports, not the one this machine has installed. A profile
+               carries its own version from the moment it is created (see BrowserVersions), and
+               that is what the user agent, the client hints and the in-page probes all name. The
+               installed browser only supplies the major when a profile was made before versions
+               were recorded, because a major that disagrees with the binary really running is a
+               worse contradiction than a stale build number. */
+            int ownMajor = BrowserVersions.MajorOf(fp.BrowserVersion);
+            int major = ownMajor > 0 ? ownMajor
+                : browser != null && browser.MajorVersion > 0 ? browser.MajorVersion : 131;
             bool edge = browser != null && browser.IsEdge;
             bool firefox = browser != null && browser.IsFirefox;
             string device = string.IsNullOrEmpty(fp.DeviceType) ? "desktop" : fp.DeviceType;

@@ -144,7 +144,7 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            float rad = Ui.S(4);
+            float rad = Ui.S(Theme.ButtonRadius);
             Ui.Fill(g, r, rad, Theme.Input);
             Ui.Stroke(g, r, rad, Theme.Line, 1f);
             using (var pen = new Pen(_open || Focused ? Theme.Accent : Theme.InputUnderline, Ui.Hair))
@@ -360,7 +360,7 @@ namespace JoeBrowser
                     var it = _owner._items[_visible[idx]];
                     float y = row * RowHeight;
                     var cell = new RectangleF(Ui.S(3), y + Ui.S(1), w - Ui.S(6), RowHeight - Ui.S(2));
-                    if (idx == _hi) Ui.Fill(g, cell, Ui.S(4), Theme.HoverOverlay);
+                    if (idx == _hi) Ui.Fill(g, cell, Ui.S(Theme.ButtonRadius), Theme.HoverOverlay);
 
                     float d = Ui.S(22);
                     Flags.Draw(g, it.Flag, new RectangleF(Ui.S(12), y + (RowHeight - d) / 2f, d, d));
@@ -382,7 +382,7 @@ namespace JoeBrowser
                     float track = _list.Height;
                     float thumb = Math.Max(Ui.S(24), track * VisibleRows / (float)_visible.Count);
                     float pos = (track - thumb) * (_scroll / (float)Math.Max(1, _visible.Count - VisibleRows));
-                    Ui.Fill(g, new RectangleF(w - Ui.S(7), pos, Ui.S(4), thumb), Ui.S(2), Theme.Line);
+                    Ui.Fill(g, new RectangleF(w - Ui.S(7), pos, Ui.S(Theme.ButtonRadius), thumb), Ui.S(2), Theme.Line);
                 }
 
                 /* A search that matches nothing used to leave a blank white box with no

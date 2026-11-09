@@ -47,8 +47,13 @@ namespace JoeBrowser
             LogoCache[path] = img;
             return img;
         }
-        private JBButton _addUrl, _addFolder, _addFile, _openFolder;
+        private JBButton _addUrl, _addFolder, _addFile, _openFolder, _fetch;
         private JBLabel _section;
+        /* The two extensions this build ships. They arrive by download, and a download can fail,
+           so they are shown with their state rather than appearing in the list only when they
+           work: a feature the user was promised and cannot see is worse than one that says why. */
+        private readonly List<ShippedRow> _shipped = new List<ShippedRow>();
+        private JBLabel _shippedHead;
         private JBPanel _empty;
         private bool _layingOut;
         private bool _ready;
@@ -92,6 +97,20 @@ namespace JoeBrowser
             _empty.Paint += PaintEmpty;
             _column.Controls.Add(_empty);
 
+            /* The resume/retry button for the shipped pair. It sits with the shipped rows, not in
+               the action bar, so the action is next to the thing that failed. */
+            _fetch = MakeButton("Download missing", "download", BtnKind.Soft, "fetch");
+            _column.Controls.Add(_fetch);
+
+            _shippedHead = new JBLabel(LabelRole.Accent, "INCLUDED WITH JOE BROWSER");
+            _column.Controls.Add(_shippedHead);
+            foreach (var row in ExtensionCatalog.DefaultStatuses())
+            {
+                var card = new ShippedRow(row[1], row[3]);
+                _column.Controls.Add(card);
+                _shipped.Add(card);
+            }
+
             _section = new JBLabel(LabelRole.Accent, "RECOMMENDED");
             _column.Controls.Add(_section);
 
@@ -109,7 +128,7 @@ namespace JoeBrowser
 
         private JBButton MakeButton(string text, string icon, BtnKind kind, string key)
         {
-            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = 6, Height = Theme.Field };
+            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = Theme.ButtonRadius, Height = Theme.Field };
             b.Click += delegate { Raise(key, -1); };
             return b;
         }
@@ -149,6 +168,23 @@ namespace JoeBrowser
             LayoutCore();
         }
 
+        /// <summary>Re-reads the shipped pair's state, after a fetch or a removal.</summary>
+        public void RefreshShipped()
+        {
+            var statuses = ExtensionCatalog.DefaultStatuses();
+            for (int i = 0; i < _shipped.Count; i++)
+            {
+                bool present = i < statuses.Count && statuses[i][2] == "Installed";
+                string state = i < statuses.Count ? statuses[i][2] : "";
+                string detail = i < statuses.Count ? statuses[i][3] : "";
+                _shipped[i].SetState(state, present, detail);
+            }
+            bool missing = false;
+            foreach (var row in _shipped) if (!row.Present && row.State != "Removed") missing = true;
+            _fetch.Visible = missing;
+            LayoutCore();
+        }
+
         public void RefreshRows()
         {
             for (int i = 0; i < _rows.Count; i++)
@@ -169,7 +205,7 @@ namespace JoeBrowser
             float w = _empty.Width;
             float chip = Ui.S(44);
             var cr = new RectangleF(Ui.S(22), (Ui.S(92) - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(8), Theme.AccentOnBg);
+            Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
             float ic = Ui.S(22);
             Icons.Draw(g, "extension", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
             Ui.Text(g, "No extensions added yet", Theme.H3, Theme.Text, cr.Right + Ui.S(16), Ui.S(26), w - cr.Right - Ui.S(30));
@@ -208,7 +244,7 @@ namespace JoeBrowser
                 JBButton[] actions = { _addUrl, _addFolder, _addFile, _openFolder };
                 /* The bar wraps instead of running off the edge, and the scroller starts under
                    whatever height it ended up needing. */
-                int bandBottom = Ui.FlowButtons(actions, pad, Ui.S(6), bandW, Ui.S(10), Ui.S(33));
+                int bandBottom = Ui.FlowButtons(actions, pad, Ui.S(6), bandW, Ui.S(10), Ui.S(Theme.ControlHeight));
                 int gapBelow = Ui.S(10);
                 _host.SetBounds(0, bandBottom + gapBelow, Math.Max(1, Width),
                     Math.Max(1, Height - bandBottom - gapBelow));
@@ -226,8 +262,22 @@ namespace JoeBrowser
                 }
                 if (Items.Count > 0) y += Ui.S(12);
 
-                _section.SetBounds(pad, y, inner, Ui.S(18));
-                y += Ui.S(18) + Ui.S(12);
+                _shippedHead.SetBounds(pad, y, inner, Theme.LineHeight(Theme.Small));
+                y += Theme.LineHeight(Theme.Small) + Ui.S(8);
+                for (int i = 0; i < _shipped.Count; i++)
+                {
+                    _shipped[i].SetBounds(pad, y, inner, ShippedRow.RowH);
+                    y += ShippedRow.RowH + Ui.S(8);
+                }
+                if (_fetch.Visible)
+                {
+                    _fetch.SetBounds(pad, y, Math.Min(inner, _fetch.PreferredWidth(Ui.S(190))), Ui.S(Theme.ControlHeight));
+                    y += Ui.S(Theme.ControlHeight) + Ui.S(8);
+                }
+                y += Ui.S(10);
+
+                _section.SetBounds(pad, y, inner, Theme.LineHeight(Theme.Small));
+                y += Theme.LineHeight(Theme.Small) + Ui.S(10);
 
                 int gap = Ui.S(12);
                 int cols = inner >= Ui.S(1080) ? 3 : inner >= Ui.S(660) ? 2 : 1;
@@ -332,8 +382,8 @@ namespace JoeBrowser
             /* One radius for both halves of the surface. Filling at 6 and stroking at 10 drew
                the border a couple of pixels proud of the fill at every corner, which is exactly
                the "not quite right" edge the whole redesign is about. */
-            Ui.Fill(g, r, Ui.S(10), cues ? Theme.PanelHover : Theme.Card);
-            Ui.Stroke(g, r, Ui.S(10), Theme.Line);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), cues ? Theme.PanelHover : Theme.Card);
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), Theme.Line);
 
             float chip = Ui.S(34);
             var cr = new RectangleF(Ui.S(16), (Height - chip) / 2f, chip, chip);
@@ -355,7 +405,7 @@ namespace JoeBrowser
             }
             else
             {
-                Ui.Fill(g, cr, Ui.S(7), Theme.AccentOnBg);
+                Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
                 float ic = Ui.S(18);
                 Icons.Draw(g, "extension", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
             }
@@ -378,8 +428,8 @@ namespace JoeBrowser
                 Math.Max(Ui.S(120), StoreRect.Left - x - Ui.S(16)));
 
             // quick actions
-            if (_hover == 2) Ui.Fill(g, StoreRect, Ui.S(4), Theme.HoverOverlay);
-            if (_hover == 1) Ui.Fill(g, DeleteRect, Ui.S(4), Theme.HoverOverlay);
+            if (_hover == 2) Ui.Fill(g, StoreRect, Ui.S(Theme.ButtonRadius), Theme.HoverOverlay);
+            if (_hover == 1) Ui.Fill(g, DeleteRect, Ui.S(Theme.ButtonRadius), Theme.HoverOverlay);
             float s = Ui.S(16);
             if (!string.IsNullOrWhiteSpace(Item.StoreUrl))
                 Icons.Draw(g, "external",
@@ -392,12 +442,80 @@ namespace JoeBrowser
             // switch
             var sw = SwitchRect;
             bool on = Item.Enabled;
-            Ui.Fill(g, sw, sw.Height / 2f, on ? Theme.Accent : Theme.ButtonBorder);
+            Ui.Fill(g, sw, Ui.S(Theme.ButtonRadius), on ? Theme.Accent : Theme.ButtonBorder);
             float knob = sw.Height - Ui.S(6);
             float kx = on ? sw.Right - knob - Ui.S(3) : sw.X + Ui.S(3);
-            using (var b = new SolidBrush(Theme.OnAccent)) g.FillEllipse(b, kx, sw.Y + Ui.S(3), knob, knob);
-            if (!on) Ui.Stroke(g, sw, sw.Height / 2f, Theme.Line, 1f);
+            using (var b = new SolidBrush(Theme.OnAccent)) g.FillRectangle(b, kx, sw.Y + Ui.S(3), knob, knob);
+            if (!on) Ui.Stroke(g, sw, Ui.S(Theme.ButtonRadius), Theme.Line, 1f);
             if (cues) Ui.FocusRing(g, r, Ui.S(6));
+        }
+    }
+
+    /// <summary>
+    /// One extension this build ships, with the state Chromium will be in: installed, waiting for
+    /// a download, or not installed with the reason the download gave. Drawn as a quiet row
+    /// rather than a card, because it is a fact about the build, not something to browse.
+    /// </summary>
+    internal sealed class ShippedRow : Control, IReStyle
+    {
+        private readonly string _name;
+        private string _state = "", _detail = "";
+        private bool _present;
+
+        public ShippedRow(string name, string detail)
+        {
+            _name = name ?? "";
+            _detail = detail ?? "";
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            Ui.Opaque(this);
+        }
+
+        public string State { get { return _state; } }
+        public bool Present { get { return _present; } }
+
+        public void SetState(string state, bool present, string detail)
+        {
+            _state = state ?? "";
+            _present = present;
+            if (!string.IsNullOrEmpty(detail)) _detail = detail;
+            ToolTips.Attach(this, _detail);
+            Invalidate();
+        }
+
+        public static int RowH
+        {
+            get
+            {
+                return Math.Max(Ui.S(56), Theme.LineHeight(Theme.H3) + Theme.LineHeight(Theme.Caption) + Ui.S(20));
+            }
+        }
+
+        public void ReStyle() { Invalidate(); }
+        protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(Ui.SurfaceColor(this)); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            Ui.Quality(g);
+            g.Clear(Theme.Bg);
+            var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+            Ui.Fill(g, r, Ui.S(Theme.CardRadius), Theme.Panel);
+            Ui.Stroke(g, r, Ui.S(Theme.CardRadius), Theme.Line);
+
+            Color tone = _present ? Theme.Success : _state == "Removed" ? Theme.TextFaint : Theme.Warn;
+            float dot = Ui.S(9);
+            using (var b = new SolidBrush(tone))
+                g.FillEllipse(b, Ui.S(16), (Height - dot) / 2f, dot, dot);
+
+            /* The state is measured, so the name is given exactly what is left and cannot run
+               under it. */
+            float stateW = Ui.Measure(g, _state, Theme.Caption).Width + Ui.S(4);
+            float left = Ui.S(16) + dot + Ui.S(12);
+            float nameW = Math.Max(Ui.S(60), Width - left - stateW - Ui.S(20));
+            Ui.Text(g, _name, Theme.H3, Theme.Text, left, (Height - Theme.LineHeight(Theme.H3)) / 2f, nameW);
+            Ui.Text(g, _state, Theme.Caption, tone, Width - stateW - Ui.S(16),
+                (Height - Theme.LineHeight(Theme.Caption)) / 2f, stateW);
         }
     }
 
@@ -459,13 +577,13 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(8), _hover ? Theme.PanelHover : Theme.Panel);
-            Ui.Stroke(g, r, Ui.S(8), _hover ? Theme.AccentBorder : Theme.Line, 1f);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), _hover ? Theme.PanelHover : Theme.Panel);
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), _hover ? Theme.AccentBorder : Theme.Line, 1f);
             if (Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(8));
 
             float chip = Ui.S(34);
             var cr = new RectangleF(Ui.S(14), (Height - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(7), Theme.AccentOnBg);
+            Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
             float ic = Ui.S(18);
             Icons.Draw(g, _icon, new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
 

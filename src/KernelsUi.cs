@@ -61,15 +61,15 @@ namespace JoeBrowser
             _note.Wrap = true;
             Controls.Add(_note);
 
-            _refresh = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = "Refresh", Radius = 6, Height = Theme.Field };
+            _refresh = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = "Refresh", Radius = Theme.ButtonRadius, Height = Theme.Field };
             _refresh.Click += delegate { LoadAsync(); };
             Controls.Add(_refresh);
 
-            _close = new JBButton { Kind = BtnKind.Ghost, Text = "Close", Radius = 6, Height = Theme.Field };
+            _close = new JBButton { Kind = BtnKind.Ghost, Text = "Close", Radius = Theme.ButtonRadius, Height = Theme.Field };
             _close.Click += delegate { Close(); };
             Controls.Add(_close);
 
-            _x = new JBIconButton { Icon = "close", Danger = true, IconSize = 13, Tip = "Close" };
+            _x = new JBIconButton { Icon = "close", Danger = true, IconSize = 16, Tip = "Close" };
             _x.Click += delegate { Close(); };
             Controls.Add(_x);
 
@@ -139,8 +139,8 @@ namespace JoeBrowser
             int rw = _refresh.PreferredWidth(Ui.S(110));
             int cwid = _close.PreferredWidth(Ui.S(84));
             Ui.FitPair(ref rw, ref cwid, Ui.S(8), Math.Max(Ui.S(160), w - pad * 2), Ui.S(72), Ui.S(64));
-            _refresh.SetBounds(pad, h - Ui.S(16) - Ui.S(33), rw, Ui.S(33));
-            _close.SetBounds(pad + rw + Ui.S(8), h - Ui.S(16) - Ui.S(33), cwid, Ui.S(33));
+            _refresh.SetBounds(pad, h - Ui.S(16) - Ui.S(Theme.ControlHeight), rw, Ui.S(Theme.ControlHeight));
+            _close.SetBounds(pad + rw + Ui.S(8), h - Ui.S(16) - Ui.S(Theme.ControlHeight), cwid, Ui.S(Theme.ControlHeight));
             /* The note shares the footer row with two buttons whose widths depend on the
                language, so the space it is given is clamped at zero rather than allowed to
                become a negative width that draws nothing at all. */
@@ -307,7 +307,7 @@ namespace JoeBrowser
             Install = install;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             Ui.Opaque(this);
-            _action = new JBButton { Radius = 6, Height = Ui.S(30) };
+            _action = new JBButton { Radius = Theme.ButtonRadius, Height = Ui.S(30) };
             _action.Click += delegate { if (!_busy) { var h = ActionRequested; if (h != null) h(this, EventArgs.Empty); } };
             Controls.Add(_action);
             Apply();

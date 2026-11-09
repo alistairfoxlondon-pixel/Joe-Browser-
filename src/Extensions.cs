@@ -734,13 +734,18 @@ if (cfg.human) {
      survive the C# parser before it reaches a page. The guard below does the same job with a
      capture listener and nothing to escape. The copy unlock in the right click block still
      patches preventDefault once, and keeps its own reference to the native one. */
+  /* Capture at the window, not at the document. A site usually registers its blocker on the
+     document or on the element, but the ones that actually defeat a document-level guard
+     register on the window - they run first, cancel the event, and the menu never opens. The
+     window is the first stop in the capture phase, so this is the earliest listener a page
+     script can be behind. */
   try {
-    document.addEventListener('copy', function (e) {
+    window.addEventListener('copy', function (e) {
       try { if (e.isTrusted) e.stopImmediatePropagation(); } catch (x) {}
     }, true);
   } catch (e) {}
   try {
-    document.addEventListener('selectstart', function (e) {
+    window.addEventListener('selectstart', function (e) {
       try { if (e.isTrusted) e.stopImmediatePropagation(); } catch (x) {}
     }, true);
   } catch (e) {}
@@ -777,8 +782,11 @@ if (cfg.rightClick) {
       (document.head || document.documentElement).appendChild(st);
     } catch(e){}
   }
-  document.addEventListener('contextmenu', function(e){
+  window.addEventListener('contextmenu', function(e){
     if (e.isTrusted) e.stopImmediatePropagation();
+  }, true);
+  window.addEventListener('mousedown', function(e){
+    if (e.isTrusted && e.button === 2) e.stopImmediatePropagation();
   }, true);
   JB.enableRightClick = function(on){ cfg.rightClick = !!on; };
   JB.restoreContextMenu = unlockAll;
@@ -805,9 +813,18 @@ async function probe(){
   return null;
 }
 /* Tell the Proxy Watch extension whether this profile really has a proxy, so it can stay
-   quiet on a direct connection instead of warning about a proxy that does not exist. */
+   quiet on a direct connection instead of warning about a proxy that does not exist. The
+   announcement is repeated whenever the relay asks: the content script can start after this
+   runtime, and a single fire-and-forget message would then be lost, leaving the watcher
+   disarmed on the profiles that need it most. */
 try {
   window.postMessage({ __jb: 'proxyConfig', hasProxy: !!cfg.hasProxy }, '*');
+} catch (e) {}
+try {
+  window.addEventListener('message', function(e){
+    if (!e.data || e.data.__jb !== 'proxyConfigQuery') return;
+    try { window.postMessage({ __jb: 'proxyConfigAnswer', hasProxy: !!cfg.hasProxy }, '*'); } catch(x){}
+  });
 } catch (e) {}
 
 if (cfg.watch) {
@@ -867,12 +884,23 @@ if (cfg.watch) {
 
         private const string HumanPasteWorker = @"
 /* Joe Human Paste - original service worker. Adds a context menu entry and relays the
-   'arm' request to the active tab. The content script does the actual typing. */
-chrome.runtime.onInstalled.addListener(function(){
+   'arm' request to the active tab. The content script does the actual typing.
+
+   The menu is built on every worker start, not only in onInstalled. An unpacked extension
+   gets a fresh profile on a fresh launch, and a menu created solely from onInstalled was
+   therefore missing on most launches - which is exactly why the entry was reported as
+   absent from the right-click menu while the feature itself was in the build. */
+function ensureMenu(){
+  var props = { id: 'jb-human-paste', title: 'Paste as human (next Ctrl+V)', contexts: ['editable'] };
   try {
-    chrome.contextMenus.create({ id: 'jb-human-paste', title: 'Paste as human (next Ctrl+V)', contexts: ['editable'] });
+    chrome.contextMenus.create(props, function(){
+      void chrome.runtime.lastError; /* already exists: that is the good case */
+    });
   } catch(e) {}
-});
+}
+ensureMenu();
+chrome.runtime.onInstalled.addListener(ensureMenu);
+chrome.runtime.onStartup.addListener(ensureMenu);
 chrome.contextMenus.onClicked.addListener(function(info, tab){
   if (info.menuItemId !== 'jb-human-paste' || !tab || tab.id == null) return;
   chrome.tabs.sendMessage(tab.id, { __jb: 'armPaste' }, function(){ void chrome.runtime.lastError; });
@@ -964,11 +992,26 @@ let HAS_PROXY = false;
 function armed(){
   return HAS_PROXY;
 }
-chrome.runtime.onInstalled.addListener(function(){
-  chrome.alarms.create('jb-proxy-check', { periodInMinutes: 1 });
-});
+/* A service worker is unloaded whenever Chrome feels like it, so the flag and the alarm
+   both have to be re-established on start rather than only in onInstalled. Without the
+   alarm no periodic check ever ran, and without the stored flag the first page that loaded
+   before the worker woke saw armed() === false: the watcher was silent for exactly the
+   profiles it exists for. */
+function start(){
+  try { chrome.alarms.create('jb-proxy-check', { periodInMinutes: 1 }); } catch(e) {}
+  try {
+    chrome.storage.local.get(['hasProxy']).then(function(st){
+      HAS_PROXY = !!st.hasProxy;
+      if (HAS_PROXY) check();
+    });
+  } catch(e) {}
+}
+start();
+chrome.runtime.onInstalled.addListener(start);
+chrome.runtime.onStartup.addListener(start);
 chrome.alarms.onAlarm.addListener(function(a){ if (a.name === 'jb-proxy-check' && armed()) check(); });
 chrome.runtime.onMessage.addListener(function(m, s, send){
+  if (!s || s.id !== chrome.runtime.id) return false; /* another extension talking to us */
   if (m && m.__jb === 'proxyConfig') {
     HAS_PROXY = !!m.hasProxy;
     chrome.storage.local.set({ hasProxy: HAS_PROXY });
@@ -978,7 +1021,7 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
   }
   if (m && m.__jb === 'checkNow') {
     if (!armed()) { if (send) send({ ok: true, skipped: true }); return true; }
-    check().then(() => send({ ok: true }));
+    check().then(function(){ if (send) send({ ok: true }); });
     return true;
   }
 });
@@ -992,12 +1035,23 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
   chrome.runtime.onMessage.addListener(function(m){
     if (m && m.__jb === 'proxyState') window.postMessage(m, '*');
   });
-  /* The main-world runtime knows whether this profile has a proxy configured. Forward that
-     to the worker so it can stay silent on a direct connection. */
+  /* Ask the main-world runtime for the profile's proxy flag. The main world cannot read
+     extension APIs, so the answer comes back as a window message below. Asking, rather
+     than waiting to be told, means the flag arrives even when this script starts after
+     the runtime has already posted its one announcement. */
+  var seen = false;
+  function ask(){
+    try { window.postMessage({ __jb: 'proxyConfigQuery' }, '*'); } catch(e) {}
+  }
+  ask();
   window.addEventListener('message', function(e){
-    if (!e.data || e.data.__jb !== 'proxyConfig') return;
-    try { chrome.runtime.sendMessage({ __jb: 'proxyConfig', hasProxy: !!e.data.hasProxy }); } catch(err){}
+    if (!e.data) return;
+    if (e.data.__jb === 'proxyConfig' || e.data.__jb === 'proxyConfigAnswer') {
+      seen = true;
+      try { chrome.runtime.sendMessage({ __jb: 'proxyConfig', hasProxy: !!e.data.hasProxy }); } catch(err){}
+    }
   });
+  document.addEventListener('visibilitychange', function(){ if (!seen) ask(); });
 })();
 ";
 
@@ -1006,9 +1060,20 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
 ";
 
         private const string RightClickWorker = @"
-/* Joe Right Click Enable - toolbar button toggles copy / context-menu restoration. */
+/* Joe Right Click Enable - toolbar button toggles copy / context-menu restoration.
+   The default lives on every worker start as well as in onInstalled: the content script
+   reads it immediately, and a fresh unpacked profile has no stored value yet. */
+function paint(next){
+  try { chrome.action.setBadgeText({ text: next ? 'ON' : '' }); } catch(e) {}
+}
+chrome.storage.local.get(['enabled']).then(function(st){
+  var on = st.enabled !== false;
+  chrome.storage.local.set({ enabled: on });
+  paint(on);
+});
 chrome.runtime.onInstalled.addListener(function(){
   chrome.storage.local.set({ enabled: true });
+  paint(true);
 });
 chrome.action.onClicked.addListener(async function(tab){
   const st = await chrome.storage.local.get(['enabled']);

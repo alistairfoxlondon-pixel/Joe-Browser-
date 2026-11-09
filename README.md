@@ -20,13 +20,14 @@ the Browsers page can fetch Chromium for you.
 |---|---|
 | **Unlimited profiles** | Every profile is its own browser with its own cookies, storage, logins and cache, in its own `--user-data-dir`. The free plan holds three and runs one at a time. |
 | **A real identity per profile** | User agent and client hints, platform, language, screen, timezone, memory, cores, WebGL, canvas and audio noise, and a WebRTC guard. Locale, clock and proxy country are kept in agreement. |
-| **No two profiles alike** | A new identity is compared against every profile you already have across twelve surfaces and re rolled until it is unique. Its browser build is taken from one the workspace has used least. |
+| **No two profiles alike** | A new identity is compared against every profile you already have across twelve surfaces and re rolled until it is unique. Every profile also gets its own browser build - a real version from a real release, never the one installed on your PC - and the user agent, the client hints and the version on the card all report it. |
 | **Pinned builds** | Download whole Chrome, Brave or Chromium builds once and pin a profile to an exact version, so a vendor update never moves it. |
 | **Any browser you have** | Chrome, Chromium, Brave, Edge and Firefox. The Browsers page shows what is installed, with its version and path, and installs what is missing. |
 | **Proxies** | HTTP, HTTPS and SOCKS5 with authentication. Credentials are applied by a local relay, so a password never appears in a browser command line. Swap the proxy of a running profile without closing its tabs. |
 | **Fingerprint check** | A fifteen point probe inside the profile's own session, plus one click buttons that open the well known checkers in that same session. |
 | **History per profile** | Every page a profile visits, including the redirect hops, isolated per account and clearable. |
-| **Extensions** | Three first party tools written by this app, plus anything you add from a Chrome Web Store link, a `.crx` or a folder. |
+| **Extensions** | Three first party tools written by this app, two store extensions included on Chrome and Brave, and anything you add from a Chrome Web Store link, a `.crx` or a folder. The included pair show their state, so a download that failed says why instead of vanishing. |
+| **Built to be read** | 16 px body text, square corners, one measured layout at every window width, and no control that cuts its own label. |
 | **Private by default** | Profile data stays in `%APPDATA%\JoeBrowser`. Proxy passwords and the account store are encrypted with Windows DPAPI. No telemetry, no server, no cloud. |
 
 ## Getting started
