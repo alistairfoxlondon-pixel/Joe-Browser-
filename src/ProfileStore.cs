@@ -156,60 +156,74 @@ namespace JoeBrowser
             {
                 Log.Error("Cannot list profiles", ex);
             }
-            /* Every profile made before versions were recorded reports whatever browser is
-               installed, which on the machine this was reported from meant ten profiles and the
-               user's own Chrome all claiming 157.0.8103.38. Repair that on load: each profile
-               that has no build of its own is given one, in creation order so the earliest keeps
-               the build that suits it, and the result is saved. */
+            /* What a profile reports has to be the build it will actually run.
+            
+               The previous round did the opposite here: it gave every profile a build of a
+               different major, chosen from a table. That made the cards look varied and made the
+               profiles detectable, because the browser answering the request is one build and the
+               user agent claimed another. ipfighter called it masking, and it was right.
+            
+               So the repair is the other way round now: a stored version that disagrees with the
+               binary the profile will launch is corrected to that binary, and a profile with no
+               version at all is given the running one. Two profiles on the same machine therefore
+               report the same build, which is the TRUTH - they are the same binary. Diversity comes
+               from pins, handled above by BrowserVersions.Assign, not from invented numbers.
+                */
             try
             {
-                var ordered = list.OrderBy(p => p.Created).ToList();
-                var taken = BrowserVersions.Taken(ordered);
-                var claimed = new HashSet<string>(StringComparer.Ordinal);
+                string installed = InstalledFullVersion();
                 int repaired = 0;
-                foreach (var p in ordered)
+                foreach (var p in list)
                 {
-                    bool hasOwn = !string.IsNullOrEmpty(p.BrowserVersion) &&
-                                  BrowserVersions.IsReal(p.BrowserVersion);
-                    if (hasOwn && claimed.Add(p.BrowserVersion))
+                    bool pinned = !string.IsNullOrEmpty(p.KernelFullVersion) && BrowserVersions.IsReal(p.KernelFullVersion);
+                    string running = pinned ? p.KernelFullVersion
+                        : BrowserVersions.IsReal(installed) ? installed : "";
+                    if (string.IsNullOrEmpty(running)) continue;
+
+                    bool changed = false;
+                    if (!string.Equals(p.BrowserVersion, running, StringComparison.Ordinal))
                     {
-                        if (p.Fp != null && p.Fp.BrowserVersion != p.BrowserVersion)
-                        {
-                            p.Fp.BrowserVersion = p.BrowserVersion;
-                            repaired++;
-                        }
-                        continue;
+                        p.BrowserVersion = running;
+                        changed = true;
                     }
-                    /* A profile with no build, or two that share one, is re-picked here.
-                       The major is only kept when nothing else in the workspace reports it.
-                       Chrome's reduced user agent hides the build, so a workspace of profiles all
-                       on 157 is still a workspace of identical strings - the major has to spread
-                       as well, and it has to spread from the load, because these are the profiles
-                       the user already made. */
-                    int major = BrowserVersions.MajorOf(p.BrowserVersion);
-                    if (major <= 0) major = BrowserVersions.MajorOf(BrowserVersions.FromUserAgent(p.Fp != null ? p.Fp.UserAgent : null));
-                    if (major <= 0) major = 131;
-                    major = BrowserVersions.FreeMajor(taken, major);
-                    p.BrowserVersion = BrowserVersions.Pick(major, taken);
-                    /* The fingerprint carries the same string, because the client hints and the
-                       in-page probes read it from there. */
-                    if (p.Fp != null) p.Fp.BrowserVersion = p.BrowserVersion;
-                    /* The user agent has to name the same major, or the profile contradicts
-                       itself in one request. */
-                    if (p.Fp != null) FingerprintFactory.ResolveUserAgent(p.Fp, null);
-                    taken.Add(p.BrowserVersion);
-                    claimed.Add(p.BrowserVersion);
-                    repaired++;
+                    if (p.Fp != null && !string.Equals(p.Fp.BrowserVersion, running, StringComparison.Ordinal))
+                    {
+                        p.Fp.BrowserVersion = running;
+                        changed = true;
+                    }
+                    /* The user agent names the major of what is running, so the string, the hints
+                       and the engine all agree. */
+                    if (p.Fp != null && BrowserVersions.MajorFromUserAgent(p.Fp.UserAgent) != BrowserVersions.MajorOf(running))
+                    {
+                        FingerprintFactory.ResolveUserAgent(p.Fp, null);
+                        changed = true;
+                    }
+                    if (changed)
+                    {
+                        repaired++;
+                        try { Save(p); } catch (Exception ex) { Log.Error("Could not save " + p.Id, ex); }
+                    }
                 }
-                if (repaired > 0)
-                {
-                    Log.Info("Gave " + repaired + " profile(s) a browser build of their own");
-                    foreach (var p in ordered) { try { Save(p); } catch (Exception ex) { Log.Error("Could not save " + p.Id, ex); } }
-                }
+                if (repaired > 0) Log.Info("Aligned " + repaired + " profile(s) with the browser build they run");
             }
-            catch (Exception ex) { Log.Error("Could not assign profile browser versions", ex); }
+            catch (Exception ex) { Log.Error("Could not align profile browser versions", ex); }
 
             return list.OrderByDescending(p => p.LastOpened == DateTime.MinValue ? p.Created : p.LastOpened).ToList();
+        }
+
+        /// <summary>
+        /// The full version of the browser a profile with no pin would launch: the one this app
+        /// finds for the machine, or empty when none is installed. Used to make a profile report
+        /// what it will really run.
+        /// </summary>
+        public static string InstalledFullVersion()
+        {
+            try
+            {
+                var info = BrowserLocator.Detect("auto", "");
+                return info != null ? info.Version ?? "" : "";
+            }
+            catch { return ""; }
         }
 
         public void Save(Profile p)
