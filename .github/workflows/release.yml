@@ -181,7 +181,39 @@ jobs:
             Requirements: any installed Chromium-based browser or Firefox. The Browsers page can
             install Chrome, Brave or Chromium for you.
 
-            ### What is new in 1.4.5
+            ### What is new in 1.4.12
+
+            **Rows that share a line are measured before they are placed.** The five editor
+            tabs, the proxy type picker and the kernel picker each split a fixed width between
+            their names. At a large text scale the names were wider than their share, so one was
+            drawn under the next and the label under the pointer was not the label that was read.
+            Each of those rows now reports the width its names need, and the caller gives it that
+            width up to a cap.
+
+            **A row of buttons never pushes one off the window.** Four dialog footers placed the
+            second button at a fixed distance left of the first, so when the two did not both fit
+            the left one left the window and lost its first letters. One helper shrinks the pair
+            in proportion instead, and it is used by the editor, the network and kernel tools, the
+            audit and the crash report.
+
+            **The extension library passes each folder once.** When the same extension had been
+            imported from two places the library passed its folder twice, and Chromium refuses a
+            repeated `--load-extension` entry: every extension in the profile then disappeared
+            with no message at all. Imports also unpack into a staging folder and prove the
+            package holds a manifest before the installed copy is replaced, so a truncated
+            download can no longer delete the copy that worked.
+
+            **One notice per launch.** A launch fired three notices in a row and each replaced the
+            last, so the caveat about a mobile profile was overwritten before it could be read.
+            The single notice now carries the caveat that applies.
+
+            **A failed store download says what happened.** The bar showed the text Windows wrote
+            about a socket. It now says whether the store was unreachable, too slow, or answered
+            with something that was not a package, and points at the file import. When no browser
+            accepts a link it goes on the clipboard instead of vanishing, and the store link
+            dialog opens on a link already on the clipboard when there is one.
+
+            ### What was new in 1.4.5
 
             **The history and account pages no longer overlap.** Both placed their rows of
             buttons one at a time from the right edge, without accounting for the gap they were
