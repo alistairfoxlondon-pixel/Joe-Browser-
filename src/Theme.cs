@@ -669,7 +669,7 @@ namespace JoeBrowser
         public static Font Micro { get { return F(12, Semi); } }        // section eyebrow
 
         /// <summary>Line height of a face, in device pixels, rounded up.</summary>
-        public static int Line(Font f)
+        public static int LineHeight(Font f)
         {
             if (f == null) return S(18);
             try
@@ -683,7 +683,7 @@ namespace JoeBrowser
         /* The vertical rhythm every page, card and dialog is built from. A controls library
            that hard codes 18 for a label row and 33 for a field gets 1 px of clipping the day
            the font gets a pixel taller; these are derived from the fonts instead. */
-        public static int Row { get { return Line(Small) + S(4); } }
+        public static int Row { get { return LineHeight(Small) + S(4); } }
         public static int Field { get { return S(34); } }
         public static int Gap { get { return S(8); } }
 
