@@ -349,9 +349,12 @@ namespace JoeBrowser
             // Chrome 137+ refuses a WebGL context entirely when there is no hardware GPU. Without
             // the software fallback a machine on a VM, RemoteApp or RDP session launches with
             // getContext('webgl') === null, which is a louder tell than any renderer string.
-            args.Add("--enable-unsafe-swiftshader");
+            // Everything software-GL lives inside this branch: --enable-unsafe-swiftshader used
+            // to be passed on GPU machines too, and Chrome then allowed itself to fall back to
+            // SwiftShader silently - the "WebGL renderer: SwiftShader" verdict on browserscan.
             if (!SystemProbe.HasHardwareGl())
             {
+                args.Add("--enable-unsafe-swiftshader");
                 args.Add("--use-gl=angle");
                 args.Add("--use-angle=swiftshader");
                 // The GPU blocklist still marks a software adapter as unusable and returns a null

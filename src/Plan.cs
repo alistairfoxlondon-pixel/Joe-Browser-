@@ -106,13 +106,10 @@ namespace JoeBrowser
         {
             get
             {
-                /* A complimentary account never lapses, and never needs a license file. Checked
-                   before the file so the answer is the same on a machine that has never paid. */
-                if (IsComplimentary) return true;
-                var d = Load();
-                if (d == null || !"pro".Equals(d.Plan, StringComparison.OrdinalIgnoreCase)) return false;
-                DateTime until;
-                return TryDate(d.Until, out until) && until > DateTime.UtcNow;
+                /* The app is free, entirely: every limit, upgrade page and payment gate reads
+                   this one property, and it now simply says yes. No code path anywhere can
+                   still ask for money or hold features back. */
+                return true;
             }
         }
 
@@ -120,13 +117,7 @@ namespace JoeBrowser
         {
             get
             {
-                // Complimentary accounts have no end date, and inventing one would put a
-                // countdown in the UI for a subscription that does not expire.
-                if (IsComplimentary) return null;
-                var d = Load();
-                DateTime until;
-                if (d != null && TryDate(d.Until, out until)) return until;
-                return null;
+                return null;   /* free: there is no licence period to count down */
             }
         }
 
@@ -141,15 +132,13 @@ namespace JoeBrowser
         {
             get
             {
-                if (IsComplimentary) return true;
-                var u = Until;
-                return u.HasValue && (u.Value - DateTime.UtcNow).TotalDays > 3650;
+                return true;   /* free, forever */
             }
         }
 
         public static string Summary()
         {
-            if (IsLifetime) return "Pro, unlimited";
+            if (IsLifetime) return "Free, unlimited";
             if (!IsPro) return "Free plan";
             var u = Until;
             return u == null ? "Pro" : "Pro until " + u.Value.ToLocalTime().ToString("d MMMM", CultureInfo.InvariantCulture);

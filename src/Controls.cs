@@ -409,6 +409,34 @@ namespace JoeBrowser
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
+        /// <summary>
+        /// One-call full compose: invalidate everything (children included), then paint the
+        /// whole tree synchronously before the call returns. Used after WM_SETREDRAW unfreezes
+        /// a page switch, so the first frame the user sees is the finished one - not the old
+        /// header over the new page for a message-loop turn, which is the reported flash.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT { public int Left, Top, Right, Bottom; }
+
+        [DllImport("user32.dll")]
+        private static extern bool RedrawWindow(IntPtr hWnd, IntPtr lprcUpdate, IntPtr hrgnUpdate, uint flags);
+
+        public const uint RDW_INVALIDATE = 0x0001;
+        public const uint RDW_NOERASE = 0x0020;
+        public const uint RDW_ALLCHILDREN = 0x0080;
+        public const uint RDW_UPDATENOW = 0x0100;
+
+        public static void ComposeNow(IntPtr hWnd)
+        {
+            try
+            {
+                RedrawWindow(hWnd, IntPtr.Zero, IntPtr.Zero,
+                    RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+            }
+            catch { }
+        }
+
+
         public const int WM_SETICON = 0x0080;
         public const int ICON_SMALL = 0;
         public const int ICON_BIG = 1;

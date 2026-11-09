@@ -62,6 +62,7 @@ namespace JoeBrowser
         private ExtensionPage _extensionPage;
         private BrowsersPage _browsersPage;
         private UpgradePage _upgradePage;
+        private JBButton _setSecurity, _setSignOut;
         private Timer _planTimer;
         private int _payTicks;
         private bool _payBusy;
@@ -75,9 +76,7 @@ namespace JoeBrowser
         private JBButton _setBrowse, _setDetect, _setOpenData, _setDownload, _setClearCache, _setReport;
         private JBLabel _setKernelInfo;
         private JBLabel _setAccountWho;
-        private JBTextBox _setGoogleId;
-        private JBTextBox _setGoogleSecret;
-        private JBButton _setSecurity, _setSignOut, _setGoogleGuide, _setGoogleTest;
+                        
         private JBLangPicker _setLang;
         private JBToggle _setExtensions, _setCustomExt, _setTrash, _setHistory;
         private JBButton _setClearHistory;
@@ -135,6 +134,24 @@ namespace JoeBrowser
                had actually finished, and a profile launched in that window started without the
                pair. The event arrives on the worker, so everything below marshals first. */
             ExtensionCatalog.DefaultsChanged += OnDefaultsChanged;
+            /* Competitors ship a browser inside their download; Joe Browser drives the Chrome
+               already on the PC. When there is neither - a clean machine - the app used to sit
+               on the launch error until the user went looking for a download button. Now it
+               fetches its own official Chromium (~180 MB, one time) the moment the window
+               opens, so the first profile can start. */
+            Shown += delegate
+            {
+                try
+                {
+                    if (BrowserFetcher.IsInstalled("chromium")) return;
+                    if (KernelStore.Installed().Any(k => k.Ready)) return;
+                    var any = BrowserLocator.Detect("auto", "");
+                    if (any != null) return;
+                    Toast("No browser found - downloading the built-in Chromium (~180 MB, one-time)", ToastKind.Info);
+                    var _ = DownloadBrowserAsync("chromium");
+                }
+                catch (Exception ex) { Log.Error("Auto browser download failed", ex); }
+            };
         }
 
         private void OnDefaultsChanged()
@@ -2060,26 +2077,10 @@ namespace JoeBrowser
             Row(storage, "set.row.report", new[] { Ui.S(96) }, _setReport);
 
             /* Account and security. Everything here is optional for daily use: the email
-               account only exists so the sign-in gate can remember who is using the app, and
-               the Google client id is needed only for the Continue with Google button. */
+               account only exists so the sign-in gate can remember who is using the app. */
             _setAccountWho = Label(LabelRole.Body, Session.Current != null ? Session.Current.Email : L10n.T("acct.signedout"));
             _setAccountWho.TextAlign = ContentAlignment.MiddleRight;
-            _setGoogleId = Field("1234567890-abc.apps.googleusercontent.com");
-            _setGoogleId.Value = GoogleSignIn.ClientId();
-            /* A "Desktop app" client comes with a secret. Google accepts the code exchange with
-               PKCE alone, but sending the secret too is what Google's own sample does, so it is
-               worth a field - it removes a whole class of "invalid_request" failures. */
-            _setGoogleSecret = Field("GOCSPX-…  (optional)");
-            _setGoogleSecret.Value = string.IsNullOrWhiteSpace(_settings.GoogleClientSecret)
-                ? GoogleSignIn.DefaultClientSecret : _settings.GoogleClientSecret;
             _setSecurity = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("btn.security"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
-            /* The Google client id is the only setting that cannot be pre-filled by the app,
-               so it gets a guided setup and a button that actually runs the flow and reports
-               what Google said. Without those two, a wrong id just looks like a dead button. */
-            _setGoogleGuide = new JBButton { Kind = BtnKind.Soft, Icon = "help", Text = "Set up", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = L10n.T("set.google.hint") };
-            _setGoogleTest = new JBButton { Kind = BtnKind.Soft, Icon = "check", Text = "Test", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = "Run the real Google sign-in now" };
-            _setGoogleGuide.Click += delegate { GoogleSetupHelp(); };
-            _setGoogleTest.Click += delegate { TestGoogleSignIn(); };
             _setSignOut = new JBButton { Kind = BtnKind.Soft, Text = L10n.T("set.row.signout"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _setSecurity.Click += delegate
             {
@@ -2099,11 +2100,6 @@ namespace JoeBrowser
 
             var account = Card("set.account");
             Row(account, "set.row.signed", null, _setAccountWho);
-            /* The id is long (72+ characters) and the row also carries two buttons, so the
-               field asks for more room than the other rows and shrinks first when the window is
-               narrow - RowWidths already handles that for every JBTextBox. */
-            Row(account, "set.row.google", new[] { Ui.S(420), Ui.S(92), Ui.S(80) }, _setGoogleId, _setGoogleGuide, _setGoogleTest);
-            Row(account, "set.row.gsecret", new[] { Ui.S(360) }, _setGoogleSecret);
             Row(account, "set.row.security", new[] { Ui.S(104), Ui.S(88) }, _setSecurity, _setSignOut);
 
             foreach (var c in _setCards) page.Controls.Add(c.Panel);
@@ -2175,79 +2171,8 @@ namespace JoeBrowser
             }
         }
 
-        /* ------------------------------------------------------------------ *
-         * Google sign-in setup. The OAuth client id can only be created by the
-         * owner of the Google account, so the app explains the four console
-         * steps and then proves the result by running the real flow.
-         * ------------------------------------------------------------------ */
-
-        private void GoogleSetupHelp()
-        {
-            /* Same dialog as the first-run button, so the instructions can never drift apart
-               from what the code actually does. */
-            if (GoogleSetupDialog.Ensure(this, _setGoogleId.Value))
-            {
-                _setGoogleId.Value = GoogleSignIn.ClientId();
-                _setGoogleSecret.Value = GoogleSignIn.SavedClientSecret();
-            }
-        }
-
-        private async System.Threading.Tasks.Task TestGoogleSignInCore()
-        {
-            /* Normalised, not trimmed: a paste from the console commonly carries a trailing
-               space or the "id:secret" pair, and the un-cleaned value used to reach Google as
-               an invalid client. */
-            string id = GoogleSignIn.NormalizeClientId(_setGoogleId.Value);
-            if (!GoogleSignIn.LooksValid(id))
-            {
-                ConfirmForm.Tell(this, "Test Google sign-in",
-                    "Paste a Google OAuth client id first. It looks like",
-                    "123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com"
-                    + "\n\nOr use \"Set up\" and Joe Browser will walk through creating one.");
-                _setGoogleId.Box.Focus();
-                return;
-            }
-
-            /* The test has to run against exactly what the sign-in gate will read, so the id is
-               saved before the flow starts rather than after it succeeds. */
-            _settings.GoogleClientId = id;
-            _settings.GoogleClientSecret = (_setGoogleSecret.Value ?? "").Trim();
-            try { _store.SaveSettings(_settings); }
-            catch (Exception ex) { Log.Error("Google client id not saved", ex); }
-
-            _setGoogleTest.Enabled = false;
-            _setGoogleTest.Text = "Testing\u2026";
-            _setGoogleTest.Invalidate();
-            GoogleResult result;
-            try
-            {
-                result = await Task.Run(new Func<GoogleResult>(delegate { return GoogleSignIn.SignIn(id); }));
-            }
-            finally
-            {
-                _setGoogleTest.Enabled = true;
-                _setGoogleTest.Text = "Test";
-                _setGoogleTest.Invalidate();
-            }
-
-            if (result.Ok)
-            {
-                Toast("Google sign-in works, " + result.Identity.Email, ToastKind.Success);
-                ConfirmForm.Tell(this, "Test Google sign-in",
-                    "Google sign-in works. Signed in as " + result.Identity.Email + ".",
-                    string.IsNullOrEmpty(result.Identity.Name) ? null : "Name: " + result.Identity.Name);
-            }
-            else
-            {
-                ConfirmForm.Tell(this, "Test Google sign-in", result.Message,
-                    "Error code: " + result.Code);
-            }
-        }
-
-        /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
-        private void TestGoogleSignIn() { Guard("TestGoogleSignIn", delegate { return TestGoogleSignInCore(); }); }
-
-        /* ------------------------------------------------------------------ *
+        
+                /* ------------------------------------------------------------------ *
          * Plan, limits and crypto payment.
          * ------------------------------------------------------------------ */
 
@@ -2558,23 +2483,7 @@ namespace JoeBrowser
             _settings.DefaultStartUrl = string.IsNullOrEmpty(url) ? Profile.FingerprintTestUrl : url;
             _settings.ThemeMode = Theme.Dark ? 1 : 2;
             _settings.DefaultGroup = (_setDefaultGroup.Value ?? "").Trim();
-            /* Normalised rather than trimmed: a paste from the console usually carries quotes,
-               a trailing space or the "id:secret" pair, and the raw value reached Google as an
-               invalid client. */
-            string clientId = GoogleSignIn.NormalizeClientId(_setGoogleId.Value);
-            /* A client id that is not a client id produces an opaque "invalid_client" from
-               Google later. Catch it at the point where it was typed instead. */
-            if (clientId.Length > 0 && !GoogleSignIn.LooksValid(clientId))
-            {
-                Toast("That does not look like a Google OAuth client id: the part before .apps.googleusercontent.com "
-                    + "starts with the project number, e.g. 123456789012-abc123.", ToastKind.Warn);
-                _setGoogleId.Box.Focus();
-                _setGoogleId.Box.SelectAll();
-                return;
-            }
-            _settings.GoogleClientId = clientId;
-            _settings.GoogleClientSecret = (_setGoogleSecret.Value ?? "").Trim();
-            _settings.EnableExtensions = _setExtensions.Checked;
+
             _settings.EnableCustomExtensions = _setCustomExt.Checked;
             _settings.UseTrash = _setTrash.Checked;
             _settings.HistoryEnabled = _setHistory.Checked;
@@ -3081,14 +2990,12 @@ namespace JoeBrowser
                 if (frozen && IsHandleCreated)
                 {
                     SendMessage(Handle, 0x000B, (IntPtr)1, IntPtr.Zero);
-                    Invalidate(true);
-                    /* Compose the first frame NOW, on this call, instead of a few messages
-                       later. Without Update() the unfroze window stayed stale for one message
-                       loop turn - child pages whose WM_PAINT had been queued during the freeze
-                       drew themselves first, so the user could see the old header band over
-                       the new page for a frame. That mixed frame is the "flash when switching
-                       sections" that was reported over and over. */
-                    Update();
+                    /* RedrawWindow with RDW_ALLCHILDREN | RDW_UPDATENOW composes the entire
+                       tree - parent and every page control - in one synchronous pass. The old
+                       Invalidate + Update pair left child pages whose WM_PAINT was already
+                       queued during the freeze painting themselves first, so one stale frame
+                       still reached the screen: the flash when switching sections. */
+                    Native.ComposeNow(Handle);
                 }
             }
         }
@@ -3279,10 +3186,7 @@ namespace JoeBrowser
             else if (page == 4)
             {
                 _setBrowserPath.Value = _settings.BrowserPath ?? "";
-                _setGoogleId.Value = GoogleSignIn.ClientId();
-                _setGoogleSecret.Value = string.IsNullOrWhiteSpace(_settings.GoogleClientSecret)
-                    ? GoogleSignIn.DefaultClientSecret : _settings.GoogleClientSecret;
-                _setStartUrl.Value = _settings.DefaultStartUrl ?? "";
+
                 _setStoragePath.Text = AppPaths.Root;
                 _setDefaultGroup.Value = _settings.DefaultGroup ?? "";
                 _setExtensions.Checked = _settings.EnableExtensions;

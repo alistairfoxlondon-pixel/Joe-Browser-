@@ -76,17 +76,9 @@ namespace JoeBrowser
             _signUp = new JBButton { Text = "Create account", Kind = BtnKind.Primary, Size = new Size(Ui.S(360), Ui.S(38)), Location = new Point(Ui.S(40), Ui.S(226)), Visible = false };
             _signUp.Click += delegate { DoEmail(); };
 
-            _google = new JBButton
-            {
-                Text = "Continue with Google",
-                Kind = BtnKind.Ghost,
-                BrandIcon = "google",
-                Size = new Size(Ui.S(360), Ui.S(38)),
-                Location = new Point(Ui.S(40), Ui.S(272))
-            };
-            _google.Click += delegate { DoGoogle(); };
-
-            _toggle = new JBLink { Text = "New here? Create an account", Location = new Point(Ui.S(40), Ui.S(322)) };
+            /* Google sign-in has been removed by product decision: the gate is email and
+               password only, and the button, its layout row and its OAuth flow are gone. */
+            _toggle = new JBLink { Text = "New here? Create an account", Location = new Point(Ui.S(40), Ui.S(272)) };
             _toggle.Click += delegate { ToggleMode(); };
 
             // Enter submits from any field, the way every sign-in form behaves.
@@ -99,7 +91,7 @@ namespace JoeBrowser
             _password.Box.TextChanged += delegate { _error.Visible = false; };
             _name.Box.TextChanged += delegate { _error.Visible = false; };
 
-            Controls.AddRange(new Control[] { _title, _subtitle, _email, _name, _password, _error, _signIn, _signUp, _google, _toggle });
+            Controls.AddRange(new Control[] { _title, _subtitle, _email, _name, _password, _error, _signIn, _signUp, _toggle });
             Theme.Restyle(this);
             LayoutForm();
 
@@ -112,7 +104,6 @@ namespace JoeBrowser
             _password.TabIndex = 2;
             _signIn.TabIndex = 3;
             _signUp.TabIndex = 3;
-            _google.TabIndex = 4;
             _toggle.TabIndex = 5;
             Shown += delegate { try { _email.Box.Focus(); } catch { } };
         }
