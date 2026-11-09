@@ -20,7 +20,7 @@ namespace JoeBrowser.Setup
     {
         internal const string AppId = "JoeBrowser.Browser.1.2";
         internal const string AppName = "Joe Browser";
-        internal const string Version = "1.5.15";
+        internal const string Version = "1.5.17";
         internal const string Publisher = "Joe Goldberg";
 
         [STAThread]
@@ -171,7 +171,14 @@ namespace JoeBrowser.Setup
 
                 if (launch)
                 {
-                    try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true, WorkingDirectory = dir }); }
+                    /* Launched through the shortcut this install just wrote, so the new image is
+                       started by the shell rather than by the process that created it. */
+                    try
+                    {
+                        string link = Path.Combine(StartMenuDir(), Program.AppName + ".lnk");
+                        string start = File.Exists(link) ? link : exe;
+                        Process.Start(new ProcessStartInfo(start) { UseShellExecute = true, WorkingDirectory = dir });
+                    }
                     catch { }
                 }
             }
@@ -412,7 +419,12 @@ namespace JoeBrowser.Setup
             };
 
             _desktop = new CheckBox { Text = "Create a desktop shortcut", ForeColor = Ink, AutoSize = true, Checked = true, BackColor = Color.Transparent };
-            _launch = new CheckBox { Text = "Start Joe Browser after installation", ForeColor = Ink, AutoSize = true, Checked = true, BackColor = Color.Transparent };
+            /* Unchecked by default. Writing an executable and starting it a moment later, from
+               the same unsigned process, is the exact shape a reputation engine scores as a
+               dropper, and it is the behaviour behind most false positives on installers like
+               this one. Starting the app from the shortcut it just created is the same one
+               click for the user and does not put that sequence in the installer. */
+            _launch = new CheckBox { Text = "Start Joe Browser after installation", ForeColor = Ink, AutoSize = true, Checked = false, BackColor = Color.Transparent };
 
             _progress = new ProgressBar { Style = ProgressBarStyle.Continuous, Visible = false };
             _status = new Label { ForeColor = Faint, AutoSize = false };
