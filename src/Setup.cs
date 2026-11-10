@@ -20,7 +20,7 @@ namespace JoeBrowser.Setup
     {
         internal const string AppId = "JoeBrowser.Browser.1.2";
         internal const string AppName = "Joe Browser";
-        internal const string Version = "1.8.3";
+        internal const string Version = "1.8.4";
         internal const string Publisher = "Joe Goldberg";
 
         [STAThread]

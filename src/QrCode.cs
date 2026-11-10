@@ -321,7 +321,10 @@ namespace JoeBrowser
             // Second copy.
             for (int i = 0; i < 8; i++) _modules[8][Size - 1 - i] = GetBit(i);
             for (int i = 8; i < 15; i++) _modules[Size - 15 + i][8] = GetBit(i);
-            _modules[8][Size - 8] = true;   // the always-dark module
+            /* The dark module sits at row Size-8, column 8 - bottom left of the alignment
+               area. The old line wrote [8][Size-8], the top-right corner, where it stomped a
+               format bit instead of adding the module: scanners refused the code. */
+            _modules[Size - 8][8] = true;   // the always-dark module
         }
 
         private void DrawVersionInfo()

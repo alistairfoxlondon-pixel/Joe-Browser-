@@ -66,38 +66,43 @@ namespace JoeBrowser
         /* A batch of 100 profiles asks for the inventory 100 times, and each ask walks the
            kernels folder and reads file versions off disk. Cached for the duration of a burst;
            every mutation path (install, delete) calls Invalidate() so the cache cannot go stale
-           behind the user's back. */
+           behind the user's back. Access is locked: an Invalidate racing an in-flight walk used
+           to let the stale list win and be published after invalidation. */
         private static List<KernelInstall> _cache;
+        private static readonly object _cacheGate = new object();
 
         /// <summary>Drops the cached inventory. Call after installing or removing a build.</summary>
-        public static void Invalidate() { _cache = null; }
+        public static void Invalidate() { lock (_cacheGate) _cache = null; }
 
         /// <summary>Every build this machine can actually launch, newest first within an engine.</summary>
         public static List<KernelInstall> Available()
         {
-            if (_cache != null) return _cache;
-            var list = new List<KernelInstall>();
-            try
+            lock (_cacheGate)
             {
-                var installed = KernelStore.Installed();
-                foreach (string engine in KernelStore.Engines)
+                if (_cache != null) return _cache;
+                var list = new List<KernelInstall>();
+                try
                 {
-                    var forEngine = new List<KernelInstall>();
-                    foreach (var k in installed)
-                        if (k != null && k.Ready &&
-                            string.Equals(k.Engine, engine, StringComparison.OrdinalIgnoreCase)) forEngine.Add(k);
-                    // Newest first so a fresh profile lands on current hardware-adjacent builds;
-                    // the tail is what gives a large workspace its spread.
-                    forEngine.Sort(delegate (KernelInstall a, KernelInstall b)
+                    var installed = KernelStore.Installed();
+                    foreach (string engine in KernelStore.Engines)
                     {
-                        return string.CompareOrdinal(VersionSortKey(b), VersionSortKey(a));
-                    });
-                    list.AddRange(forEngine);
+                        var forEngine = new List<KernelInstall>();
+                        foreach (var k in installed)
+                            if (k != null && k.Ready &&
+                                string.Equals(k.Engine, engine, StringComparison.OrdinalIgnoreCase)) forEngine.Add(k);
+                        // Newest first so a fresh profile lands on current hardware-adjacent builds;
+                        // the tail is what gives a large workspace its spread.
+                        forEngine.Sort(delegate (KernelInstall a, KernelInstall b)
+                        {
+                            return string.CompareOrdinal(VersionSortKey(b), VersionSortKey(a));
+                        });
+                        list.AddRange(forEngine);
+                    }
                 }
+                catch (Exception ex) { Log.Error("Kernel inventory failed", ex); }
+                _cache = list;
+                return list;
             }
-            catch (Exception ex) { Log.Error("Kernel inventory failed", ex); }
-            _cache = list;
-            return list;
         }
 
         private static string VersionSortKey(KernelInstall k)

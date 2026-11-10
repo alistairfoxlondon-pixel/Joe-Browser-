@@ -16,10 +16,6 @@ namespace JoeBrowser
         public bool Running;
         public bool Launching;
         public bool Picked;
-        /* Set when the plan no longer covers this profile: over the free cap after a paid plan
-           lapsed, or never covered at all. The card says so and the launch is refused with the
-           upgrade offer instead of opening a browser the plan does not allow. */
-        public bool Locked;
 
         public event EventHandler OpenRequested;
         public event EventHandler EditRequested;
@@ -165,12 +161,9 @@ namespace JoeBrowser
             if (e.Button != MouseButtons.Left) return;
             if (CheckRect.Contains(e.Location) || ((ModifierKeys & (Keys.Control | Keys.Shift)) != 0 && !KebabRect.Contains(e.Location) && !OpenRect.Contains(e.Location)))
             {
-                if (CheckRect.Contains(e.Location) || (ModifierKeys & (Keys.Control | Keys.Shift)) != 0)
-                {
-                    var h = PickToggled;
-                    if (h != null) h(this, EventArgs.Empty);
-                    return;
-                }
+                var h = PickToggled;
+                if (h != null) h(this, EventArgs.Empty);
+                return;
             }
             if (KebabRect.Contains(e.Location)) { ShowMenu(); return; }
             if (OpenRect.Contains(e.Location)) { RaiseOpen(); return; }
@@ -308,9 +301,8 @@ namespace JoeBrowser
 
             float tx = LogoRect.Right + Ui.S(12);
             float nameRight = Width - Ui.S(Pad);
-            string status = Running ? "Running" : Launching ? "Starting…" : Locked ? "Plan expired" : "Stopped";
-            Color statusColor = Running ? Theme.Success : Launching ? Theme.Accent :
-                                Locked ? Theme.Warn : Theme.TextFaint;
+            string status = Running ? "Running" : Launching ? "Starting…" : "Stopped";
+            Color statusColor = Running ? Theme.Success : Launching ? Theme.Accent : Theme.TextFaint;
 
             // The pill is sized from the measured label so the word is never ellipsised.
             float dot = Ui.S(7);
@@ -369,7 +361,7 @@ namespace JoeBrowser
             string os = Model.Fp != null ? (Model.Fp.Os ?? "") : "";
             if (string.IsNullOrWhiteSpace(os)) os = "Windows";
             string device = FingerprintFactory.DeviceIcon(os);
-            string screen = Model.Fp != null && Model.Fp.ScreenW > 0
+            string screen = Model.Fp != null && Model.Fp.ScreenW > 0 && Model.Fp.ScreenH > 0
                 ? Model.Fp.ScreenW + "×" + Model.Fp.ScreenH : "";
 
             var proxy = Model.Proxy;
@@ -584,14 +576,12 @@ namespace JoeBrowser
             var or = OpenRect;
             bool enabled = !Launching;
             float rad = Ui.S(Theme.ButtonRadius);
-            if (Running || Locked) Ui.Fill(g, or, rad, _openHover ? Theme.PanelHover : Theme.Panel2);
+            if (Running) Ui.Fill(g, or, rad, _openHover ? Theme.PanelHover : Theme.Panel2);
             else Ui.Fill(g, or, rad, Launching ? Theme.Panel2 : _openHover ? Theme.AccentHi : Theme.Accent);
-            if (!Running && !Locked && !Launching && _openHover) { /* accent fill already brightened */ }
-            if (Running || Locked) Ui.Stroke(g, or, rad, _openHover ? Theme.HoverStrong : Theme.ButtonBorder);
+            if (Running) Ui.Stroke(g, or, rad, _openHover ? Theme.HoverStrong : Theme.ButtonBorder);
 
-            string openLabel = Launching ? "Starting" : Running ? "Focus window" :
-                               Locked ? "Renew to open" : "Open profile";
-            Color openFg = Locked || Launching ? Theme.TextFaint
+            string openLabel = Launching ? "Starting" : Running ? "Focus window" : "Open profile";
+            Color openFg = Launching ? Theme.TextFaint
                 : Running ? Theme.Text : Theme.OnAccent;
             float ic = Ui.S(13);
             float ow = Ui.Measure(g, openLabel, Theme.SmallBold).Width;
@@ -599,7 +589,7 @@ namespace JoeBrowser
             float ox = or.X + (or.Width - content) / 2f;
             if (enabled)
             {
-                Icons.Draw(g, Running ? "window" : Locked ? "lock" : "play",
+                Icons.Draw(g, Running ? "window" : "play",
                     new RectangleF(ox, or.Y + (or.Height - ic) / 2f, ic, ic), openFg);
                 ox += ic + Ui.S(6);
             }

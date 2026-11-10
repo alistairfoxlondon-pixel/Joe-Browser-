@@ -30,7 +30,6 @@ namespace JoeBrowser
             public int DescLines = 2;
             public RectangleF Button;
             public bool Hover;
-            public bool Locked;
             public Color Tint;
         }
 
@@ -118,22 +117,6 @@ namespace JoeBrowser
         /// <summary>Labels changed language: pill widths depend on them, so relayout.</summary>
         public void ApplyText() { LayoutTiles(); }
 
-        /// <summary>
-        /// Marks a tool as part of Pro. The tile keeps working - it opens the upgrade page -
-        /// but the pill says so up front instead of letting the user find out by clicking.
-        /// </summary>
-        public void SetLocked(string key, bool locked)
-        {
-            foreach (var t in _tiles)
-            {
-                if (!string.Equals(t.Key, key, StringComparison.Ordinal)) continue;
-                if (t.Locked == locked) return;
-                t.Locked = locked;
-                Invalidate();
-                return;
-            }
-        }
-
         public void ReStyle() { BackColor = Theme.Bg; Invalidate(); }
 
         protected override void OnSizeChanged(EventArgs e)
@@ -161,7 +144,15 @@ namespace JoeBrowser
             base.OnGotFocus(e);
         }
 
-        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+        protected override void OnLostFocus(EventArgs e)
+        {
+            /* The tile that represented the keyboard cursor keeps its highlight otherwise: the
+               page loses focus, nothing is hovered, and one tile stays lit for no reason. */
+            foreach (var t in _tiles) t.Hover = false;
+            _hoverIndex = -1;
+            Invalidate();
+            base.OnLostFocus(e);
+        }
 
         protected override bool IsInputKey(Keys keyData)
         {
@@ -172,7 +163,7 @@ namespace JoeBrowser
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
-            int cols = Math.Max(1, ColumnCount(Math.Max(Ui.S(240), Width - Ui.S(Pad) * 2)));
+            int cols = Cols();
             switch (e.KeyCode)
             {
                 case Keys.Right: MoveFocus(_focusIndex + 1); e.Handled = true; break;
@@ -213,6 +204,15 @@ namespace JoeBrowser
             if (want != _scroll) { _scroll = want; Invalidate(); }
         }
 
+        /// <summary>The columns the tile grid uses. One source of truth: the keyboard navigator
+        /// and the layout must agree or Up/Down jumps the wrong distance near a threshold.</summary>
+        private int Cols()
+        {
+            float pad = Ui.S(Pad);
+            float colW = Math.Max(Ui.S(240), Width - pad * 2 - Ui.S(14));
+            return ColumnCount(colW);
+        }
+
         private static int ColumnCount(float colW)
         {
             if (colW >= Ui.S(1420)) return 4;
@@ -226,8 +226,8 @@ namespace JoeBrowser
             if (_tiles.Count == 0 || Width <= 0) return;
             float pad = Ui.S(Pad);
             float gap = Ui.S(Gap);
-            /* The scrollbar lane is kept clear on the right, so a wide tile never has its PRO
-               pill or its action pill sitting under the thumb. */
+            /* The scrollbar lane is kept clear on the right, so a wide tile never has its
+               action pill sitting under the thumb. */
             float colW = Math.Max(Ui.S(240), Width - pad * 2 - Ui.S(14));
             int cols = ColumnCount(colW);
             float tileW = (colW - gap * (cols - 1)) / cols;
@@ -399,7 +399,6 @@ namespace JoeBrowser
             float bw = t.Button.Width;
             float textLeft = cr.Right + Ui.S(12);
             float textRight = r.Right - Ui.S(16);
-            if (t.Locked) textRight -= ProBadgeWidth(g);
             float textW = Math.Max(Ui.S(60), textRight - textLeft);
 
             Ui.Text(g, title, Theme.H3, Theme.Text, textLeft, r.Y + Ui.S(17), textW);
@@ -417,34 +416,6 @@ namespace JoeBrowser
             Ui.Stroke(g, b, Ui.S(Theme.ButtonRadius), t.Hover ? Theme.AccentBorder : Theme.Line, 1f);
             Ui.Text(g, btn, Theme.SmallBold, t.Hover ? Theme.AccentText : Theme.TextDim,
                 b.X, b.Y + (b.Height - Theme.SmallBold.GetHeight(g)) / 2f, b.Width, "center");
-
-            if (t.Locked) PaintProBadge(g, r);
-        }
-
-        /// <summary>The PRO pill in the corner of a tile that the free plan cannot use.</summary>
-        private static void PaintProBadge(Graphics g, RectangleF r)
-        {
-            float h = Ui.S(20);
-            float li = Ui.S(11);
-            const string label = "PRO";
-            /* Sized from the label, not from a constant: "PRO" in a translated build, or at a
-               larger text scale, used to be cut to "P…" inside a pill that never grew. */
-            float tw = Ui.Measure(g, label, Theme.Micro).Width;
-            float w = Ui.S(9) + li + Ui.S(5) + tw + Ui.S(10);
-            var pill = new RectangleF(r.Right - w - Ui.S(14), r.Y + Ui.S(14), w, h);
-            Ui.Fill(g, pill, h / 2f, Theme.AccentOnBg);
-            Ui.Stroke(g, pill, h / 2f, Theme.AccentBorder, 1f);
-
-            Icons.Draw(g, "lock", new RectangleF(pill.X + Ui.S(9), pill.Y + (h - li) / 2f, li, li),
-                Theme.AccentText);
-            Ui.Text(g, label, Theme.Micro, Theme.AccentText,
-                pill.X + Ui.S(9) + li + Ui.S(5), pill.Y + (h - Theme.Micro.GetHeight(g)) / 2f, tw + Ui.S(4));
-        }
-
-        /// <summary>How much width the title must leave free for the badge.</summary>
-        private static float ProBadgeWidth(Graphics g)
-        {
-            return Ui.S(9) + Ui.S(11) + Ui.S(5) + Ui.Measure(g, "PRO", Theme.Micro).Width + Ui.S(10) + Ui.S(10);
         }
 
         /// <summary>Greedy word wrap clipped to the tile, so a long translation can never overflow.</summary>

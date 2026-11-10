@@ -36,7 +36,7 @@ namespace JoeBrowser
             rev = rev.Trim();
             if (rev.Length == 0 || rev.Length > 30) throw new Exception("Could not determine the latest Chromium revision.");
 
-            string zip = Path.Combine(AppPaths.ChromiumDir, "chrome-win.zip");
+            string zip = Path.Combine(AppPaths.ChromiumDir, "chrome-win-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".zip");
             string url = Base + rev + "/chrome-win.zip";
             try
             {
@@ -108,30 +108,62 @@ namespace JoeBrowser
             using (var resp = await req.GetResponseAsync().ConfigureAwait(false))
             {
                 long total = resp.ContentLength;
-                using (var inStream = resp.GetResponseStream())
-                using (var ms = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+                /* A unique temp name per fetch, then an atomic move: two concurrent fetches
+                   shared one fixed destination with FileShare.None, and a leftover locked by a
+                   crashed run blocked every future download. */
+                string tmp = dest + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".part";
+                try
                 {
-                    byte[] buf = new byte[81920];
-                    long got = 0;
-                    int lastPct = -1;
-                    int n;
-                    while ((n = await inStream.ReadAsync(buf, 0, buf.Length, ct).ConfigureAwait(false)) > 0)
+                    long got = await PumpAsync(resp, tmp, total, progress, label, ct).ConfigureAwait(false);
+                    /* A short read used to "succeed": the failure surfaced much later as a
+                       cryptic zip error. Fail here with the numbers in the message. */
+                    if (total > 0 && got < total)
+                        throw new IOException("The download was cut short: got " + got + " of " + total + " bytes.");
+                    if (File.Exists(dest)) File.Delete(dest);
+                    File.Move(tmp, dest);
+                }
+                finally
+                {
+                    try { File.Delete(tmp); } catch { }
+                }
+            }
+        }
+
+        private static async Task<long> PumpAsync(WebResponse resp, string tmp, long total,
+            Action<int, string> progress, string label, CancellationToken ct)
+        {
+            using (var inStream = resp.GetResponseStream())
+            using (var ms = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+            {
+                byte[] buf = new byte[81920];
+                long got = 0;
+                int lastPct = -1;
+                int n;
+                while ((n = await inStream.ReadAsync(buf, 0, buf.Length, ct).ConfigureAwait(false)) > 0)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    await ms.WriteAsync(buf, 0, n, ct).ConfigureAwait(false);
+                    got += n;
+                    if (total > 0)
                     {
-                        ct.ThrowIfCancellationRequested();
-                        await ms.WriteAsync(buf, 0, n, ct).ConfigureAwait(false);
-                        got += n;
-                        if (total > 0)
+                        int pct = (int)(got * 100 / total);
+                        if (pct != lastPct)
                         {
-                            int pct = (int)(got * 100 / total);
-                            if (pct != lastPct)
-                            {
-                                lastPct = pct;
-                                progress?.Invoke(Math.Min(pct, 99), "Downloading " + label + "\u2026  " +
-                                    (got / 1048576.0).ToString("F1") + " MB / " + (total / 1048576.0).ToString("F1") + " MB");
-                            }
+                            lastPct = pct;
+                            progress?.Invoke(Math.Min(pct, 99), "Downloading " + label + "\u2026  " +
+                                (got / 1048576.0).ToString("F1") + " MB / " + (total / 1048576.0).ToString("F1") + " MB");
                         }
                     }
+                    else if (got - lastPct >= 8 * 1048576 || lastPct < 0)
+                    {
+                        /* Servers without a ContentLength: report MB so far instead of a bar
+                           frozen on "Connecting…" for minutes. */
+                        lastPct = (int)got;
+                        progress?.Invoke(0, "Downloading " + label + "\u2026  " +
+                            (got / 1048576.0).ToString("F1") + " MB");
+                    }
                 }
+                return got;
             }
         }
     }

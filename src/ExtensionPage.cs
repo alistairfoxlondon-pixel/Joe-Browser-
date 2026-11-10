@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace JoeBrowser
@@ -44,8 +45,27 @@ namespace JoeBrowser
                     img = new Bitmap(src);
             }
             catch { img = null; }
-            LogoCache[path] = img;
+            /* A missing or unreadable logo is not remembered forever: a fixed icon file (or a
+               folder that was momentarily locked) then never appeared again until restart. */
+            if (img != null) LogoCache[path] = img;
             return img;
+        }
+
+        /// <summary>Drops logo cache entries whose source file no longer exists.</summary>
+        public static void PruneLogoCache()
+        {
+            foreach (string key in LogoCache.Keys.ToArray())
+            {
+                if (!File.Exists(key))
+                {
+                    Image dead;
+                    if (LogoCache.TryGetValue(key, out dead))
+                    {
+                        LogoCache.Remove(key);
+                        if (dead != null) dead.Dispose();
+                    }
+                }
+            }
         }
         private JBButton _addUrl, _addFolder, _addFile, _openFolder, _fetch;
         private JBLabel _section;
@@ -191,6 +211,7 @@ namespace JoeBrowser
             bool missing = false;
             foreach (var row in _shipped) if (!row.Present && row.State != "Removed") missing = true;
             _fetch.Visible = missing;
+            PruneLogoCache();
             LayoutCore();
         }
 

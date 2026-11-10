@@ -130,11 +130,13 @@ namespace JoeBrowser
                        grey outline - the exact look that makes an icon seem cheap. */
                     if (!small)
                     {
-                        var oldClip = g.Clip;
-                        g.SetClip(path, CombineMode.Intersect);
-                        using (var pen = new Pen(Color.FromArgb(70, 255, 255, 255), Math.Max(1.2f, box.Width / 40f)))
-                            g.DrawPath(pen, path);
-                        g.Clip = oldClip;
+                        using (var oldClip = g.Clip)
+                        {
+                            g.SetClip(path, CombineMode.Intersect);
+                            using (var pen = new Pen(Color.FromArgb(70, 255, 255, 255), Math.Max(1.2f, box.Width / 40f)))
+                                g.DrawPath(pen, path);
+                            g.Clip = oldClip;
+                        }
                     }
                 }
 

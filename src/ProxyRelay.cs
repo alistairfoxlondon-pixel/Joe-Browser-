@@ -276,10 +276,19 @@ namespace JoeBrowser
             byte[] req = Encoding.ASCII.GetBytes(sb.ToString());
             await stream.WriteAsync(req, 0, req.Length).ConfigureAwait(false);
 
-            byte[] resp = await ReadUntilHeaderEndAsync(stream, ct).ConfigureAwait(false);
+            /* The handshake read needs its own deadline: a proxy that accepts the TCP connect
+               and then never answers used to hang the browser's request forever, because the
+               read waited only on the app-wide cancellation token. */
+            var readTask = ReadUntilHeaderEndAsync(stream, ct);
+            var finished = await Task.WhenAny(readTask, Task.Delay(15000, ct)).ConfigureAwait(false);
+            byte[] resp = finished == readTask ? await readTask.ConfigureAwait(false) : null;
             if (resp == null) { tcp.Close(); return null; }
             string text = Encoding.ASCII.GetString(resp);
-            if (text.IndexOf(" 200", StringComparison.Ordinal) < 0)
+            /* Parse the status LINE, not the whole header: a value like
+               "Content-Length: 2000" contains " 200" too, and a rejected CONNECT whose body
+               mentioned that length used to be accepted. */
+            string[] status = FirstLine(text).Split(' ');
+            if (status.Length < 2 || !status[1].StartsWith("200", StringComparison.Ordinal))
             {
                 Log.Info("Proxy CONNECT rejected: " + FirstLine(text));
                 tcp.Close();
@@ -435,7 +444,22 @@ namespace JoeBrowser
         {
             string[] lines = head.Split(new[] { "\r\n" }, StringSplitOptions.None);
             var sb = new StringBuilder();
-            if (lines.Length > 0) sb.Append(lines[0].Replace(uri.Scheme + "://" + uri.Host + (uri.IsDefaultPort ? "" : ":" + uri.Port), "")).Append("\r\n");
+            if (lines.Length > 0)
+            {
+                /* Rebuild the request line from method + path + version. A substring strip of
+                   the absolute URL left "GET  /path" - two spaces, which strict origin
+                   servers answered with 400. */
+                string fl = lines[0];
+                int sp1 = fl.IndexOf(' ');
+                int sp2 = fl.LastIndexOf(' ');
+                if (sp1 > 0 && sp2 > sp1)
+                {
+                    sb.Append(fl.Substring(0, sp1)).Append(' ')
+                      .Append(uri.PathAndQuery).Append(' ')
+                      .Append(fl.Substring(sp2 + 1)).Append("\r\n");
+                }
+                else sb.Append(fl).Append("\r\n");
+            }
             bool dropClientAuth = auth == null;
             for (int i = 1; i < lines.Length; i++)
             {

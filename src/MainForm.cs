@@ -31,7 +31,7 @@ namespace JoeBrowser
         private List<ExtensionItem> _extensions = new List<ExtensionItem>();
 
         // Sidebar
-        private JBButton _navProfiles, _navHistory, _navAccount, _navProxies, _navExtensions, _navBrowsers, _navSettings, _navTools, _navAbout, _navPlan;
+        private JBButton _navProfiles, _navHistory, _navAccount, _navProxies, _navExtensions, _navBrowsers, _navSettings, _navTools, _navAbout;
         private JBLabel _navGroupWorkspace, _navGroupSystem;
         private JBThemeSwitch _themeSwitch;
 
@@ -61,12 +61,7 @@ namespace JoeBrowser
         private ProxyPage _proxyPage;
         private ExtensionPage _extensionPage;
         private BrowsersPage _browsersPage;
-        private UpgradePage _upgradePage;
         private JBButton _setSecurity, _setSignOut;
-        private Timer _planTimer;
-        private int _payTicks;
-        private bool _payBusy;
-        private const int PayPollSeconds = 8;
         private JBButton _emptyBtn, _clearFilter, _aboutTelegram;
         private JBToast _toast;
 
@@ -345,7 +340,6 @@ namespace JoeBrowser
             _navSettings = Nav(L10n.T("nav.settings"), "sliders", delegate { SetPage(4); });
             _navTools = Nav(L10n.T("header.tools"), "command", delegate { SetPage(5); });
             _navAbout = Nav(L10n.T("nav.about"), "info", delegate { SetPage(6); });
-            _navPlan = Nav(L10n.T("nav.plan"), "crown", delegate { SetPage(7); });
 
             _navGroupWorkspace = NavGroup(L10n.T("nav.workspace"));
             _navGroupSystem = NavGroup(L10n.T("nav.system"));
@@ -473,34 +467,12 @@ namespace JoeBrowser
             _accountPage.SwitchRequested += delegate { SwitchAccount(); };
             _accountPage.PinRequested += delegate { ShowSecurity(); };
             _accountPage.TwoFactorRequested += delegate { ShowSecurity(); };
-            _accountPage.ManagePlanRequested += delegate { SetPage(7); };
             _accountPage.DeleteAccountRequested += delegate(object sender, string email) { RemoveAccount(email); };
 
             _historyPage = new HistoryPage { Visible = false };
             _historyPage.Back += delegate { SetPage(0); };
             _historyPage.ClearRequested += delegate { ClearHistory(); };
             _historyPage.OpenRequested += delegate(object sender, string url) { OpenHistoryUrl(url); };
-
-            _upgradePage = new UpgradePage { Visible = false };
-            _upgradePage.ActionRequested += delegate(object sender, UpgradeActionEventArgs e) { PlanAction(e.Key); };
-            /* Only needed while the plan page is open, and only it has anything to tick. A one
-               second timer that runs for the life of the window, wakes the message loop and then
-               returns, is a watt and a hitch for nothing: it is started when the page opens and
-               stopped when it closes. */
-            _planTimer = new Timer { Interval = 1000 };
-            _planTimer.Tick += delegate
-            {
-                if (_page != 7) { _planTimer.Stop(); return; }
-                _upgradePage.TickTimer();
-                /* The chain is watched while the page is open, so a payment confirms on its own.
-                   The manual button stays for someone who wants an answer immediately. */
-                if (!Plan.IsPro && _upgradePage.Current != null && _upgradePage.Current.Left > TimeSpan.Zero
-                    && !_payBusy && ++_payTicks >= PayPollSeconds)
-                {
-                    _payTicks = 0;
-                    var _ = CheckPaymentAsync(true);
-                }
-            };
 
             // The About page grows past a short window, so it scrolls like the settings page.
             _aboutPage = new Panel { BackColor = Theme.Bg, Visible = false };
@@ -523,7 +495,6 @@ namespace JoeBrowser
             Controls.Add(_navSettings);
             Controls.Add(_navTools);
             Controls.Add(_navAbout);
-            Controls.Add(_navPlan);
             Controls.Add(_themeSwitch);
             Controls.Add(_search);
             Controls.Add(_sortBtn);
@@ -537,7 +508,6 @@ namespace JoeBrowser
             Controls.Add(_proxyPage);
             Controls.Add(_extensionPage);
             Controls.Add(_browsersPage);
-            Controls.Add(_upgradePage);
             Controls.Add(_historyPage);
             Controls.Add(_accountPage);
             Controls.Add(_aboutPage);
@@ -564,8 +534,6 @@ namespace JoeBrowser
 
             _built = true;
             ApplyLanguage();
-            RefreshPlanState();
-            CheckUnfinishedPayment();
         }
 
         /// <summary>
@@ -584,73 +552,6 @@ namespace JoeBrowser
             }
             catch { return true; }
             return false;
-        }
-
-        /// <summary>
-        /// A payment that was sent before the app closed was only ever confirmed while the window
-        /// was open, so a buyer who paid and quit stayed on the free plan until they thought to
-        /// press the check button again. The pending invoice is remembered; this finishes the job
-        /// on the next start. It is still the chain that decides - nothing here grants anything
-        /// without a matching, unseen transaction.
-        /// </summary>
-        private void CheckUnfinishedPayment()
-        {
-            try
-            {
-                if (Plan.IsPro) return;
-                string coinKey = Plan.PendingCoin;
-                DateTime? created = Plan.PendingCreated;
-                decimal? amount = Plan.PendingAmount;
-                if (string.IsNullOrEmpty(coinKey) || created == null || amount == null) return;
-                /* Give the transfer time to be mined before the first attempt; a check run the
-                   second the app opens would find nothing and burn the pending record's meaning. */
-                if ((DateTime.UtcNow - created.Value).TotalMinutes < 2) return;
-                if ((DateTime.UtcNow - created.Value).TotalDays > 7) { Plan.ClearPending(); return; }
-
-                var coin = CoinCatalog.ByKey(coinKey);
-                if (coin == null) { Plan.ClearPending(); return; }
-                string address = Plan.PendingAddress;
-                if (string.IsNullOrEmpty(address)) address = coin.Address;
-
-                var inv = new Invoice
-                {
-                    Id = "RESUME",
-                    Coin = coin,
-                    Amount = amount.Value,
-                    Usd = 1.0,
-                    CreatedUtc = created.Value,
-                    ExpiresUtc = created.Value.AddSeconds(1)
-                };
-                if (!string.IsNullOrEmpty(address) && !string.Equals(address, coin.Address, StringComparison.OrdinalIgnoreCase))
-                {
-                    /* A different receiving address is a different invoice; the invoice object
-                       carries the coin, so the address the user was shown is restored onto it. */
-                    var copy = CoinCatalog.ByKey(coinKey);
-                    if (copy != null) { copy.Address = address; inv.Coin = copy; }
-                }
-
-                System.Threading.ThreadPool.QueueUserWorkItem(delegate
-                {
-                    PaymentCheck result;
-                    try { result = Payments.Check(inv); }
-                    catch { return; }
-                    if (result == null || !result.Found || Plan.HasSpent(result.TxId)) return;
-                    try
-                    {
-                        BeginInvoke(new Action(delegate
-                        {
-                            Plan.Activate(result.TxId, inv.Coin.Key + " " + Invoice.Fmt(result.Amount) + " " +
-                                inv.Coin.Symbol + "  tx " + result.TxId);
-                            Plan.ClearPending();
-                            RefreshPlanState();
-                            Invalidate();
-                            Toast("Payment confirmed. Pro unlocked", ToastKind.Success);
-                        }));
-                    }
-                    catch { }
-                });
-            }
-            catch (Exception ex) { Log.Error("Resume payment check failed", ex); }
         }
 
         private void OpenUrl(string url)
@@ -714,7 +615,6 @@ namespace JoeBrowser
             _navSettings.Text = L10n.T("nav.settings");
             _navTools.Text = L10n.T("header.tools");
             _navAbout.Text = L10n.T("nav.about");
-            _navPlan.Text = L10n.T("nav.plan");
             _navHistory.Text = L10n.T("nav.history");
             _navAccount.Text = L10n.T("nav.account");
             _themeSwitch.NightText = L10n.T("theme.night");
@@ -836,18 +736,10 @@ namespace JoeBrowser
         {            string prefix, group, proxyText;
             int count;
 
-            /* Checked before the dialog opens, so nobody fills in a form that cannot be used. */
-            int slots = Entitlements.ProfileSlotsLeft(_profiles.Count);
-            if (slots <= 0)
-            {
-                OfferUpgrade(Entitlements.ProfileReason(_profiles.Count));
-                return;
-            }
-
             using (var dlg = new ToolDialog("Batch create", "Create", "Cancel", 520, 660))
             {
                 var prefixBox = dlg.AddField("NAME PREFIX", "Profile", "", "pencil", false, 33);
-                var countBox = dlg.AddSelect(Entitlements.IsPro ? "HOW MANY" : "HOW MANY  \u00b7  " + slots + " LEFT",
+                var countBox = dlg.AddSelect("HOW MANY",
                     new[] { "5", "10", "25", "50", "100" }, 1, "layers");
                 var groupBox = dlg.AddField("GROUP / FOLDER", _settings.DefaultGroup ?? "",
                     L10n.T("set.group.hint"), "folder", false, 33);
@@ -870,10 +762,6 @@ namespace JoeBrowser
                 if (count > 200) count = 200;
             }
 
-            /* The plan decides how many can actually be made. Clamping here rather than
-               refusing outright keeps the dialog honest: the user still gets what they can. */
-            count = AllowProfiles(count);
-            if (count <= 0) return;
             string[] lines = proxyText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(x => x.Trim()).Where(x => x.Length > 0).ToArray();
 
@@ -952,14 +840,6 @@ namespace JoeBrowser
                 var list = _store.ImportFrom(ofd.FileName);
                 if (list.Count == 0) { Toast("No profiles found in that file", ToastKind.Error); return; }
 
-                int allowed = AllowProfiles(list.Count);
-                if (allowed <= 0) return;
-                if (allowed < list.Count)
-                {
-                    list = list.Take(allowed).ToList();
-                    Toast("Imported the first " + allowed + ". The plan is full", ToastKind.Info);
-                }
-
                 /* An imported file carries whatever fingerprints the exporting machine had, which
                    is frequently a duplicate of the ones already here - the same JSON imported
                    twice, or two files from one seller. Re-rolling the colliding ones keeps the
@@ -1012,7 +892,6 @@ namespace JoeBrowser
 
         private void ProxyBatchTest()
         {
-            if (!RequirePro(Entitlements.BatchProxyTest)) return;
             using (var dlg = new ToolDialog("Proxy batch test", "Close", "", 620, 640))
             {
                 dlg.Secondary.Visible = false;
@@ -1166,9 +1045,6 @@ namespace JoeBrowser
             }
 
             if (chosen == null) return;
-            /* Restoring puts a profile back in the live list, so it needs a slot like any
-               other creation. */
-            if (!AllowAnotherProfile()) return;
             if (_store.Restore(chosen.File))
             {
                 ReloadCards(true);
@@ -1524,8 +1400,6 @@ namespace JoeBrowser
         {
             var e = ProxyAt(index);
             if (e == null) return;
-            // Creating a profile from a proxy row obeys the same plan limit as the New button.
-            if (!AllowAnotherProfile()) return;
             /* Opened with the proxy already set, so a proxy that has been checked once also
                carries its country into the new fingerprint instead of generating a mismatch the
                user has to notice and fix by hand. */
@@ -2171,282 +2045,6 @@ namespace JoeBrowser
             }
         }
 
-        
-                /* ------------------------------------------------------------------ *
-         * Plan, limits and crypto payment.
-         * ------------------------------------------------------------------ */
-
-        /// <summary>Free plan caps the number of profiles; Pro does not.</summary>
-        private bool AllowAnotherProfile()
-        {
-            if (Entitlements.ProfileSlotsLeft(_profiles.Count) >= 1) return true;
-            OfferUpgrade(Entitlements.ProfileReason(_profiles.Count));
-            return false;
-        }
-
-        /// <summary>
-        /// Asks for <paramref name="adding"/> new profiles at once. Returns how many are allowed
-        /// and says so when the plan cannot take them all.
-        /// </summary>
-        private int AllowProfiles(int adding)
-        {
-            int left = Entitlements.ProfileSlotsLeft(_profiles.Count);
-            if (left >= adding) return adding;
-            if (left <= 0)
-            {
-                OfferUpgrade(Entitlements.ProfileReason(_profiles.Count));
-                return 0;
-            }
-            Toast("Free plan: " + left + " more profile" + (left == 1 ? "" : "s") + " available", ToastKind.Info);
-            return left;
-        }
-
-        /// <summary>Free plan runs one browser at a time. The count includes the profiles that
-        /// are mid-launch: the session is only registered in _sessions when the browser window
-        /// is up, so a fast "Open all" used to pass this gate once per click before the first
-        /// session existed - and the free plan started five browsers instead of one.</summary>
-        private bool AllowAnotherBrowser()
-        {
-            int running = 0;
-            foreach (var s in _sessions.Values) if (s.IsRunning) running++;
-            int starting = _launching.Count;
-            if (Entitlements.ConcurrentSlotsLeft(running + starting) >= 1) return true;
-            OfferUpgrade(Entitlements.ConcurrentReason());
-            return false;
-        }
-
-        /// <summary>Refuses a Pro-only tool on the free plan and offers the upgrade.</summary>
-        private bool RequirePro(string feature)
-        {
-            if (Entitlements.Allows(feature)) return true;
-            OfferUpgrade(Entitlements.Reason(feature));
-            return false;
-        }
-
-        /// <summary>
-        /// Re-reads the plan and updates everything that depends on it. One method rather than
-        /// scattered calls: a lock that is set in one place and not another is a bug that only
-        /// shows up on the machine of the person who just paid.
-        /// </summary>
-        private void RefreshPlanState()
-        {
-            _upgradePage.RefreshPlan();
-            if (_toolsPage != null) _toolsPage.SetLocked("proxy", !Entitlements.IsPro);
-            Invalidate();
-        }
-
-        private void OfferUpgrade(string why)
-        {
-            if (ConfirmForm.Ask(this, "Free plan", why,
-                    "Everything else in the app stays available on the free plan.",
-                    "See the plan", BtnKind.Primary))
-                SetPage(7);
-            else
-                Toast("Free plan: " + Entitlements.FreeProfiles + " profiles, one open at a time", ToastKind.Info);
-        }
-
-        private void PlanAction(string key)
-        {
-            if (key == "copy" || key == "copyamount")
-            {
-                var inv = _upgradePage.Current;
-                if (inv == null) return;
-                /* Send exactly this amount: the number the user would otherwise retype from the
-                   screen, rounded to the coin's own precision so the clipboard value is the one
-                   the invoice is actually matched against. */
-                string text = key == "copyamount"
-                    ? Invoice.Fmt(inv.Amount)
-                    : inv.Coin.Address;
-                try
-                {
-                    Clipboard.SetText(text);
-                    Toast(key == "copyamount" ? "Amount copied  ·  " + text + " " + inv.Coin.Symbol
-                                              : "Address copied", ToastKind.Success);
-                }
-                catch (Exception ex) { Log.Error("Clipboard", ex); Toast("Could not copy", ToastKind.Error); }
-                return;
-            }
-            if (key == "restore")
-            {
-                RestorePurchase();
-                return;
-            }
-            if (key == "terms")
-            {
-                ShowTerms();
-                return;
-            }
-            if (key == "invite")
-            {
-                try
-                {
-                    Clipboard.SetText(Referral.Invite());
-                    Toast("Invite copied. Your code is " + Referral.MyCode, ToastKind.Success);
-                }
-                catch (Exception ex) { Log.Error("Clipboard", ex); Toast("Could not copy", ToastKind.Error); }
-                return;
-            }
-            if (key == "claim")
-            {
-                ClaimReferral();
-                return;
-            }
-            if (key == "check")
-            {
-                /* An expired session cannot be paid into, so the button becomes "New session". */
-                if (_upgradePage.Current == null || _upgradePage.Current.Left <= TimeSpan.Zero)
-                {
-                    if (_upgradePage.Selected == null) return;
-                    _upgradePage.NewInvoice(_upgradePage.Selected);
-                    _payTicks = 0;
-                    Toast("New 30-minute session at the current rate", ToastKind.Info);
-                    return;
-                }
-                var _ = CheckPaymentAsync();
-            }
-        }
-
-        /// <summary>
-        /// The payment terms, shown before the first payment. The same text is reachable later
-        /// from the Terms link, so nobody has to accept something they cannot re-read.
-        /// </summary>
-        /// <summary>
-        /// Redeems a receipt a referred friend sent. The transaction is checked on the chain
-        /// before any days are added, so a receipt cannot simply be typed out.
-        /// </summary>
-        private void ClaimReferral()
-        {
-            using (var dlg = new ToolDialog("Claim a referral", "Claim", "Cancel", 560, 400))
-            {
-                dlg.AddNote("Paste the receipt your friend sent after their payment. It is checked "
-                          + "on the chain before the days are added.");
-                var box = dlg.AddField("RECEIPT", "", "JBR1.JB7K2M4Q.bsc.0x\u2026", "copy", true, 74);
-                if (dlg.ShowDialog(this) != DialogResult.OK) return;
-
-                bool credited;
-                string message = Referral.Claim(box.Value, out credited);
-                RefreshPlanState();
-                ConfirmForm.Tell(this, credited ? "Referral claimed" : "Referral",
-                    credited ? "Referral credit added." : "That receipt could not be used.", message);
-            }
-        }
-
-        /// <summary>
-        /// After a payment, a referred user gets the receipt to send on. It is only offered when
-        /// they actually entered somebody's code, so nobody is shown a receipt that means nothing.
-        /// </summary>
-        private void OfferReferralReceipt(Invoice inv, string txId)
-        {
-            string receipt = Referral.BuildReceipt(inv == null ? "" : inv.Coin.Chain, txId);
-            if (string.IsNullOrEmpty(receipt)) return;
-
-            using (var dlg = new ToolDialog("Your referral receipt", "Copy", "Close", 600, 380))
-            {
-                dlg.AddNote("Send this to " + Referral.MyReferrer() + " so they receive "
-                          + Referral.Days + " days. One payment, one receipt.");
-                var box = dlg.AddField("RECEIPT", receipt, "", "copy", true, 74);
-                box.Box.ReadOnly = true;
-                if (dlg.ShowDialog(this) == DialogResult.OK)
-                {
-                    try { Clipboard.SetText(receipt); Toast("Receipt copied", ToastKind.Success); }
-                    catch (Exception ex) { Log.Error("Clipboard", ex); }
-                }
-            }
-        }
-
-        private void ShowTerms()
-        {
-            using (var dlg = new ToolDialog("Payment terms", "I accept", "Cancel", 660, 580))
-            {
-                dlg.AddNote("Version " + Terms.Version + "  \u00b7  crypto payments are final.");
-                foreach (var s in Terms.Sections())
-                {
-                    dlg.AddSection(s.Title.ToUpperInvariant());
-                    var body = new JBLabel(LabelRole.Body, s.Body);
-                    body.Wrap = true;
-                    body.TextAlign = ContentAlignment.TopLeft;
-                    dlg.AddRow(null, body, Ui.S(74));
-                }
-                if (dlg.ShowDialog(this) == DialogResult.OK)
-                {
-                    _upgradePage.AcceptTerms();
-                    _payTicks = 0;
-                }
-            }
-        }
-
-        /// <summary>
-        /// Reads the chain for the open invoice. Deliberately not a "trust the button" flow:
-        /// the amount, the block time and the transaction id are all checked, and a hash that
-        /// has already paid once is refused.
-        /// </summary>
-        private async Task CheckPaymentAsync(bool quiet = false)
-        {
-            var inv = _upgradePage.Current;
-            if (inv == null || _payBusy) return;
-            if (inv.Left <= TimeSpan.Zero)
-            {
-                _upgradePage.SetStatus("That session expired. Pick a coin to start a new one.", Theme.Danger);
-                return;
-            }
-
-            _payBusy = true;
-            _upgradePage.SetBusy(true);
-            if (!quiet) _upgradePage.SetStatus("Reading the " + inv.Coin.Network + " network\u2026", Theme.TextDim);
-            PaymentCheck result;
-            try
-            {
-                result = await Task.Run(new Func<PaymentCheck>(delegate { return Payments.Check(inv); }));
-            }
-            catch (Exception ex)
-            {
-                Log.Error("Payment check", ex);
-                result = PaymentCheck.No("Could not reach the network. Try again in a moment.");
-            }
-            finally
-            {
-                _payBusy = false;
-                _upgradePage.SetBusy(false);
-            }
-
-            if (result.Found)
-            {
-                if (Plan.HasSpent(result.TxId))
-                {
-                    _upgradePage.SetStatus("That transaction has already been used.", Theme.Danger);
-                    return;
-                }
-                Plan.Activate(result.TxId, inv.Coin.Key + " " + Invoice.Fmt(result.Amount) + " " +
-                    inv.Coin.Symbol + "  tx " + result.TxId);
-                Plan.ClearPending();
-                RefreshPlanState();
-                _upgradePage.SetStatus("Payment confirmed. Pro is active until " +
-                    (Plan.Until.HasValue ? Plan.Until.Value.ToLocalTime().ToString("d MMMM") : "next month") + ".",
-                    Theme.Success);
-                Toast("Payment confirmed. Pro unlocked", ToastKind.Success);
-                Invalidate();
-                OfferReferralReceipt(inv, result.TxId);
-                return;
-            }
-
-            /* A background poll only speaks when it has something to say. */
-            if (!quiet || result.Pending) _upgradePage.SetStatus(result.Message, result.Pending ? Theme.Accent : Theme.TextDim);
-        }
-
-        private void RestorePurchase()
-        {
-            var history = Plan.History();
-            if (Plan.IsPro)
-            {
-                ConfirmForm.Tell(this, "Plan", "Pro is active on this Windows user.",
-                    Plan.Summary() + (history.Count > 0 ? "\n\nLast payment: " + history[history.Count - 1] : ""));
-                return;
-            }
-            ConfirmForm.Tell(this, "Restore a purchase",
-                "Pro is tied to this Windows user.",
-                "Reinstall and sign in to the same account to get it back. A transaction can never unlock twice.");
-        }
-
         private void UpdateBrowserInfo()
         {
             if (_setBrowserInfo == null) return;
@@ -2572,7 +2170,6 @@ namespace JoeBrowser
                 case 3: title = L10n.T("header.browsers"); sub = L10n.T("sub.browsers"); break;
                 case 4: title = L10n.T("header.settings"); sub = L10n.T("sub.settings"); break;
                 case 5: title = L10n.T("header.tools"); sub = L10n.T("sub.tools"); break;
-                case 7: title = L10n.T("header.plan"); sub = L10n.T("sub.plan"); break;
                 case 8: title = L10n.T("header.history"); sub = L10n.T("sub.history"); break;
                 case 9: title = L10n.T("header.account"); sub = L10n.T("sub.account"); break;
                 default: title = L10n.T("header.about"); sub = L10n.T("sub.about"); break;
@@ -2604,13 +2201,13 @@ namespace JoeBrowser
         }
 
         /// <summary>
-        /// Height the rail needs for ten destinations in two captioned groups, at the given row
+        /// Height the rail needs for nine destinations in two captioned groups, at the given row
         /// height and gap. Used to pick the density that fits the window instead of discovering
         /// it after the rows have been placed.
         /// </summary>
         private static int RailHeight(int row, int gap)
         {
-            int rows = 10;
+            int rows = 9;
             int captions = 2;
             return rows * row + rows * gap + captions * (Theme.Row + Ui.S(4)) + Ui.S(8);
         }
@@ -2665,10 +2262,9 @@ namespace JoeBrowser
             navY += Theme.Row + Ui.S(4);
             _navSettings.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
             _navTools.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
-            _navPlan.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
             _navAbout.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
 
-            /* Ten destinations and two captions. The switch gives way before a destination does. */
+            /* Nine destinations and two captions. The switch gives way before a destination does. */
             _themeSwitch.Visible = navY <= _themeSwitch.Top;
 
             // caption buttons, flush with the top right corner
@@ -2786,7 +2382,6 @@ namespace JoeBrowser
             _proxyPage.SetBounds(contentX, headerH, contentW, pageH);
             _extensionPage.SetBounds(contentX, headerH, contentW, pageH);
             _browsersPage.SetBounds(contentX, headerH, contentW, pageH);
-            _upgradePage.SetBounds(contentX, headerH, contentW, pageH);
             _aboutPage.SetBounds(contentX, headerH, contentW, pageH);
             LayoutAbout();
 
@@ -3032,7 +2627,7 @@ namespace JoeBrowser
             }
             if (!ConfirmForm.Ask(this, L10n.T("acct.remove.title"), L10n.T("acct.remove.body"),
                 L10n.T("acct.remove.detail"), L10n.T("acct.remove"), BtnKind.Danger)) return;
-            Accounts.Delete(email);
+            if (!Accounts.Delete(email)) { Toast("The account could not be removed. It is still on this PC.", ToastKind.Error); return; }
             _accountPage.Reload();
             Toast(email + " " + L10n.T("acct.switched"), ToastKind.Info);
         }
@@ -3105,15 +2700,12 @@ namespace JoeBrowser
         private void SetPageCore(int page)
         {
             _page = page;
-            /* Only the plan page has a clock. Leaving it stops the timer here rather than on its
-               next tick, so the message loop goes quiet the moment the page does. */
-            if (page != 7 && _planTimer != null) _planTimer.Stop();
             SuspendLayout();
-            /* Pages 0-7 are the long-standing destinations; 8 and 9 are History and Account.
+            /* Pages 0-6 are the long-standing destinations; 8 and 9 are History and Account.
                Selected state is per button, so the subscript mismatch between "page number" and
                "slot in this array" has to be spelled out rather than assumed. */
-            JBButton[] navs = { _navProfiles, _navProxies, _navExtensions, _navBrowsers, _navSettings, _navTools, _navAbout, _navPlan, _navHistory, _navAccount };
-            int[] pageOf = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+            JBButton[] navs = { _navProfiles, _navProxies, _navExtensions, _navBrowsers, _navSettings, _navTools, _navAbout, _navHistory, _navAccount };
+            int[] pageOf = { 0, 1, 2, 3, 4, 5, 6, 8, 9 };
             for (int i = 0; i < navs.Length; i++)
             {
                 navs[i].Selected = pageOf[i] == page;
@@ -3134,7 +2726,6 @@ namespace JoeBrowser
             if (page == 4) RefreshKernelInfo();
             _toolsPage.Visible = page == 5;
             _aboutPage.Visible = page == 6;
-            _upgradePage.Visible = page == 7;
             _historyPage.Visible = page == 8;
             if (page == 8) RefreshHistory();
             _accountPage.Visible = page == 9;
@@ -3149,10 +2740,10 @@ namespace JoeBrowser
             /* The newly visible page has to come forward over the other page containers...
                and then the fixed chrome has to be put back on top of everything. Every page
                that is not showing stays Visible=false but keeps its z-order slot above the
-               toast, so without the second step the answer to a save, a proxy test or a Google
-               sign-in was hidden behind an invisible page on every screen but Profiles, and the
+               toast, so without the second step the answer to a save or a proxy test was
+               hidden behind an invisible page on every screen but Profiles, and the
                user saw nothing happen at all. */
-            Control[] pages = { _host, _emptyPanel, _proxyPage, _extensionPage, _browsersPage, _settingsPage, _toolsPage, _aboutPage, _upgradePage, _historyPage, _accountPage };
+            Control[] pages = { _host, _emptyPanel, _proxyPage, _extensionPage, _browsersPage, _settingsPage, _toolsPage, _aboutPage, _historyPage, _accountPage };
             foreach (var p in pages) if (p.Visible) p.BringToFront();
             Restack();
 
@@ -3170,18 +2761,6 @@ namespace JoeBrowser
             else if (page == 3)
             {
                 _browsersPage.Rescan();
-            }
-            else if (page == 7)
-            {
-                RefreshPlanState();
-                /* Re-open the session that was live when the app last closed, so a payment made
-                   just before closing is still watched instead of being treated as too old. */
-                _upgradePage.RestorePending();
-                /* The exchange rate is a web request; warming it here, off the UI thread, is
-                   what keeps the first invoice click from feeling like a hang. */
-                Rates.Warm();
-                _payTicks = 0;
-                if (!_planTimer.Enabled) _planTimer.Start();
             }
             else if (page == 4)
             {
@@ -3227,9 +2806,6 @@ namespace JoeBrowser
             _cards.Clear();
             _grid.Batch(delegate { _grid.Controls.Clear(); });
 
-            /* Worked out once per rebuild rather than per card: the ordering that decides which
-               profiles a lapsed plan still covers is a sort of the whole list. */
-            var locked = Entitlements.LockedProfiles(_profiles);
             _grid.Batch(delegate
             {
                 foreach (var p in _profiles)
@@ -3240,7 +2816,6 @@ namespace JoeBrowser
                         Model = p,
                         Running = _sessions.ContainsKey(id),
                         Launching = _launching.Contains(id),
-                        Locked = locked.Contains(id),
                         AccessibleName = p.Name,
                         AccessibleRole = AccessibleRole.PushButton
                     };
@@ -3534,7 +3109,6 @@ namespace JoeBrowser
 
         private async void NewProfile()
         {
-            if (!AllowAnotherProfile()) return;
             /* A new profile is generated unique against the workspace before the editor opens,
                so the chips the user sees are the truth: rolling here and de-duplicating on save
                would show one fingerprint and store another. */
@@ -3724,9 +3298,6 @@ namespace JoeBrowser
             _duplicateWarning = null;
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return false;
-            /* The bulk path is clamped once, up front: _profiles does not grow inside the loop,
-               so re-checking here would let a batch overshoot the cap. */
-            if (announce && !AllowAnotherProfile()) return false;
             var copy = p.Copy(true);
             copy.Name = p.Name + " copy";
             copy.Proxy.Password = p.Proxy.Password;
@@ -3921,14 +3492,12 @@ namespace JoeBrowser
         private void BulkDuplicate()
         {
             var ids = _picks.ToArray();
-            int allowed = AllowProfiles(ids.Length);
-            if (allowed <= 0) { ClearPicks(); return; }
 
             int made = 0, failed = 0;
             string lastWarning = null;
             foreach (string id in ids)
             {
-                if (made >= allowed) break;
+                if (made >= ids.Length) break;
                 /* Counted from what actually succeeded. The old loop incremented made whether or
                    not the save worked, so a full disk produced a cheerful "5 profiles duplicated"
                    and five missing cards. */
@@ -4059,14 +3628,6 @@ namespace JoeBrowser
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
 
-            /* A lapsed plan leaves the profiles on disk but refuses to open the ones it no
-               longer covers. The offer is the upgrade, and the data is still there afterwards. */
-            if (Entitlements.LockedProfiles(_profiles).Contains(id))
-            {
-                OfferUpgrade("This profile is outside the free plan. Renew to open it again.");
-                return;
-            }
-
             BrowserSession existing;
             if (_sessions.TryGetValue(id, out existing))
             {
@@ -4082,7 +3643,6 @@ namespace JoeBrowser
                 return;
             }
             if (_launching.Contains(id)) return;
-            if (!AllowAnotherBrowser()) return;
 
             _launching.Add(id);
             RefreshCardState(id);
@@ -4306,7 +3866,6 @@ namespace JoeBrowser
                 {
                     c.Running = _sessions.ContainsKey(id);
                     c.Launching = _launching.Contains(id);
-                    c.Locked = Entitlements.LockedProfiles(_profiles).Contains(id);
                     c.Invalidate();
                 }
                 Invalidate();

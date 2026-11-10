@@ -47,8 +47,9 @@ namespace JoeBrowser
                 get
                 {
                     DateTime t;
+                    /* A corrupt timestamp sorts last instead of pretending to be "now". */
                     return DateTime.TryParse(At, System.Globalization.CultureInfo.InvariantCulture,
-                        System.Globalization.DateTimeStyles.RoundtripKind, out t) ? t.ToLocalTime() : DateTime.Now;
+                        System.Globalization.DateTimeStyles.RoundtripKind, out t) ? t.ToLocalTime() : DateTime.MinValue;
                 }
             }
         }
@@ -69,12 +70,26 @@ namespace JoeBrowser
             }
         }
 
-        /// <summary>Only characters safe in a file name, so a profile id can never escape the folder.</summary>
+        /// <summary>Only characters safe in a file name, so a profile id can never escape the folder.
+        /// A short hash of the raw id is appended when sanitisation actually replaced characters,
+        /// so "a/b" and "a_b" no longer share one file. Well-formed ids (GUIDs) keep the exact
+        /// name they have always had, so existing history files stay where they are.</summary>
         private static string FileFor(string profileId)
         {
+            string raw = profileId ?? "unknown";
             var sb = new StringBuilder();
-            foreach (char c in (profileId ?? "unknown"))
-                sb.Append(char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_');
+            bool safe = true;
+            foreach (char c in raw)
+            {
+                if (char.IsLetterOrDigit(c) || c == '-' || c == '_') sb.Append(c);
+                else { sb.Append('_'); safe = false; }
+            }
+            if (!safe)
+            {
+                int h = 5381;
+                foreach (char c in raw) h = (h * 33 + c) & 0x3FFFFFFF;
+                sb.Append('-').Append(h.ToString("x6"));
+            }
             return Path.Combine(Dir, sb.ToString() + ".jsonl");
         }
 
@@ -90,7 +105,9 @@ namespace JoeBrowser
             {
                 if (ForceEnabled) return true;
                 var p = EnabledProvider;
-                try { return p == null || p(); } catch { return true; }
+                /* A throwing provider must fail CLOSED: "record anyway" would keep writing
+                   history after the user had switched it off in Settings. */
+                try { return p == null || p(); } catch { return false; }
             }
         }
 
@@ -121,9 +138,31 @@ namespace JoeBrowser
         /// event a moment after the document starts, so the visit is recorded first - when it
         /// happens, which is the whole point - and named second.
         /// </summary>
+        /* Throttling for title rewrites: one navigation can fire several targetInfoChanged
+           events, and each used to rewrite the whole JSONL file (up to 20k lines) under the
+           global lock. Same title, or a second event inside the window, changes nothing. */
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _titleMemo
+            = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _titleAt
+            = new System.Collections.Concurrent.ConcurrentDictionary<string, DateTime>();
+
+        /// <summary>
+        /// Attaches a page title to the profile's newest history row. The file is rewritten only
+        /// when the tail actually changes, and at most once per two seconds per profile.
+        /// </summary>
         public static void SetLastTitle(string profileId, string title)
         {
             if (!Enabled || string.IsNullOrWhiteSpace(title)) return;
+            string trimmed = title.Length > 300 ? title.Substring(0, 300) : title;
+            string key = profileId ?? "";
+            string memo;
+            _titleMemo.TryGetValue(key, out memo);
+            if (string.Equals(memo, trimmed, StringComparison.Ordinal)) return;
+            DateTime lastAt;
+            _titleAt.TryGetValue(key, out lastAt);
+            if ((DateTime.UtcNow - lastAt).TotalSeconds < 2) return;
+            _titleMemo[key] = trimmed;
+            _titleAt[key] = DateTime.UtcNow;
             try
             {
                 lock (Gate)
@@ -139,8 +178,8 @@ namespace JoeBrowser
                     if (last < 0) return;
                     Entry e;
                     try { e = ser.Deserialize<Entry>(lines[last]); } catch { return; }
-                    if (e == null || e.Title == title) return;
-                    e.Title = title.Length > 300 ? title.Substring(0, 300) : title;
+                    if (e == null || e.Title == trimmed) return;
+                    e.Title = trimmed;
                     lines[last] = ser.Serialize(e);
                     File.WriteAllLines(file, lines);
                 }
@@ -333,6 +372,10 @@ namespace JoeBrowser
             const string id = "__selftest__";
             var problems = new StringBuilder();
             bool wasEnabled = ForceEnabled;
+            /* The title memo must not carry state between runs: a second self test in one
+               process would otherwise see the memo match and skip the rewrite it asserts on. */
+            _titleMemo.Clear();
+            _titleAt.Clear();
             try
             {
                 DeleteFileFor(id);
@@ -368,7 +411,9 @@ namespace JoeBrowser
                 if (Interesting("chrome://settings")) problems.Append(" a browser page was recorded");
                 if (!Interesting("https://example.com/keep")) problems.Append(" a real url was rejected");
 
-                if (ClearAll() < 1) problems.Append(" clear all removed nothing");
+                /* Clear this self-test profile only. The old call was ClearAll(), which erased
+                   every real profile's history on whatever machine ran --selftest. */
+                if (Clear(id) < 1) problems.Append(" clear removed nothing");
                 if (Read(id).Count != 0) problems.Append(" rows survived clear");
             }
             catch (Exception ex) { problems.Append(" " + ex.GetType().Name + ": " + ex.Message); }

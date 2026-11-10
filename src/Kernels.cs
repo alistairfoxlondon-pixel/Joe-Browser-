@@ -416,8 +416,10 @@ namespace JoeBrowser
             Directory.CreateDirectory(dir);
 
             /* The zip and its unpacked copy both have to fit, and the published size is the
-               compressed one: a build that reports 244 MB unpacks to well over 400 MB. */
-            long need = ((rel.SizeMb > 0 ? rel.SizeMb : 200) + 120) * 1048576L * 2;
+               compressed one: a build that reports 170 MB unpacks to ~500 MB. The old estimate
+               reserved barely enough for the zip twice, so a mid-extract disk-full was the
+               first symptom instead of a clear message. */
+            long need = ((rel.SizeMb > 0 ? rel.SizeMb : 200) * 4 + 300) * 1048576L;
             DiskSpace.Require(dir, need, "download " + rel.Engine + " " + rel.Version);
 
             string tmp = Path.Combine(dir, "dl-" + Guid.NewGuid().ToString("N").Substring(0, 8));
@@ -425,13 +427,23 @@ namespace JoeBrowser
             string file = Path.Combine(tmp, "build.zip");
             try
             {
-                progress?.Invoke(2, "Connecting\u2026");
-                var ignored = ChromiumDownloader.DownloadFileAsync(rel.Url, file,
-                    (pct, msg) => progress?.Invoke(pct, msg), rel.Engine + " " + rel.Version, ct);
-                ignored.GetAwaiter().GetResult();
+                try
+                {
+                    progress?.Invoke(2, "Connecting\u2026");
+                    var ignored = ChromiumDownloader.DownloadFileAsync(rel.Url, file,
+                        (pct, msg) => progress?.Invoke(pct, msg), rel.Engine + " " + rel.Version, ct);
+                    ignored.GetAwaiter().GetResult();
 
-                progress?.Invoke(100, "Unpacking\u2026");
-                ExtractZip(file, dir);
+                    progress?.Invoke(100, "Unpacking\u2026");
+                    ExtractZip(file, dir);
+                }
+                catch
+                {
+                    /* A cancelled or failed install must not leave an empty version folder
+                       behind: it kept appearing in the installed list with nothing in it. */
+                    try { Directory.Delete(dir, true); } catch { }
+                    throw;
+                }
             }
             finally
             {
@@ -461,19 +473,34 @@ namespace JoeBrowser
 
         private static void ExtractZip(string zip, string dir)
         {
+            string root = Path.GetFullPath(dir);
+            if (!root.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal))
+                root += Path.DirectorySeparatorChar;
+            int failed = 0;
             using (var archive = ZipFile.OpenRead(zip))
             {
                 foreach (var entry in archive.Entries)
                 {
                     if (string.IsNullOrEmpty(entry.Name)) continue;   // directory entry
-                    string dest = Path.Combine(dir, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+                    string dest = Path.GetFullPath(Path.Combine(dir, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
+                    /* Zip-slip: an archive is untrusted input, and a ".." entry used to be
+                       extracted wherever it pointed - outside the kernels root. */
+                    if (!dest.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("The archive contained an unsafe path: " + entry.FullName);
                     string parent = Path.GetDirectoryName(dest);
                     if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
                     // A single failed file (locked by an antivirus scan) must not lose the build.
                     try { entry.ExtractToFile(dest, true); }
-                    catch (IOException) { Thread.Sleep(120); try { entry.ExtractToFile(dest, true); } catch { } }
+                    catch (Exception)
+                    {
+                        Thread.Sleep(120);
+                        try { entry.ExtractToFile(dest, true); }
+                        catch { failed++; }
+                    }
                 }
             }
+            if (failed > 0)
+                Log.Error("Kernel unpack lost " + failed + " file(s) to locks; the build may be incomplete");
         }
 
         // ------------------------------------------------------------------ json helpers

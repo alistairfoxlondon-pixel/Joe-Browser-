@@ -6,15 +6,13 @@ using System.Windows.Forms;
 namespace JoeBrowser
 {
     /// <summary>
-    /// Account page: who is signed in, what the plan covers, how the workspace is using it, and
-    /// whether the account is protected - the four things a person opens an account page to see.
+    /// Account page: who is signed in, how the workspace is being used, and whether the account
+    /// is protected - the three things a person opens an account page to see.
     ///
-    /// The previous page answered three of the four, repeated its security answers twice, showed
-    /// a plan card to a signed-out visitor, printed a raw ISO-8601 timestamp as "member since",
-    /// and stretched a narrow column across a wide window. This version: an identity header with
-    /// a readable date, a plan card, a security card that says each protection once, a workspace
-    /// card with the counts the rest of the app is already tracking, and the account list - all
-    /// inside a centred column that stops growing at the width good text columns stop at.
+    /// The page shows an identity header with a readable date, a security card that says each
+    /// protection once, a workspace card with the counts the rest of the app is already
+    /// tracking, and the account list - all inside a centred column that stops growing at the
+    /// width good text columns stop at.
     /// </summary>
     internal sealed class AccountPage : Panel, IReStyle, ISyncLayout
     {
@@ -22,10 +20,8 @@ namespace JoeBrowser
         private readonly JBScrollHost _host;
 
         private readonly IdentityCard _identity;
-        private readonly InfoCard _plan;
         private readonly InfoCard _security;
         private readonly InfoCard _workspace;
-        private readonly UsageCard _usage;
         private readonly JBLabel _accountsHeading;
         private readonly JBPanel _accountsBox;
         private readonly List<AccountRow> _rows = new List<AccountRow>();
@@ -38,7 +34,6 @@ namespace JoeBrowser
         public event EventHandler SwitchRequested;
         public event EventHandler PinRequested;
         public event EventHandler TwoFactorRequested;
-        public event EventHandler ManagePlanRequested;
         public event EventHandler<string> DeleteAccountRequested;
 
         /// <summary>
@@ -71,10 +66,6 @@ namespace JoeBrowser
             _identity.Switch.Click += delegate { var h = SwitchRequested; if (h != null) h(this, EventArgs.Empty); };
             _column.Controls.Add(_identity);
 
-            _plan = new InfoCard("PLAN", "crown");
-            _column.Controls.Add(_plan);
-            _plan.Primary.Click += delegate { var h = ManagePlanRequested; if (h != null) h(this, EventArgs.Empty); };
-
             _security = new InfoCard("SECURITY", "shield");
             _column.Controls.Add(_security);
             _security.Primary.Click += delegate { var h = PinRequested; if (h != null) h(this, EventArgs.Empty); };
@@ -83,9 +74,6 @@ namespace JoeBrowser
             _workspace = new InfoCard("WORKSPACE", "layers");
             _workspace.Secondary.Visible = false;
             _column.Controls.Add(_workspace);
-
-            _usage = new UsageCard();
-            _column.Controls.Add(_usage);
 
             _accountsHeading = new JBLabel(LabelRole.Strong, L10n.T("acct.others"));
             _column.Controls.Add(_accountsHeading);
@@ -102,7 +90,7 @@ namespace JoeBrowser
             LayoutCore();
         }
 
-        /// <summary>Re-reads the account store and the plan, then rebuilds every card.</summary>
+        /// <summary>Re-reads the account store, then rebuilds every card.</summary>
         public void Reload()
         {
             if (!_ready) return;
@@ -112,36 +100,12 @@ namespace JoeBrowser
             _identity.Bind(me);
 
             /* A signed-out visitor (a session marker that expired, say) gets an identity card
-               and the workspace numbers - not a PLAN card offering an upgrade to somebody who
-               has not signed in, and not a SECURITY card about an account that is not open. */
+               and the workspace numbers - not a SECURITY card about an account that is not open. */
             bool signedIn = me != null;
-            _plan.Visible = signedIn;
             _security.Visible = signedIn;
 
             if (signedIn)
             {
-                bool pro = Plan.IsPro;
-                _plan.Title = L10n.T("acct.planhead");
-                _plan.Primary.Text = pro ? L10n.T("acct.manageplan") : L10n.T("acct.upgrade");
-                _plan.Primary.Icon = pro ? "settings" : "crown";
-                _plan.Primary.Kind = pro ? BtnKind.Soft : BtnKind.Primary;
-                /* The filler "Renews: upgrade for unlimited profiles" row is gone - it restated
-                   the button underneath it. Free accounts see what the plan covers, Pro accounts
-                   see when it renews. */
-                var planRows = new List<InfoCard.Row>
-                {
-                    new InfoCard.Row(L10n.T("acct.plannow"), Plan.Summary(), true),
-                    new InfoCard.Row(L10n.T("acct.planprofiles"), Plan.IsPro
-                        ? L10n.T("acct.planunlimited")
-                        : UsedProfiles() + " / " + Entitlements.FreeProfiles, false)
-                };
-                if (Plan.IsLifetime || (Plan.IsPro && Plan.Until != null))
-                {
-                    string note = PlanNote();
-                    if (!string.IsNullOrWhiteSpace(note)) planRows.Add(new InfoCard.Row(L10n.T("acct.planrenew"), note, false));
-                }
-                _plan.SetRows(planRows.ToArray());
-
                 bool pin = !string.IsNullOrEmpty(me.PinHash);
                 bool two = !string.IsNullOrEmpty(me.TotpSecret);
                 _security.Primary.Text = pin ? L10n.T("acct.pin.on") : L10n.T("acct.pin");
@@ -175,9 +139,6 @@ namespace JoeBrowser
                 });
             }
 
-            _usage.Visible = signedIn;
-            if (signedIn) _usage.Reload();
-
             _identity.Switch.Visible = me != null;
             _identity.SignOut.Visible = me != null;
 
@@ -197,33 +158,13 @@ namespace JoeBrowser
             LayoutCore();
         }
 
-        /// <summary>
-        /// The one number a plan page has to answer: how many profiles this account holds right
-        /// now. Read from the store rather than counted from the cards on the other page, so it
-        /// is right even when no profile card has been built yet.
-        /// </summary>
-        private static int UsedProfiles()
-        {
-            try { return ProfileStore.CountMine(); } catch { return 0; }
-        }
-
-        private static string PlanNote()
-        {
-            var until = Plan.Until;
-            if (Plan.IsLifetime) return L10n.T("acct.plan.unlimited");
-            if (Plan.IsPro && until != null) return L10n.T("acct.plan.renews") + " " + until.Value.ToLocalTime().ToString("d MMMM yyyy");
-            return "";
-        }
-
         public void ReStyle()
         {
             BackColor = Theme.Bg;
             _column.BackColor = Theme.Bg;
             _identity.Invalidate();
-            _plan.Invalidate();
             _security.Invalidate();
             _workspace.Invalidate();
-            _usage.Invalidate();
             foreach (var r in _rows) r.Invalidate();
             Invalidate();
         }
@@ -242,7 +183,7 @@ namespace JoeBrowser
                 int w = Math.Max(Ui.S(320), _host.Width - Ui.S(10));
                 /* A text column does not get better past a certain width: every extra hundred
                    px is dead right margin or a card row that reads like a shelf. The column now
-                   centres at up to 980 logical px, the same cap the plan page uses. */
+                   centres at up to 980 logical px. */
                 int maxInner = Ui.S(980);
                 int pad = Ui.S(30);
                 int inner = Math.Max(Ui.S(240), Math.Min(maxInner, w - pad * 2));
@@ -253,41 +194,32 @@ namespace JoeBrowser
                 _identity.SetBounds(left, y, inner, _identity.NeededHeight(inner));
                 y += _identity.Height + gap;
 
-                /* Two cards side by side when there is room for two readable columns, stacked
-                   otherwise. The break point is the width at which a "label   value" row stops
-                   being one line, not a device class. */
+                /* Side by side with the workspace card when there is room for two readable
+                   columns, stacked otherwise. The break point is the width at which a
+                   "label   value" row stops being one line, not a device class. */
                 bool two = inner >= Ui.S(700);
-                if (_plan.Visible || _security.Visible)
+                if (_security.Visible && two && _workspace.Visible)
                 {
-                    if (two && _plan.Visible && _security.Visible)
+                    int colW = (inner - gap) / 2;
+                    int h = Math.Max(_security.NeededHeight(colW), _workspace.NeededHeight(colW));
+                    _security.SetBounds(left, y, colW, h);
+                    _workspace.SetBounds(left + colW + gap, y, colW, h);
+                    y += h + gap;
+                }
+                else
+                {
+                    if (_security.Visible)
                     {
-                        int colW = (inner - gap) / 2;
-                        int h = Math.Max(_plan.NeededHeight(colW), _security.NeededHeight(colW));
-                        _plan.SetBounds(left, y, colW, h);
-                        _security.SetBounds(left + colW + gap, y, colW, h);
+                        int h = _security.NeededHeight(inner);
+                        _security.SetBounds(left, y, inner, h);
                         y += h + gap;
                     }
-                    else
+                    if (_workspace.Visible)
                     {
-                        int h = _plan.Visible ? _plan.NeededHeight(inner) : 0;
-                        if (h > 0) { _plan.SetBounds(left, y, inner, h); y += h + gap; }
-                        h = _security.Visible ? _security.NeededHeight(inner) : 0;
-                        if (h > 0) { _security.SetBounds(left, y, inner, h); y += h + gap; }
+                        int h = _workspace.NeededHeight(inner);
+                        _workspace.SetBounds(left, y, inner, h);
+                        y += h + gap;
                     }
-                }
-
-                if (_workspace.Visible)
-                {
-                    int h = _workspace.NeededHeight(inner);
-                    _workspace.SetBounds(left, y, inner, h);
-                    y += h + gap;
-                }
-
-                if (_usage.Visible)
-                {
-                    int h = _usage.NeededHeight(inner);
-                    _usage.SetBounds(left, y, inner, h);
-                    y += h + gap;
                 }
 
                 if (_accountsHeading.Visible)
@@ -484,7 +416,7 @@ namespace JoeBrowser
                 BackColor = Theme.Bg;
                 _eyebrow = eyebrow;
                 _glyph = glyph;
-                Primary = MakeButton("", "crown", BtnKind.Primary);
+                Primary = MakeButton("", "settings", BtnKind.Primary);
                 Secondary = MakeButton("", "shield", BtnKind.Soft);
                 Controls.Add(Primary);
                 Controls.Add(Secondary);
@@ -642,108 +574,5 @@ namespace JoeBrowser
             }
         }
 
-        /// <summary>
-        /// Where the account stands inside its plan, drawn rather than written: a bar for the
-        /// profile slots in use, the days the subscription still runs, and the invite code with
-        /// the days it has earned. The plan card says what the plan is; this card says where the
-        /// account stands inside it.
-        /// </summary>
-        private sealed class UsageCard : Control
-        {
-            private int _used, _limit;          // _limit <= 0 means unlimited
-            private int _daysLeft = -1;         // -1: not applicable
-            private string _invite = "";
-            private int _earned;
-            private readonly JBButton _copy;
-
-            public UsageCard()
-            {
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-                         ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-                Ui.Opaque(this);
-                BackColor = Theme.Bg;
-                _copy = MakeButton(L10n.T("acct.referral.copy"), "copy", BtnKind.Soft);
-                _copy.Click += delegate
-                {
-                    try { if (!string.IsNullOrEmpty(_invite)) Clipboard.SetText(_invite); } catch { }
-                };
-                Controls.Add(_copy);
-            }
-
-            public void Reload()
-            {
-                _used = UsedProfiles();
-                _limit = Plan.IsPro ? 0 : Entitlements.FreeProfiles; // 0 = unlimited
-                var until = Plan.Until;
-                _daysLeft = (!Plan.IsLifetime && Plan.IsPro && until != null)
-                    ? Math.Max(0, (int)Math.Ceiling((until.Value.ToLocalTime() - DateTime.Now).TotalDays)) : -1;
-                try { _invite = Referral.MyCode ?? ""; _earned = Referral.EarnedDays(); }
-                catch { _invite = ""; _earned = 0; }
-                _copy.Visible = !string.IsNullOrEmpty(_invite);
-                Invalidate();
-            }
-
-            public int NeededHeight(int width)
-            {
-                int lines = Theme.LineHeight(Theme.H3) + Ui.S(8);
-                int bar = Ui.S(8) + Ui.S(10);
-                return Ui.S(40) + lines + bar + Ui.S(14);
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                var g = e.Graphics;
-                Ui.Quality(g);
-                g.Clear(Theme.Bg);
-                var box = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-                Ui.Fill(g, box, Ui.S(Theme.CardRadius), Theme.Card);
-                Ui.Stroke(g, box, Ui.S(Theme.CardRadius), Theme.Line);
-
-                float pad = Ui.S(18);
-                float y = Ui.S(14);
-                Ui.Text(g, L10n.T("acct.usage.head"), Theme.Micro, Theme.TextFaint, pad, y, Width - pad * 2 - Ui.S(130));
-                y += Theme.LineHeight(Theme.Micro) + Ui.S(4);
-
-                string slots = _limit <= 0
-                    ? _used + L10n.T("acct.usage.unlimited")
-                    : _used + " / " + _limit + L10n.T("acct.usage.profiles");
-                Color slotColor = _limit > 0 && _used >= _limit ? Theme.Warn : Theme.Text;
-                Ui.Text(g, slots, Theme.H3, slotColor, pad, y, Width - pad * 2 - Ui.S(130));
-                y += Theme.LineHeight(Theme.H3) + Ui.S(8);
-
-                /* The bar. Square ends, like every corner in this app. */
-                float barW = Math.Max(Ui.S(40), Width - pad * 2);
-                var track = new RectangleF(pad, y, barW, Ui.S(8));
-                Ui.Fill(g, track, Ui.S(Theme.ButtonRadius), Theme.Input);
-                float frac = _limit > 0 ? Math.Min(1f, _used / (float)_limit) : 1f;
-                var fillR = new RectangleF(pad, y, Math.Max(0f, barW * frac), Ui.S(8));
-                if (fillR.Width > 0.5f)
-                    Ui.Fill(g, fillR, Ui.S(Theme.ButtonRadius),
-                        _limit > 0 && _used >= _limit ? Theme.Warn : Theme.Accent);
-
-                float rightX = Width - pad - Ui.S(120);
-                float rightW = Ui.S(120);
-                float ry = Ui.S(12);
-                if (_daysLeft >= 0)
-                {
-                    string days = _daysLeft == 1 ? "1 day left" : _daysLeft + L10n.T("acct.usage.daysleft");
-                    Ui.Text(g, days, Theme.Body, _daysLeft <= 3 ? Theme.Warn : Theme.TextDim, rightX, ry, rightW);
-                    ry += Theme.LineHeight(Theme.Body) + Ui.S(6);
-                }
-                if (!string.IsNullOrEmpty(_invite))
-                {
-                    if (_earned > 0)
-                        Ui.Text(g, "+" + _earned + L10n.T("acct.referral.earned"), Theme.Body, Theme.Success, rightX, ry, rightW);
-                    Ui.Text(g, _invite, Theme.Body, Theme.Text, rightX, ry + (_earned > 0 ? Theme.LineHeight(Theme.Body) + Ui.S(4) : 0), rightW);
-                }
-            }
-
-            protected override void OnResize(EventArgs e)
-            {
-                base.OnResize(e);
-                int bw = _copy.PreferredWidth(Ui.S(96));
-                _copy.SetBounds(Width - Ui.S(18) - bw, Ui.S(12), bw, Ui.S(32));
-            }
-        }
     }
 }

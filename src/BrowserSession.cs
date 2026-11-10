@@ -137,7 +137,7 @@ namespace JoeBrowser
             if (browser == null || !browser.Found)
                 browser = BrowserLocator.Detect(pref, custom);
             if (!browser.Found)
-                throw new InvalidOperationException("No browser found.\r\n\r\nInstall Google Chrome, Microsoft Edge, Brave or Firefox, or set a browser path in Settings.");
+                throw new InvalidOperationException("No browser found.\r\n\r\nJoe Browser can download its own Chromium automatically (open the Browsers page), or you can install Chrome, Edge, Brave or Firefox and set a browser path in Settings.");
             s.Browser = browser;
             s._browserFullVersion = browser.Version;
             s._browserIsBrave = browser.IsBrave;
@@ -292,7 +292,13 @@ namespace JoeBrowser
                enabled. Previously the header was stamped through Network.setExtraHTTPHeaders,
                which required Network.enable - the single clearest indication to a page that the
                browser is under remote control. */
-            if (!string.IsNullOrEmpty(fp.AcceptLanguage)) args.Add("--accept-lang=\"" + fp.AcceptLanguage + "\"");
+            if (!string.IsNullOrEmpty(fp.AcceptLanguage))
+            {
+                /* A hand-edited header carrying a quote or a newline would corrupt the whole
+                   command line, so those characters never reach the flag. */
+                string acc = fp.AcceptLanguage.Replace("\"", "").Replace("\r", "").Replace("\n", "").Trim();
+                if (acc.Length > 0) args.Add("--accept-lang=\"" + acc + "\"");
+            }
             args.Add("--window-size=" + winW + "," + winH);
             /* Chrome features this app turns off everywhere. DnsOverHttps so every name is
                resolved at the proxy rather than by a public resolver the browser chose itself,
@@ -438,32 +444,48 @@ namespace JoeBrowser
             s._proc.EnableRaisingEvents = true;
             s._proc.Exited += delegate { s.Cleanup(); };
 
-            var ready = Stopwatch.StartNew();
-            string wsUrl = await WaitForEndpointAsync(port, s._proc, 30000).ConfigureAwait(false);
-            if (wsUrl == null)
+            /* Everything after Process.Start can still fail - a dead endpoint, a WebSocket the
+               browser refused. Without this wrapper the Chrome process kept running headless
+               with the debug port open, and the profile stayed locked by a browser nobody
+               could see. */
+            try
             {
-                s.Cleanup();
-                throw new InvalidOperationException("The browser started but its debugging endpoint was not reachable.\r\nTry updating Chrome or Edge.");
+                var ready = Stopwatch.StartNew();
+                string wsUrl = await WaitForEndpointAsync(port, s._proc, 30000).ConfigureAwait(false);
+                if (wsUrl == null)
+                {
+                    try { s._proc.Kill(); } catch { }
+                    try { s._proc.WaitForExit(3000); } catch { }
+                    s.Cleanup();
+                    throw new InvalidOperationException("The browser started but its debugging endpoint was not reachable.\r\nTry updating Chrome or Edge.");
+                }
+                Log.Info("Browser debug endpoint ready in " + ready.ElapsedMilliseconds + " ms");
+
+                s._cdp = await CdpConnection.ConnectAsync(wsUrl, 10000).ConfigureAwait(false);
+                s._cdp.Closed += delegate { s.Cleanup(); };
+
+                // Attach at the browser level so tabs, windows and popups opened later are stamped too;
+                // a page target connection only ever covers the single tab that existed at launch.
+                s._cdp.Event += s.OnCdpEvent;
+                await s.TrySend("Target.setDiscoverTargets", new Dictionary<string, object> { { "discover", true } }, null).ConfigureAwait(false);
+                await s.TrySend("Target.setAutoAttach", new Dictionary<string, object>
+                {
+                    { "autoAttach", true },
+                    { "waitForDebuggerOnStart", false },
+                    { "flatten", true }
+                }, null).ConfigureAwait(false);
+
+                await s.AttachExistingTargetsAsync().ConfigureAwait(false);
+                Log.Info("Fingerprint applied in " + ready.ElapsedMilliseconds + " ms; profile ready");
+                return s;
             }
-            Log.Info("Browser debug endpoint ready in " + ready.ElapsedMilliseconds + " ms");
-
-            s._cdp = await CdpConnection.ConnectAsync(wsUrl, 10000).ConfigureAwait(false);
-            s._cdp.Closed += delegate { s.Cleanup(); };
-
-            // Attach at the browser level so tabs, windows and popups opened later are stamped too;
-            // a page target connection only ever covers the single tab that existed at launch.
-            s._cdp.Event += s.OnCdpEvent;
-            await s.TrySend("Target.setDiscoverTargets", new Dictionary<string, object> { { "discover", true } }, null).ConfigureAwait(false);
-            await s.TrySend("Target.setAutoAttach", new Dictionary<string, object>
+            catch
             {
-                { "autoAttach", true },
-                { "waitForDebuggerOnStart", false },
-                { "flatten", true }
-            }, null).ConfigureAwait(false);
-
-            await s.AttachExistingTargetsAsync().ConfigureAwait(false);
-            Log.Info("Fingerprint applied in " + ready.ElapsedMilliseconds + " ms; profile ready");
-            return s;
+                try { if (!s._proc.HasExited) s._proc.Kill(); } catch { }
+                try { s._proc.WaitForExit(3000); } catch { }
+                s.Cleanup();
+                throw;
+            }
         }
 
         /// <summary>
@@ -560,12 +582,18 @@ namespace JoeBrowser
                     url, "", started);
                 return;
             }
-            if (method == "Page.titleUpdated" || method == "Page.frameNavigated")
+            if (method == "Target.targetInfoChanged")
             {
-                /* Best effort: the title usually arrives after the document starts, so the
-                   history entry is rewritten with it rather than waiting to record the visit. */
-                string t = Str(args, "title");
-                if (!string.IsNullOrEmpty(t) && Profile != null) HistoryStore.SetLastTitle(Profile.Id, t);
+                /* Page.titleUpdated does not exist in CDP, and the frameNavigated half of the
+                   old check was unreachable - every frameNavigated returned further above. The
+                   title actually arrives on the target info, so history entries finally carry
+                   the page's title instead of staying blank forever. */
+                var ti = Get<Dictionary<string, object>>(args, "targetInfo");
+                if (ti != null && Str(ti, "type") == "page" && Profile != null)
+                {
+                    string t = Str(ti, "title");
+                    if (!string.IsNullOrEmpty(t)) HistoryStore.SetLastTitle(Profile.Id, t);
+                }
             }
             if (method == "Page.navigatedWithinDocument")
             {
@@ -612,6 +640,10 @@ namespace JoeBrowser
             if (fp == null) return;
             try
             {
+                /* Same resolution the page stamp does: a stored UA resolved under an older
+                   browser build would make a worker that attached before the first page stamp
+                   report a different agent than the page does. */
+                FingerprintFactory.ResolveUserAgent(fp, Browser);
                 string lang = string.IsNullOrEmpty(fp.Language) ? "en-US" : fp.Language;
                 string baseLang = lang.Split('-')[0];
                 string[] languages = lang.IndexOf('-') > 0 ? new[] { lang, baseLang } : new[] { lang };
@@ -737,7 +769,11 @@ namespace JoeBrowser
         private void LaunchFirefox(FingerprintConfig fp, string dataDir, string startUrl)
         {
             string firefoxDir = Path.Combine(dataDir, "firefox");
-            WriteFirefoxPrefs(firefoxDir, fp);
+            /* The prefs ARE the anti-detect and the anti-leak layer for Firefox. A profile that
+               could not be written would have launched with network.proxy.type=0 - the user's
+               real IP on a proxied profile - so a failed write aborts the launch instead. */
+            if (!WriteFirefoxPrefs(firefoxDir, fp))
+                throw new InvalidOperationException("The Firefox profile could not be written to disk, so this browser cannot start safely.\r\nCheck that the app data folder is writable.");
 
             var args = new List<string>();
             args.Add("-no-remote");
@@ -754,13 +790,20 @@ namespace JoeBrowser
                 WorkingDirectory = Path.GetDirectoryName(Browser.Path)
             };
 
-            _proc = Process.Start(psi);
-            if (_proc == null) throw new InvalidOperationException("Could not start Firefox.");
+            try { _proc = Process.Start(psi); }
+            catch
+            {
+                /* A failed start used to leak the profile lock and the relay: the directory
+                   lock only frees when Cleanup runs. */
+                Cleanup();
+                throw;
+            }
+            if (_proc == null) { Cleanup(); throw new InvalidOperationException("Could not start Firefox."); }
             _proc.EnableRaisingEvents = true;
             _proc.Exited += delegate { Cleanup(); };
         }
 
-        private void WriteFirefoxPrefs(string dir, FingerprintConfig fp)
+        private bool WriteFirefoxPrefs(string dir, FingerprintConfig fp)
         {
             try
             {
@@ -833,10 +876,12 @@ namespace JoeBrowser
                 }
 
                 File.WriteAllText(Path.Combine(dir, "prefs.js"), sb.ToString(), new UTF8Encoding(false));
+                return true;
             }
             catch (Exception ex)
             {
                 Log.Error("Firefox prefs write failed", ex);
+                return false;
             }
         }
 
@@ -1748,6 +1793,10 @@ namespace JoeBrowser
             if (Interlocked.Exchange(ref _closedRaised, 1) == 1) return;
             try { if (_cdp != null) _cdp.Dispose(); } catch { }
             try { if (_relay != null) _relay.Dispose(); } catch { }
+            /* Dispose alone leaves the browser process alive: the endpoint-timeout path used to
+               strand a headless Chrome with an open debug port while the profile lock was
+               already released. The normal path is a no-op - the process has already exited. */
+            try { if (_proc != null && !_proc.HasExited) _proc.Kill(); } catch { }
             try { if (_proc != null) _proc.Dispose(); } catch { }
             try { if (_dirLock != null) { _dirLock.Close(); _dirLock = null; } } catch { }
             /* A profile marked as a fresh session is wiped here, on the way out, not when the

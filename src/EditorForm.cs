@@ -253,7 +253,7 @@ namespace JoeBrowser
             t.Value = value ?? "";
             t.Placeholder = placeholder;
             t.Icon = icon;
-            if (multiline) t.PadTop = Ui.S(10);
+            if (multiline) t.PadTop = 8;   /* paint applies Ui.S once - match ToolDialog */
             t.Height = Ui.S(height);
             parent.Controls.Add(t);
             return t;
@@ -306,6 +306,15 @@ namespace JoeBrowser
             _browserKind.SelectedIndexChanged += delegate
             {
                 if (_suppress) return;
+                /* A stale custom path must not silently force the kind back to "custom" on
+                   save: a leftover folder in the path box would override the browser the user
+                   just picked. */
+                if (_browserKind.Value != "custom" && _browserPath.Value.Length > 0)
+                {
+                    _suppress = true;
+                    _browserPath.Value = "";
+                    _suppress = false;
+                }
                 UpdateBrowserFetchUi();
                 LayoutAll();
             };
@@ -461,6 +470,10 @@ namespace JoeBrowser
         {
             string key = CurrentKindKey();
             if (!BrowserFetcher.Supports(key) || BrowserFetcher.IsInstalled(key)) return;
+            /* A second click during a download used to open a second dialog and race two
+               installs into the same folder. */
+            if (_fetching) return;
+            _fetching = true;
             string label = BrowserFetcher.Label(key);
 
             var dlg = new DownloadDialog("Get " + label);
@@ -470,19 +483,25 @@ namespace JoeBrowser
             try
             {
                 await BrowserFetcher.InstallAsync(key, dlg.UpdateProgress, dlg.Token);
+                /* The dialog is modeless: it may have been closed (or the whole editor
+                   disposed) while the download ran. Touching the controls after that threw
+                   into the catch below, whose Fail touched them again. */
+                if (IsDisposed) return;
                 dlg.Close();
                 BuildBrowserOptions(key);
             }
-            catch (OperationCanceledException) { dlg.Close(); }
+            catch (OperationCanceledException) { if (!IsDisposed) dlg.Close(); }
             catch (Exception ex)
             {
-                dlg.Close();
-                Fail(0, ShortLine(ex));
+                if (!IsDisposed) { dlg.Close(); Fail(0, ShortLine(ex)); }
             }
-            finally { _suppress = false; }
+            finally { _suppress = false; _fetching = false; }
+            if (IsDisposed) return;
             UpdateBrowserFetchUi();
             LayoutAll();
         }
+
+        private bool _fetching;
 
         /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>
         private void FetchBrowser() { Guarded.Run("FetchBrowser", this, delegate { return FetchBrowserCore(); }); }
@@ -595,6 +614,9 @@ namespace JoeBrowser
                 _fp.AutoUserAgent = !manualUa;
                 RefreshFingerprintUi();
                 _ua.Value = _fp.UserAgentOverride;
+                /* Re-rolling to a phone shows the OS-version row; the stale bounds of the new
+                   row used to overlap its neighbours until something else laid out. */
+                LayoutAll();
                 SetError("");
             };
             _tabFp.Controls.Add(_regen);
@@ -1657,6 +1679,17 @@ namespace JoeBrowser
                 _name.Box.Focus();
                 return;
             }
+            /* Warn, do not block: two profiles with the same name are legal, but a user who
+               just typed a name a sibling already has probably did not mean it. */
+            foreach (var s in _siblings)
+            {
+                if (s == null || s.Id == _profile.Id) continue;
+                if (string.Equals((s.Name ?? "").Trim(), name, StringComparison.OrdinalIgnoreCase))
+                {
+                    SetError("\"" + name + "\" is already another profile's name - saved, but you may want to rename one.");
+                    break;
+                }
+            }
 
             string type = ProxyTypeFromUi();
             string host = _host.Value.Trim();
@@ -1834,8 +1867,12 @@ namespace JoeBrowser
             }
             if (keyData == (Keys.Control | Keys.D))
             {
-                _tabs.SelectedIndex = 3;
-                TestProxy();
+                /* Same busy guard the button has: Ctrl+D used to fire concurrent tests. */
+                if (_testBtn.Enabled)
+                {
+                    _tabs.SelectedIndex = 3;
+                    TestProxy();
+                }
                 return true;
             }
             return base.ProcessCmdKey(ref msg, keyData);

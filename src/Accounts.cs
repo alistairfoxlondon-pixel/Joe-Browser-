@@ -12,10 +12,7 @@ namespace JoeBrowser
     public class Account
     {
         public string Email { get; set; }
-        public string Hash { get; set; }          // PBKDF2 payload, null for Google-only sign-in
-        public string GoogleId { get; set; }      // Google subject id when linked
-        public string GoogleName { get; set; }
-        public string GooglePicture { get; set; }
+        public string Hash { get; set; }          // PBKDF2 payload (salt$hash)
         public string DisplayName { get; set; }
         public string Created { get; set; }
         public string LastLogin { get; set; }
@@ -24,7 +21,7 @@ namespace JoeBrowser
     }
 
     /// <summary>
-    /// The local account store. Sign-up, sign-in, Google linking and 2FA secrets all live in
+    /// The local account store. Sign-up, sign-in and 2FA secrets all live in
     /// one JSON file under the app data root, protected with DPAPI so another Windows user
     /// cannot simply read the hashes.
     /// </summary>
@@ -135,7 +132,15 @@ namespace JoeBrowser
                     return Encoding.UTF8.GetString(ProtectedData.Unprotect(
                         Convert.FromBase64String(stored.Substring(6)), null, DataProtectionScope.CurrentUser));
                 }
-                catch (Exception ex) { Log.Error("Cannot decrypt accounts", ex); return "[]"; }
+                catch (Exception ex)
+                {
+                    /* A DPAPI failure must NOT read as an empty store: an empty list would be
+                       treated as valid and the next save would atomically replace the real
+                       file with nothing. Null makes Load throw, set _unreadable, and back the
+                       file up instead - the accounts survive until the store can be read. */
+                    Log.Error("Cannot decrypt accounts", ex);
+                    return null;
+                }
             }
             if (stored.StartsWith("b64:", StringComparison.Ordinal))
                 return Encoding.UTF8.GetString(Convert.FromBase64String(stored.Substring(4)));
@@ -178,7 +183,8 @@ namespace JoeBrowser
         /// <summary>
         /// Registers a new email account. No verification mail is sent - the product asks for
         /// an address and a password and the account exists immediately.
-        /// Returns an error string, or null on success.
+        /// Returns an error string, or null on success. The duplicate check and the save run
+        /// under one lock, so two windows registering the same address cannot both pass.
         /// </summary>
         public static string Register(string email, string password, string displayName)
         {
@@ -186,7 +192,6 @@ namespace JoeBrowser
             if (!LooksLikeEmail(email)) return "Please enter a valid email address.";
             if (string.IsNullOrEmpty(password) || password.Length < 6)
                 return "The password needs at least 6 characters.";
-            if (FindByEmail(email) != null) return "An account with this email already exists.";
 
             string salt = NewSalt();
             var a = new Account
@@ -196,9 +201,14 @@ namespace JoeBrowser
                 DisplayName = string.IsNullOrWhiteSpace(displayName) ? email.Split('@')[0] : displayName.Trim(),
                 Created = DateTime.UtcNow.ToString("o")
             };
-            var list = Load();
-            list.Add(a);
-            if (!Save(list)) return "The account could not be stored on this PC. Nothing was saved - please try again.";
+            lock (_gate)
+            {
+                var list = Load();
+                if (list.FirstOrDefault(x => Normalize(x.Email) == Normalize(email)) != null)
+                    return "An account with this email already exists.";
+                list.Add(a);
+                if (!Save(list)) return "The account could not be stored on this PC. Nothing was saved - please try again.";
+            }
             return null;
         }
 
@@ -206,12 +216,20 @@ namespace JoeBrowser
         {
             var a = FindByEmail(email);
             if (a == null || string.IsNullOrEmpty(a.Hash)) return false;
-            int i = a.Hash.IndexOf('$');
-            if (i <= 0) return false;
-            string salt = a.Hash.Substring(0, i);
-            string expect = a.Hash.Substring(i + 1);
-            string got = HashSecret(password ?? "", salt);
-            return FixedTimeEquals(expect, got);
+            try
+            {
+                int i = a.Hash.IndexOf('$');
+                if (i <= 0) return false;
+                string salt = a.Hash.Substring(0, i);
+                string expect = a.Hash.Substring(i + 1);
+                string got = HashSecret(password ?? "", salt);
+                return FixedTimeEquals(expect, got);
+            }
+            catch
+            {
+                /* A stored hash with a corrupt salt must not crash the sign-in dialog. */
+                return false;
+            }
         }
 
         private static bool FixedTimeEquals(string a, string b)
@@ -222,47 +240,13 @@ namespace JoeBrowser
             return diff == 0;
         }
 
-        /// <summary>
-        /// Signs in with a Google identity. The account is created on first use, so the
-        /// Google button is also the sign-up button.
-        /// </summary>
-        public static Account SignInGoogle(string googleId, string email, string name, string picture)
-        {
-            if (string.IsNullOrEmpty(googleId)) return null;
-            var list = Load();
-            var a = list.FirstOrDefault(x => x.GoogleId == googleId);
-            if (a == null && !string.IsNullOrEmpty(email)) a = list.FirstOrDefault(x => Normalize(x.Email) == Normalize(email));
-            if (a == null)
-            {
-                a = new Account
-                {
-                    Email = string.IsNullOrEmpty(email) ? googleId + "@google.local" : email,
-                    GoogleId = googleId,
-                    DisplayName = string.IsNullOrWhiteSpace(name) ? "Google user" : name,
-                    GoogleName = name,
-                    GooglePicture = picture,
-                    Created = DateTime.UtcNow.ToString("o")
-                };
-                list.Add(a);
-            }
-            else
-            {
-                a.GoogleId = googleId;
-                if (!string.IsNullOrEmpty(name)) a.GoogleName = name;
-                if (!string.IsNullOrEmpty(picture)) a.GooglePicture = picture;
-            }
-            a.LastLogin = DateTime.UtcNow.ToString("o");
-            if (!Save(list)) return null;   /* sign-in state not persisted - caller treats it as failure */
-            return a;
-        }
-
         public static void TouchLogin(string email)
         {
             var list = Load();
             var a = list.FirstOrDefault(x => Normalize(x.Email) == Normalize(email));
             if (a == null) return;
             a.LastLogin = DateTime.UtcNow.ToString("o");
-            Save(list);
+            if (!Save(list)) Log.Error("Last login could not be recorded for " + email);
         }
 
         public static void Update(Account updated)
@@ -275,9 +259,6 @@ namespace JoeBrowser
                 a.Hash = updated.Hash;
                 a.PinHash = updated.PinHash;
                 a.TotpSecret = updated.TotpSecret;
-                a.GoogleId = updated.GoogleId;
-                a.GoogleName = updated.GoogleName;
-                a.GooglePicture = updated.GooglePicture;
                 a.DisplayName = updated.DisplayName;
             }
             if (!Save(list)) throw new InvalidOperationException("The account could not be saved on this PC.");
@@ -329,11 +310,13 @@ namespace JoeBrowser
             return a == null ? null : a.TotpSecret;
         }
 
-        public static void Delete(string email)
+        /// <summary>Removes an account. False when the store refused the write, so the caller
+        /// can say the account is still there rather than pretending it is gone.</summary>
+        public static bool Delete(string email)
         {
             var list = Load();
             list.RemoveAll(x => Normalize(x.Email) == Normalize(email));
-            Save(list);
+            return Save(list);
         }
 
         private static string Normalize(string email)

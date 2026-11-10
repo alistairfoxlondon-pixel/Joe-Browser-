@@ -51,8 +51,18 @@ namespace JoeBrowser
                     }
                     form.BeginInvoke(new Action(delegate
                     {
-                        if (busy != null) busy(false);
-                        if (ex != null) Report(action, owner, ex);
+                        try
+                        {
+                            if (busy != null) busy(false);
+                            if (ex != null) Report(action, owner, ex);
+                        }
+                        catch (Exception inner)
+                        {
+                            /* A form disposed between the check and this dispatch used to let the
+                               exception reach the crash dialog - the exact thing this class is
+                               here to prevent. */
+                            Log.Error(action + " (dispatch)", inner);
+                        }
                     }));
                 }
                 catch
@@ -77,7 +87,7 @@ namespace JoeBrowser
             else if (ex is TaskCanceledException || ex is OperationCanceledException)
                 hint = "\n\nThe step was cancelled before it finished.";
 
-            try { ConfirmForm.Tell(owner, "That did not work", ex.Message, (action + "." + hint).Trim()); }
+            try { ConfirmForm.Tell(owner, "That did not work", ex.Message, ("" + hint).Trim()); }
             catch { }
         }
     }

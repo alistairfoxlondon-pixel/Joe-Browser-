@@ -41,7 +41,10 @@ namespace JoeBrowser
 
         private static readonly string[] CookieFiles =
         {
-            "Network\\Cookies", "Network\\Cookies-journal", "Cookies", "Cookies-journal"
+            "Network\\Cookies", "Network\\Cookies-journal", "Cookies", "Cookies-journal",
+            /* Chromium keeps a WAL beside the cookie database; deleting the database alone let
+               cookies resurrect from it on the next start. */
+            "Network\\Cookies-wal", "Cookies-wal"
         };
 
         public static string DirFor(Profile p)
@@ -90,10 +93,12 @@ namespace JoeBrowser
 
         public static string Human(long bytes)
         {
+            /* Invariant formatting: a German locale printed "1,5 MB" here while every parser
+               in the app read the invariant decimal point. */
             if (bytes < 1024) return bytes + " B";
-            if (bytes < 1024 * 1024) return (bytes / 1024.0).ToString("F0") + " KB";
-            if (bytes < 1024L * 1024 * 1024) return (bytes / 1048576.0).ToString("F1") + " MB";
-            return (bytes / 1073741824.0).ToString("F2") + " GB";
+            if (bytes < 1024 * 1024) return (bytes / 1024.0).ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " KB";
+            if (bytes < 1024L * 1024 * 1024) return (bytes / 1048576.0).ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " MB";
+            return (bytes / 1073741824.0).ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " GB";
         }
 
         /// <summary>
@@ -106,8 +111,14 @@ namespace JoeBrowser
             if (p == null) throw new ArgumentNullException("p");
             string dir = DirFor(p);
 
-            if (live != null && live.IsRunning && !live.IsFirefox)
+            if (live != null && live.IsRunning)
             {
+                /* A live Firefox profile goes straight to disk: its clear must refuse the same
+                   way a live Chromium profile refuses when CDP declines - deleting cookie and
+                   cache files under a running browser corrupts the store and the clear
+                   silently fails or throws mid-walk. */
+                if (live.IsFirefox)
+                    throw new InvalidOperationException("Close the profile before clearing its data.");
                 if (scope == ClearScope.Everything)
                     throw new InvalidOperationException("Close the profile before erasing all of its data.");
                 bool ok = await live.ClearStorageAsync(scope).ConfigureAwait(false);
@@ -148,7 +159,8 @@ namespace JoeBrowser
                         string path = Path.Combine(root, f);
                         if (!File.Exists(path)) continue;
                         try { freed += new FileInfo(path).Length; File.Delete(path); }
-                        catch { }
+                        catch { /* counted only when the delete succeeds below; a throw here
+                                   leaves the file in place and the caller sees no freed bytes */ }
                     }
                 }
             }

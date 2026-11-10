@@ -147,8 +147,6 @@ namespace JoeBrowser
             float rad = Ui.S(Theme.ButtonRadius);
             Ui.Fill(g, r, rad, Theme.Input);
             Ui.Stroke(g, r, rad, Theme.Line, 1f);
-            using (var pen = new Pen(_open || Focused ? Theme.Accent : Theme.InputUnderline, Ui.Hair))
-                g.DrawLine(pen, Ui.S(5), Height - 1.5f, Width - Ui.S(5), Height - 1.5f);
 
             LangItem item = _selected >= 0 && _selected < _items.Count ? _items[_selected] : null;
             float x = Ui.S(10);
@@ -165,13 +163,12 @@ namespace JoeBrowser
                 x += ic + Ui.S(10);
             }
 
-            string title = item != null ? item.Title : "Select a language";
+            string title = item != null ? item.Title : L10n.T("lang.pick");
             Color fg = item != null ? Theme.Text : Theme.TextFaint;
             Ui.Text(g, title, Font, fg, x, (Height - Font.GetHeight(g)) / 2f, Math.Max(Ui.S(20), Width - x - Ui.S(46)));
             if (item != null && !string.IsNullOrEmpty(item.Subtitle))
             {
-                float tw;
-                using (var tmp = CreateGraphics()) tw = Ui.Measure(tmp, title, Font).Width;
+                float tw = Ui.Measure(Ui.Ruler, title, Font).Width;
                 float remain = Width - x - tw - Ui.S(46);
                 if (remain > Ui.S(60))
                     Ui.Text(g, item.Subtitle, Theme.Caption, Theme.TextFaint,
@@ -188,10 +185,20 @@ namespace JoeBrowser
         /// <summary>Searchable owner-drawn popup. Kept as a nested class so the picker owns it.</summary>
         private sealed class Popup : Form
         {
+            /// <summary>The popup's list repaints on every highlight change; unbuffered, it
+            /// flickered like a strobe.</summary>
+            private sealed class BufferedPanel : Panel
+            {
+                public BufferedPanel()
+                {
+                    SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+                }
+            }
+
             private readonly JBLangPicker _owner;
             private readonly List<int> _visible = new List<int>();
             private readonly TextBox _search = new TextBox();
-            private readonly Panel _list = new Panel();
+            private readonly Panel _list = new BufferedPanel();
             private int _hi = -1;
             private int _scroll;
 
@@ -240,7 +247,7 @@ namespace JoeBrowser
                 _search.BackColor = Theme.Input;
                 _search.ForeColor = Theme.Text;
                 _search.BorderStyle = BorderStyle.FixedSingle;
-                _search.PlaceholderTextCompat("Search language or country\u2026");
+                _search.PlaceholderTextCompat(L10n.T("lang.search"));
                 _search.TextChanged += delegate { Filter(); };
                 _search.KeyDown += SearchKeyDown;
                 Controls.Add(_search);
@@ -251,6 +258,7 @@ namespace JoeBrowser
                 _list.MouseMove += ListMouseMove;
                 _list.MouseDown += ListMouseDown;
                 _list.MouseWheel += ListMouseWheel;
+                _list.MouseLeave += delegate { if (_hi != -1) { _hi = -1; _list.Invalidate(); } };
                 Controls.Add(_list);
 
                 Filter();
@@ -390,11 +398,28 @@ namespace JoeBrowser
                 if (_visible.Count == 0)
                 {
                     string none = string.IsNullOrWhiteSpace(_search.Text)
-                        ? "No languages available."
-                        : "No language matches \u201c" + _search.Text.Trim() + "\u201d.";
+                        ? L10n.T("lang.none")
+                        : L10n.T("lang.nomatch").Replace("{0}", _search.Text.Trim());
                     Ui.Text(g, none, Theme.Body, Theme.TextFaint, 0,
                         (_list.Height - Theme.Body.GetHeight(g)) / 2f, w, "center");
                 }
+            }
+
+            /* The wheel goes to the control that has focus - the search box - and the native EDIT
+               forwards what it cannot use up the window chain. Without this override the list
+               simply never scrolled, because the panel's own wheel handler never fired. */
+            protected override void WndProc(ref Message m)
+            {
+                const int WM_MOUSEWHEEL = 0x020A;
+                if (m.Msg == WM_MOUSEWHEEL)
+                {
+                    int delta = (short)(((long)m.WParam >> 16) & 0xFFFF);
+                    int max = Math.Max(0, _visible.Count - VisibleRows);
+                    _scroll = Math.Max(0, Math.Min(max, _scroll - (delta > 0 ? 2 : -2)));
+                    _list.Invalidate();
+                    return;
+                }
+                base.WndProc(ref m);
             }
 
             protected override void OnPaint(PaintEventArgs e)

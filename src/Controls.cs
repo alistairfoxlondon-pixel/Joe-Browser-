@@ -90,7 +90,16 @@ namespace JoeBrowser
                 /* Ease-out cubic: fast at the start where the eye wants the answer, gentle at
                    the end where it reads as "settled" rather than "slammed". */
                 float eased = 1f - (1f - t) * (1f - t) * (1f - t);
-                try { it.Step(eased); } catch { continue; }
+                try { it.Step(eased); }
+                catch
+                {
+                    /* A step that throws every frame used to stay in the list forever: the
+                       catch skipped the removal, the 16 ms clock never stopped, and the app
+                       burned idle CPU on an exception loop. One failure and the animation is
+                       out. */
+                    lock (_gate) { _items.Remove(it); }
+                    continue;
+                }
                 if (t < 1f) alive = true;
                 else lock (_gate) { _items.Remove(it); }
             }
@@ -828,9 +837,15 @@ namespace JoeBrowser
             /* Square, like every other surface. A window region is also the one place a mistake is
                visible for a whole second: while a context menu is still a plain rectangle the
                default grey border shows at its edge, which is the pale line that flashed when a
-               menu opened before the region was applied. */
+               menu opened before the region was applied. The old region is disposed before it is
+               replaced - WinForms does not do it, and every resize churned one native region. */
             using (var path = Ui.Round(new RectangleF(0, 0, strip.Width, strip.Height), Ui.S(Theme.ButtonRadius)))
-                strip.Region = new Region(path);
+            using (var region = new Region(path))
+            {
+                var old = strip.Region;
+                strip.Region = region;
+                if (old != null) old.Dispose();
+            }
         }
 
         protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
@@ -985,7 +1000,8 @@ namespace JoeBrowser
         /// compile and a future shape can be introduced in one place.</summary>
         public int Radius = Theme.ButtonRadius;
         private string _tip = "";
-        public string Tip { get { return _tip; } set { _tip = value ?? ""; ToolTips.Attach(this, _tip); } }
+        public string Tip { get { return _tip; } set { _tip = value ?? ""; _tipShown = null; ToolTips.Attach(this, _tip); } }
+        private string _tipShown;
         private bool _hover, _down;
 
         /// <summary>Width needed for this button's icon and label, so text is never clipped.</summary>
@@ -1143,7 +1159,15 @@ namespace JoeBrowser
                            one. */
                         float room = Math.Max(Ui.S(8), Width - x - Ui.S(10));
                         Ui.Text(g, Text, Font, fg, x, (Height - Font.GetHeight(g)) / 2f, room);
-                        if (textW > room + 1f) ToolTips.Attach(this, Text);
+                        /* Once per text change, not once per paint: the old per-paint Attach
+                           permanently overwrote whatever Tip the caller had set. When the label
+                           fits again the caller's tip is restored. */
+                        string wantTip = textW > room + 1f ? Text : _tip;
+                        if (!string.Equals(_tipShown, wantTip, StringComparison.Ordinal))
+                        {
+                            _tipShown = wantTip;
+                            ToolTips.Attach(this, wantTip);
+                        }
                     }
                 }
             }
@@ -1243,8 +1267,11 @@ namespace JoeBrowser
                         s = Ui.S(8);
                         sx = (Width - s) / 2f + Ui.S(1);
                         sy = (Height - s) / 2f + Ui.S(1);
-                        g.DrawRectangle(pen, sx, sy, s, s);
+                        /* Back square first and filled: drawn afterwards, its strokes cut
+                           straight through the front square. */
+                        using (var b = new SolidBrush(Theme.Bg)) g.FillRectangle(b, sx - Ui.S(2), sy - Ui.S(2), s, s);
                         g.DrawRectangle(pen, sx - Ui.S(2), sy - Ui.S(2), s, s);
+                        g.DrawRectangle(pen, sx, sy, s, s);
                     }
                     else g.DrawRectangle(pen, sx, sy, s, s);
                 }
@@ -1488,7 +1515,9 @@ namespace JoeBrowser
             Ui.Fill(g, r, rad, Theme.Input);
             if (Tapped)
             {
-                Ui.Stroke(g, r, rad, Theme.Accent, Ui.S(Theme.ButtonRadius));
+                /* A real stroke width - the old call passed a radius constant (0), which only
+                   rendered because Stroke maps any width below 1.2 to the hairline. */
+                Ui.Stroke(g, r, rad, Theme.Accent, Ui.S(1.6f));
             }
             else
             {
@@ -1695,7 +1724,7 @@ namespace JoeBrowser
         /// </summary>
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            if (keyData == Keys.F4 && Items.Count > 0)
+            if ((keyData == Keys.F4 || keyData == (Keys.Alt | Keys.Down)) && Items.Count > 0)
             {
                 if (_open) CloseMenu(); else ShowMenu();
                 return true;
@@ -1725,6 +1754,13 @@ namespace JoeBrowser
                 if (label.StartsWith(_typed, StringComparison.OrdinalIgnoreCase)) { found = i; break; }
             }
             if (found >= 0) SelectedIndex = found;
+            else
+            {
+                /* A letter that matches nothing used to stay in the buffer and block every
+                   further match until the 800 ms idle reset - "G, E, R" after a typo made the
+                   control go deaf. */
+                _typed = "";
+            }
             e.Handled = true;
             base.OnKeyPress(e);
         }
@@ -2188,7 +2224,7 @@ namespace JoeBrowser
             content.Layout += delegate { SyncExtent(); };
 
             _barT = new AnimValue(this);
-            _barT.Set(0.45f);
+            _barT.Set(0f);   /* quiet until the first real scroll reveals it */
             _fade = new Timer { Interval = 350 };
             _fade.Tick += delegate
             {
@@ -2645,7 +2681,15 @@ namespace JoeBrowser
 
         protected override void OnClick(EventArgs e) { _timer.Stop(); Hide(); base.OnClick(e); }
         protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+        /* Hovering the toast stops the countdown, so leaving must start it again - the old code
+           only cleared the flag and the message stayed open forever. */
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hover = false;
+            Invalidate();
+            if (Visible) { _timer.Interval = 1800; _timer.Start(); }
+            base.OnMouseLeave(e);
+        }
 
         public void ReStyle() { Font = Theme.Body; FitHeight(); Invalidate(); }
 

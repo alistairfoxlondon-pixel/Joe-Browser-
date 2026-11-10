@@ -387,6 +387,9 @@ namespace JoeBrowser
                 OpenCount = freshId ? 0 : OpenCount,
                 Created = freshId ? DateTime.Now : Created,
                 LastOpened = freshId ? DateTime.MinValue : LastOpened,
+                FreshSession = FreshSession,
+                BrowserVersion = BrowserVersion,
+                KernelFullVersion = KernelFullVersion,
                 Fp = Fp.Copy(),
                 Proxy = Proxy.Copy(),
                 Tools = Tools == null ? new ToolConfig() : Tools.Copy()
@@ -415,17 +418,6 @@ namespace JoeBrowser
         public bool StartMaximized { get; set; }
         /// <summary>Keep deleted profile JSON in a recycle bin instead of erasing it.</summary>
         public bool UseTrash { get; set; }
-        /// <summary>Google OAuth client id for the Continue with Google button. Belongs to
-        /// the publisher's Google Cloud project and is pasted in once, in Settings.</summary>
-        public string GoogleClientId { get; set; }
-        /// <summary>Optional client secret when the OAuth client was created as "Web" rather
-        /// than "Desktop". Desktop clients leave this empty.</summary>
-        public string GoogleClientSecret { get; set; }
-        /// <summary>Version of the payment terms the user accepted, e.g. "1". Empty means the
-        /// terms have not been accepted on this machine yet.</summary>
-        public string TermsAccepted { get; set; }
-        /// <summary>Referral code entered by this user, if any.</summary>
-        public string ReferralCode { get; set; }
         /// <summary>Record the pages each profile visits, so a URL that was passed through can
         /// be found again. On by default; the History page and Settings can both turn it off.</summary>
         public bool HistoryEnabled { get; set; }

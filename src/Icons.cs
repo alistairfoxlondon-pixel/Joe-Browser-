@@ -122,18 +122,6 @@ namespace JoeBrowser
             d["texture"] = Ch(0xE421);      // canvas noise
             d["wave"] = Ch(0xE798);         // water_drop, audio noise
             d["speed"] = Ch(0xE9E4);
-            // plan, payment and referral
-            d["crown"] = Ch(0xE7EF);        // workspace_premium
-            d["gift"] = Ch(0xE8F6);         // card_giftcard
-            d["wallet"] = Ch(0xE850);       // account_balance_wallet
-            d["receipt"] = Ch(0xEF6E);      // receipt_long
-            d["timer"] = Ch(0xE425);
-            d["hourglass"] = Ch(0xE88B);    // hourglass_empty
-            d["verified"] = Ch(0xEF76);
-            d["rocket"] = Ch(0xEBA7);       // rocket_launch
-            d["qr"] = Ch(0xE00A);           // qr_code_2
-            d["swap"] = Ch(0xEB70);         // currency_exchange
-            d["percent"] = Ch(0xEB58);
             d["paste"] = Ch(0xE14F);        // content_paste
             return d;
         }
@@ -261,9 +249,6 @@ namespace JoeBrowser
             try
             {
                 if (name == "telegram") Telegram(g, box);
-                else if (name == "x") XMark(g, box);
-                else if (name == "youtube") YouTube(g, box);
-                else if (name == "google") Google(g, box);
             }
             finally { g.SmoothingMode = old; }
         }
@@ -286,83 +271,6 @@ namespace JoeBrowser
                 new PointF(x + d * 0.42f, y + d * 0.57f)
             };
             using (var b = new SolidBrush(Color.White)) g.FillPolygon(b, p);
-        }
-
-        private static void XMark(Graphics g, RectangleF box)
-        {
-            float d = Math.Min(box.Width, box.Height);
-            float x = box.X + (box.Width - d) / 2f, y = box.Y + (box.Height - d) / 2f;
-            PointF[] p =
-            {
-                new PointF(x + d * 0.10f, y + d * 0.14f),
-                new PointF(x + d * 0.38f, y + d * 0.14f),
-                new PointF(x + d * 0.50f, y + d * 0.35f),
-                new PointF(x + d * 0.63f, y + d * 0.14f),
-                new PointF(x + d * 0.90f, y + d * 0.14f),
-                new PointF(x + d * 0.63f, y + d * 0.49f),
-                new PointF(x + d * 0.92f, y + d * 0.88f),
-                new PointF(x + d * 0.63f, y + d * 0.88f),
-                new PointF(x + d * 0.49f, y + d * 0.64f),
-                new PointF(x + d * 0.34f, y + d * 0.88f),
-                new PointF(x + d * 0.08f, y + d * 0.88f),
-                new PointF(x + d * 0.38f, y + d * 0.50f)
-            };
-            using (var b = new SolidBrush(Theme.Text)) g.FillPolygon(b, p);
-        }
-
-        /// <summary>
-        /// The four-colour Google "G": a ring split into the brand arcs plus the blue bar that
-        /// runs into the centre. Drawn rather than shipped as a bitmap, because the sign-in
-        /// button uses it at 16 px where a resampled PNG turns into a smudge.
-        /// </summary>
-        private static void Google(Graphics g, RectangleF box)
-        {
-            float d = Math.Min(box.Width, box.Height);
-            float x = box.X + (box.Width - d) / 2f, y = box.Y + (box.Height - d) / 2f;
-            float stroke = Math.Max(1.2f, d * 0.26f);
-            var ring = new RectangleF(x + stroke / 2f, y + stroke / 2f, d - stroke, d - stroke);
-
-            Color blue = Color.FromArgb(0x42, 0x85, 0xF4);
-            Color red = Color.FromArgb(0xEA, 0x43, 0x35);
-            Color yellow = Color.FromArgb(0xFB, 0xBC, 0x05);
-            Color green = Color.FromArgb(0x34, 0xA8, 0x53);
-
-            using (var pen = new Pen(blue, stroke))
-            {
-                pen.StartCap = LineCap.Flat;
-                pen.EndCap = LineCap.Flat;
-                g.DrawArc(pen, ring, 312f, 60f);   // right, above the bar
-                pen.Color = red;
-                g.DrawArc(pen, ring, 190f, 120f);  // over the top
-                pen.Color = yellow;
-                g.DrawArc(pen, ring, 135f, 55f);   // left
-                pen.Color = green;
-                g.DrawArc(pen, ring, 40f, 95f);    // bottom
-            }
-
-            // The blue bar into the centre; its right end meets the blue arc.
-            float barH = stroke * 0.86f;
-            float barLeft = x + d * 0.50f;
-            float barRight = x + d - stroke * 0.10f;
-            using (var b = new SolidBrush(blue))
-                g.FillRectangle(b, barLeft, y + d * 0.5f - barH / 2f, barRight - barLeft, barH);
-        }
-
-        private static void YouTube(Graphics g, RectangleF box)
-        {
-            float w = Math.Min(box.Width, box.Height * 1.4f);
-            float h = w / 1.4f;
-            float x = box.X + (box.Width - w) / 2f, y = box.Y + (box.Height - h) / 2f;
-            using (var path = Ui.Round(new RectangleF(x, y, w, h), h * 0.28f))
-            using (var b = new SolidBrush(Color.FromArgb(0xFF, 0x00, 0x00)))
-                g.FillPath(b, path);
-            PointF[] tri =
-            {
-                new PointF(x + w * 0.42f, y + h * 0.30f),
-                new PointF(x + w * 0.42f, y + h * 0.70f),
-                new PointF(x + w * 0.68f, y + h * 0.50f)
-            };
-            using (var b = new SolidBrush(Color.White)) g.FillPolygon(b, tri);
         }
     }
 }

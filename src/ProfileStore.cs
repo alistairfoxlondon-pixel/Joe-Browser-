@@ -11,7 +11,13 @@ namespace JoeBrowser
     internal class ProfileStore
     {
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("JoeBrowser.Proxy.v1");
-        private readonly JavaScriptSerializer _json = new JavaScriptSerializer();
+        /* Long notes, big extension lists and exported bundles went past the serializer's
+           default ~2 MB cap, which made Save throw and the profile silently stay unsaved. */
+        private readonly JavaScriptSerializer _json = new JavaScriptSerializer
+        {
+            MaxJsonLength = int.MaxValue,
+            RecursionLimit = 256
+        };
 
         /// <summary>
         /// Root override for anything that needs an isolated folder: the release self test
@@ -296,7 +302,14 @@ namespace JoeBrowser
                     }
                     return;
                 }
-                catch (Exception ex) { Log.Error("Cannot move profile to trash", ex); }
+                catch (Exception ex)
+                {
+                    /* The user asked for the recycle bin; falling through to a permanent delete
+                       when the move failed (a locked file, a full disk) destroyed the profile
+                       instead. The delete is refused so the card can say it did not happen. */
+                    Log.Error("Cannot move profile to trash", ex);
+                    throw new IOException("The profile could not be moved to the recycle bin: " + ex.Message, ex);
+                }
             }
 
             try { if (File.Exists(file)) File.Delete(file); }
@@ -434,6 +447,10 @@ namespace JoeBrowser
                     p.Created = DateTime.Now;
                     p.LastOpened = DateTime.MinValue;
                     p.OpenCount = 0;
+                    /* Importing the same file twice produced two identical names with nothing
+                       to tell them apart. The repeats are numbered instead. */
+                    if (result.Any(x => string.Equals(x.Name, p.Name, StringComparison.OrdinalIgnoreCase)))
+                        p.Name = p.Name + " (imported)";
                     result.Add(p);
                 }
                 catch (Exception ex) { Log.Error("Skipping an unreadable profile in import", ex); }
@@ -502,7 +519,7 @@ namespace JoeBrowser
                 "Network", "Session Storage", "Local Storage", "IndexedDB", "File System",
                 "Service Worker", "Cache", "Code Cache", "GPUCache", "DawnCache",
                 "GrShaderCache", "ShaderCache", "Sync Data", "Extension State",
-                "Local Extension Settings", "Managed Extension Settings", "Session Storage"
+                "Local Extension Settings", "Managed Extension Settings"
             };
             foreach (string pattern in files)
             {
@@ -536,12 +553,7 @@ namespace JoeBrowser
                 if (File.Exists(AppPaths.SettingsFile))
                 {
                     var s = _json.Deserialize<AppSettings>(File.ReadAllText(AppPaths.SettingsFile, Encoding.UTF8));
-                    if (s != null)
-                    {
-                        if (s.GoogleClientId != null) s.GoogleClientId = s.GoogleClientId.Trim();
-                        if (s.GoogleClientSecret != null) s.GoogleClientSecret = s.GoogleClientSecret.Trim();
-                        return s;
-                    }
+                    if (s != null) return s;
                 }
             }
             catch (Exception ex)
@@ -563,10 +575,9 @@ namespace JoeBrowser
 
         /// <summary>
         /// Writes settings.json. Throws when the file cannot be written, so a caller that has to
-        /// know - the Google setup, which must not report success and then sign in with nothing -
-        /// can say so. Most callers save while the user is typing and ignore the failure; the
-        /// previous version swallowed everything, which is why a read-only %APPDATA% produced a
-        /// "saved" toast and settings that were gone on the next launch.
+        /// know can say so. Most callers save while the user is typing and ignore the failure;
+        /// the previous version swallowed everything, which is why a read-only %APPDATA%
+        /// produced a "saved" toast and settings that were gone on the next launch.
         ///
         /// The write goes to a temporary file first: a crash or a full disk during the write
         /// used to leave a truncated settings.json, and every launch afterwards silently ran on

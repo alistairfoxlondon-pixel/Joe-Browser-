@@ -285,9 +285,8 @@ namespace JoeBrowser
                 _action.Icon = "download";
                 _action.Text = "Working\u2026";
                 _action.Enabled = false;
-                return;
             }
-            if (Info.Installed)
+            else if (Info.Installed)
             {
                 _action.Kind = BtnKind.Soft;
                 _action.Icon = "folder";
@@ -313,6 +312,9 @@ namespace JoeBrowser
                 _action.Text = "Get it";
             }
             _action.Enabled = !Busy;
+            /* The label changes with the state; the width has to follow or a longer label clips
+               inside the button the resize laid out for the previous text. */
+            OnResize(EventArgs.Empty);
         }
 
         public void ReStyle() { Invalidate(); }
@@ -384,11 +386,11 @@ namespace JoeBrowser
                 : Info.Installed
                     ? (string.IsNullOrEmpty(Info.Version) ? "Installed" : "Installed  \u00b7  " + ShortVersion(Info.Version))
                     : !Info.Checked ? "Could not check, re-scan" : "Not installed";
-            /* Theme has no warning colour of its own, so the amber the toasts use is mixed in
-               place; a plain faint grey would read as another "not installed". */
+            /* Theme.Warn IS the warning colour the toasts use; the amber was hardcoded here and
+               drifted whenever the palette moved. */
             Color statusInk = Busy ? Theme.Accent
                 : Info.Installed || Info.Checked ? Theme.TextDim
-                : Ui.Blend(Theme.TextDim, Color.FromArgb(0xF2, 0xA8, 0x1B), 0.75f);
+                : Ui.Blend(Theme.TextDim, Theme.Warn, 0.75f);
             Ui.Text(g, status, Theme.Caption, statusInk, dr.Right + Ui.S(8), statusY, tw - dot - Ui.S(8));
 
             Ui.Text(g, Info.Desc, Theme.Caption, Theme.TextFaint, x, statusY + capH + Ui.S(2), tw, "left", 1);

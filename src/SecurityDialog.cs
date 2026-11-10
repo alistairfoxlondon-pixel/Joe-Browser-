@@ -14,6 +14,7 @@ namespace JoeBrowser
         private readonly JBLabel _pinStatus, _totpStatus, _error;
         private readonly JBTextBox _pin, _totp;
         private readonly PictureBox _qr;
+        private JBButton _totpRemove;
 
         public SecurityDialog(string email)
         {
@@ -67,6 +68,7 @@ namespace JoeBrowser
 
             var totpRemove = new JBButton { Text = "Turn off 2FA", Kind = BtnKind.Ghost, Location = new Point(left + Ui.S(196), Ui.S(356)), Size = new Size(Ui.S(130), Ui.S(30)) };
             totpRemove.Click += delegate { DisableTotp(); };
+            _totpRemove = totpRemove;
 
             _error = new JBLabel { ForeColor = Theme.Danger, AutoSize = false, Size = new Size(Ui.S(500), Ui.S(20)), Location = new Point(left, Ui.S(396)) };
 
@@ -102,7 +104,13 @@ namespace JoeBrowser
             {
                 string uri = Totp.OtpAuthUri(secret, _email, "Joe Browser");
                 QrCode code = QrCode.Encode(uri);
-                if (code == null) return;
+                if (code == null)
+                {
+                    /* A blank QR box with no word reads as a broken app; the key beside it is
+                       the fallback, so say so. */
+                    Fail("The code could not be generated for this key - enter it by hand instead.");
+                    return;
+                }
                 var old = _qr.Image;
                 _qr.Image = code.ToBitmap(6, 4);
                 if (old != null) old.Dispose();
@@ -110,26 +118,49 @@ namespace JoeBrowser
             catch (Exception ex) { Log.Error("QR render", ex); }
         }
 
+        /// <summary>The QR bitmap is a GDI object; the PictureBox does not dispose it on close.</summary>
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            base.OnFormClosed(e);
+            try
+            {
+                var img = _qr.Image;
+                _qr.Image = null;
+                if (img != null) img.Dispose();
+            }
+            catch { }
+        }
+
         private void Fail(string m) { _error.Text = m; _error.Visible = true; }
 
+        /* Accounts.SetPin/SetTotpSecret throw when the store refuses the write; an uncaught
+           throw here went straight to the crash dialog. */
         private void SavePin()
         {
             _error.Visible = false;
-            string err = Accounts.SetPin(_email, _pin.Box.Text);
-            if (err != null) { Fail(err); return; }
-            _pin.Box.Text = "";
-            RefreshState();
+            try
+            {
+                string err = Accounts.SetPin(_email, _pin.Box.Text);
+                if (err != null) { Fail(err); return; }
+                _pin.Box.Text = "";
+                RefreshState();
+            }
+            catch (Exception ex) { Fail(ex.Message); }
         }
 
         private void EnableTotp(string candidate)
         {
             _error.Visible = false;
-            string code = _totp.Box.Text.Trim();
-            if (string.IsNullOrEmpty(candidate)) { Fail("No setup key to confirm."); return; }
-            if (!Totp.Verify(candidate, code)) { Fail("That code did not match. Check the app and try again."); return; }
-            Accounts.SetTotpSecret(_email, candidate);
-            _totp.Box.Text = "";
-            RefreshState();
+            try
+            {
+                string code = _totp.Box.Text.Trim();
+                if (string.IsNullOrEmpty(candidate)) { Fail("No setup key to confirm."); return; }
+                if (!Totp.Verify(candidate, code)) { Fail("That code did not match. Check the app and try again."); return; }
+                Accounts.SetTotpSecret(_email, candidate);
+                _totp.Box.Text = "";
+                RefreshState();
+            }
+            catch (Exception ex) { Fail(ex.Message); }
         }
 
         private void DisableTotp()
@@ -141,8 +172,12 @@ namespace JoeBrowser
             if (!ConfirmForm.Ask(this, "Turn off two-step code?",
                 "Sign-in will no longer ask for the 6-digit code from your authenticator.",
                 "You can turn it back on here at any time.", "Turn off", BtnKind.Danger)) return;
-            Accounts.SetTotpSecret(_email, null);
-            RefreshState();
+            try
+            {
+                Accounts.SetTotpSecret(_email, null);
+                RefreshState();
+            }
+            catch (Exception ex) { Fail(ex.Message); }
         }
 
         private void RefreshState()
@@ -150,9 +185,13 @@ namespace JoeBrowser
             _pinStatus.Text = Accounts.PinEnabled(_email)
                 ? "A PIN is set. Opening this app asks for it."
                 : "No PIN set. Anyone at this desk can open the app.";
-            _totpStatus.Text = !string.IsNullOrEmpty(Accounts.GetTotpSecret(_email))
+            bool two = !string.IsNullOrEmpty(Accounts.GetTotpSecret(_email));
+            _totpStatus.Text = two
                 ? "2FA is ON: sign-in asks for a 6-digit code from your authenticator."
                 : "2FA is OFF. Enable it to require a rotating code at sign-in.";
+            /* Turning 2FA off when it is off walks the user through a confirm dialog to change
+               nothing. */
+            if (_totpRemove != null) _totpRemove.Enabled = two;
         }
     }
 }

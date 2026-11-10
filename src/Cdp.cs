@@ -21,7 +21,12 @@ namespace JoeBrowser
         private readonly ConcurrentDictionary<int, TaskCompletionSource<Dictionary<string, object>>> _pending =
             new ConcurrentDictionary<int, TaskCompletionSource<Dictionary<string, object>>>();
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
-        private readonly JavaScriptSerializer _json = new JavaScriptSerializer();
+        private readonly JavaScriptSerializer _json = new JavaScriptSerializer
+        {
+            /* Full-HD screenshots and large Runtime.evaluate results go far past the default
+               ~2 MB cap, which made every such call fail as a misleading "timed out". */
+            MaxJsonLength = int.MaxValue
+        };
         /* ClientWebSocket allows one SendAsync at a time. Several targets can be stamped in
            parallel when tabs or popups appear, so writes are serialised here. */
         private readonly SemaphoreSlim _sendLock = new SemaphoreSlim(1, 1);
@@ -43,9 +48,18 @@ namespace JoeBrowser
         {
             var ws = new ClientWebSocket();
             ws.Options.Proxy = null;
-            using (var cts = new CancellationTokenSource(timeoutMs))
+            try
             {
-                await ws.ConnectAsync(new Uri(wsUrl), cts.Token).ConfigureAwait(false);
+                using (var cts = new CancellationTokenSource(timeoutMs))
+                {
+                    await ws.ConnectAsync(new Uri(wsUrl), cts.Token).ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+                /* A refused handshake used to leave the socket alive until finalizers ran. */
+                ws.Dispose();
+                throw;
             }
             return new CdpConnection(ws);
         }

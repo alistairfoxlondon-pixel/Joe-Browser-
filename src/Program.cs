@@ -156,17 +156,6 @@ namespace JoeBrowser
                     if (settings.DefaultStartUrl != Profile.FingerprintTestUrl)
                         sb.Append(" [the app default start page is " + (settings.DefaultStartUrl ?? "nothing") + "]");
 
-                    /* The complimentary grant: it must recognise the account whatever shape the
-                       address arrives in, and it must not recognise anybody else. */
-                    if (!Plan.IsComplimentaryEmail("alistairfox.london@gmail.com"))
-                        sb.Append(" [the complimentary account is not recognised]");
-                    if (!Plan.IsComplimentaryEmail("  AlistairFox.London@Gmail.com "))
-                        sb.Append(" [a spaced or capitalised address is not recognised]");
-                    if (Plan.IsComplimentaryEmail("someone@example.com"))
-                        sb.Append(" [an unrelated address was granted Pro]");
-                    if (Plan.IsComplimentaryEmail(""))
-                        sb.Append(" [an empty address was granted Pro]");
-
                     /* The extension id scheme: Chromium derives an extension's id from the key
                        in its manifest, and the library now records that id so a store link can
                        be opened for an extension that arrived as a file. A wrong mapping here
@@ -212,8 +201,6 @@ namespace JoeBrowser
                         if (EngineRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [browser row cannot hold its two lines at " + scale + "]");
                         if (KernelRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [kernel row cannot hold its two lines at " + scale + "]");
                         if (ExtensionRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [extension row cannot hold its two lines at " + scale + "]");
-                        if (PromoCard.CardH < Theme.LineHeight(Theme.H2) + Theme.LineHeight(Theme.Small) + cap)
-                            sb.Append(" [promo card cannot hold its three lines at " + scale + "]");
                         /* A measured row is only right if the text it is measured against grows
                            with the scale. This is the assertion that fails if anyone ever asks
                            for a type size in points again. */

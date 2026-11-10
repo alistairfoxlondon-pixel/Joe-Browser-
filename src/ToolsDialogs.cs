@@ -72,6 +72,8 @@ namespace JoeBrowser
             Secondary = new JBButton { Kind = BtnKind.Ghost, Text = secondaryText ?? "Cancel", Radius = Theme.ButtonRadius, Height = Theme.Field };
             Secondary.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(Secondary);
+            /* The Esc-undo hint renames this button for a moment; this is what it goes back to. */
+            _secondaryText = Secondary.Text;
         }
 
         /// <summary>Set to validate before the dialog closes. Return false to keep it open.</summary>
@@ -373,11 +375,20 @@ namespace JoeBrowser
                     {
                         field.Value = original;
                         field.Box.SelectAll();
+                        /* The original Secondary caption comes back once every field is back to
+                           its initial value - the old code renamed the button forever, so a
+                           dialog's "Cancel" became a hint for the rest of its life. */
                         _escHinted = true;
                         Secondary.Text = "Press Esc again to close";
                         Secondary.Invalidate();
                         return true;
                     }
+                }
+                if (_escHinted)
+                {
+                    _escHinted = false;
+                    Secondary.Text = _secondaryText;
+                    Secondary.Invalidate();
                 }
                 DialogResult = DialogResult.Cancel;
                 Close();
@@ -387,8 +398,10 @@ namespace JoeBrowser
             /* Enter submits, from any single-line field. JBTextBox deliberately swallows Enter
                (so a dialog cannot submit while the user is still typing a value), which also
                meant the AcceptButton never saw it and every one of these dialogs had to be
-               finished with the mouse. */
-            if ((keyData == Keys.Enter || keyData == Keys.Return) && Primary.Enabled && Primary.Visible)
+               finished with the mouse. Enter on a focused BUTTON keeps that button's own
+               meaning - Enter on "Cancel" used to confirm instead of cancelling. */
+            if ((keyData == Keys.Enter || keyData == Keys.Return) && Primary.Enabled && Primary.Visible
+                && !(ActiveControl is JBButton))
             {
                 JBTextBox field = FocusedField();
                 /* Enter in a multi-line field inserts a newline and stays there; the dialog is
@@ -416,5 +429,6 @@ namespace JoeBrowser
         }
 
         private bool _escHinted;
+        private string _secondaryText;
     }
 }

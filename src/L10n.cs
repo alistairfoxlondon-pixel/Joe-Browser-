@@ -37,12 +37,9 @@ namespace JoeBrowser
             new UiLang("tr", "TR", "Turkish",            "Türkçe"),
             new UiLang("uk", "UA", "Ukrainian",          "Українська"),
             new UiLang("ar", "SA", "Arabic",             "العربية"),
-            new UiLang("hi", "IN", "Hindi",              "हिन्दी"),
             new UiLang("zh", "CN", "Chinese (Simplified)","简体中文"),
             new UiLang("ja", "JP", "Japanese",           "日本語"),
-            new UiLang("ko", "KR", "Korean",             "한국어"),
-            new UiLang("id", "ID", "Indonesian",         "Bahasa Indonesia"),
-            new UiLang("vi", "VN", "Vietnamese",         "Tiếng Việt")
+            new UiLang("ko", "KR", "Korean",             "한국어")
         };
 
         public static string Current { get; private set; } = "en";
@@ -76,9 +73,9 @@ namespace JoeBrowser
         {
             var sb = new System.Text.StringBuilder();
             foreach (string k in new[] { "nav.profiles", "nav.proxies", "nav.extensions", "nav.browsers",
-                "nav.settings", "nav.tools", "nav.about", "nav.plan", "nav.history", "acct.signout",
+                "nav.settings", "nav.tools", "nav.about", "nav.history", "acct.signout",
                 "header.profiles", "sub.proxies", "acct.pin.off.state", "set.clearhistory",
-                "acct.plannow", "acct.planunlimited", "history.confirmall.body" })
+                "history.confirmall.body" })
             {
                 string v = T(k);
                 if (!string.IsNullOrEmpty(v) && v != k) sb.Append(v).Append(' ');
@@ -181,11 +178,10 @@ nav.about=About
 nav.proxies=Proxies
 nav.extensions=Extensions
 nav.browsers=Browsers
-nav.plan=Plan
 header.history=History
 sub.history=What each profile visited, per account
 header.account=Account
-sub.account=Who is signed in, the plan, and how this PC is protected
+sub.account=Who is signed in, and how this PC is protected
 history.back=All profiles
 history.clear=Clear history
 history.copy=Copy link
@@ -204,11 +200,6 @@ history.confirm.detail=The profile itself and its browser data are not touched.
 history.cleared=History cleared
 history.none=Pick a profile first
 acct.signedout=Not signed in
-acct.plan.unlimited=Pro with no time limit on this account.
-acct.plan.renews=Renews
-acct.plan.free=Free plan, up to
-acct.plan.profiles=profiles.
-acct.manageplan=Plans
 acct.signout=Sign out
 acct.switch=Switch account
 acct.pin=Set an app PIN
@@ -232,15 +223,7 @@ history.confirmall.title=Clear all history
 history.confirmall.body=Delete the browsing history of every profile?
 history.confirmall.detail=Only the recorded page addresses are removed. Profiles, cookies and logins are untouched.
 acct.signout.detail=Your profiles, proxies and history stay where they are and come back the next time you sign in.
-acct.signedout.note=Sign in to keep profiles, proxies and history together.
 acct.since=Member since
-acct.planhead=Your plan
-acct.plannow=Plan
-acct.planprofiles=Profiles
-acct.planunlimited=Unlimited
-acct.planrenew=Renews
-acct.upgrade=Upgrade
-acct.free.note=Upgrade for unlimited profiles.
 acct.pinhead=App PIN
 acct.2fahead=Two-step code
 acct.pin.on.state=On. Asked for when the app starts.
@@ -248,13 +231,6 @@ acct.pin.off.state=Off. Anyone at this PC can open the app.
 acct.2fa.on.state=On. A code is asked for at sign-in.
 acct.2fa.off.state=Off. A password alone signs in.
 acct.only=No other accounts on this PC.
-acct.usage.head=Usage
-acct.usage.profiles= profiles
-acct.usage.unlimited= profiles · unlimited
-acct.usage.daysleft= days left
-acct.referral.code=Invite code
-acct.referral.copy=Copy code
-acct.referral.earned= days earned
 nav.workspace=Workspace
 nav.system=System
 theme.night=Night Mode
@@ -266,14 +242,12 @@ header.about=About
 header.proxies=Proxies
 header.extensions=Extensions
 header.browsers=Browsers
-header.plan=Plan
 sub.settings=Browser, storage and start page
 sub.tools=Batch operations, cookies, proxies and extensions
 sub.about=Private browser profiles, built for serious workflows
 sub.proxies=Save a proxy once, check it, then use it in any profile
 sub.extensions=Built-in tools and extensions you add yourself
 sub.browsers=What is installed on this PC, and one click to add the rest
-sub.plan=Unlimited profiles for $1 a month, paid in crypto
 btn.new=New profile
 btn.batch=Batch create
 btn.save=Save changes
@@ -344,13 +318,15 @@ btn.audit=Run audit
 set.row.build=Portable Chromium
 set.account=ACCOUNT & SECURITY
 set.row.signed=Signed in as
-set.row.google=Google client ID
-set.row.gsecret=Google client secret
 set.row.security=Profile lock and 2FA
 set.row.signout=Sign out
-set.google.hint=Paste the OAuth client ID from your Google Cloud console (Desktop app). Required only for Continue with Google.
 btn.security=Manage
-acct.signedout=Signed out
+lang.pick=Select a language
+lang.search=Search language or country…
+lang.none=No languages available.
+lang.nomatch=No language matches “{0}”.
+acct.signedout.note=Signed out. Sign in to keep profiles, proxies and history together.
+list.empty=Nothing here yet
 about.features=FEATURES
 about.f1=Unlimited profiles
 about.f1d=Separate cookies, storage and sessions.

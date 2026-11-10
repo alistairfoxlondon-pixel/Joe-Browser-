@@ -125,9 +125,12 @@ namespace JoeBrowser
 
             // Three 120 degree sectors form the coloured ring.
             var pie = new RectangleF(x + d * 0.02f, y + d * 0.02f, d * 0.96f, d * 0.96f);
-            g.FillPie(new SolidBrush(C(0xEA, 0x43, 0x35)), Rectangle.Round(pie), -90f, 120f);
-            g.FillPie(new SolidBrush(C(0x34, 0xA8, 0x53)), Rectangle.Round(pie), 30f, 120f);
-            g.FillPie(new SolidBrush(C(0xFB, 0xBC, 0x05)), Rectangle.Round(pie), 150f, 120f);
+            /* Each brush is disposed: the fallback path runs for every profile row whenever the
+               PNG logos are missing, and three leaked brushes per row per paint exhausts GDI
+               handles after a few thousand cards. */
+            using (var b1 = new SolidBrush(C(0xEA, 0x43, 0x35))) g.FillPie(b1, Rectangle.Round(pie), -90f, 120f);
+            using (var b2 = new SolidBrush(C(0x34, 0xA8, 0x53))) g.FillPie(b2, Rectangle.Round(pie), 30f, 120f);
+            using (var b3 = new SolidBrush(C(0xFB, 0xBC, 0x05))) g.FillPie(b3, Rectangle.Round(pie), 150f, 120f);
 
             float cx = x + d / 2f, cy = y + d / 2f;
             float white = d * 0.68f, blue = d * 0.56f;

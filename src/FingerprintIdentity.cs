@@ -517,7 +517,7 @@ namespace JoeBrowser
                the final attempts (see Regenerate's widePool). */
             for (int attempt = 0; attempt < 12; attempt++)
             {
-                FingerprintFactory.Regenerate(fp, os, proxy, attempt >= 8);
+                FingerprintFactory.Regenerate(fp, os, proxy, attempt >= 8, true);
                 probeMap = Surfaces(fp);
                 var worst = WorstMatch(probe, probeMap, poolMaps);
 

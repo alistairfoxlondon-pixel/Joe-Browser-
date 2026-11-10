@@ -345,8 +345,11 @@ namespace JoeBrowser
                 _action.Icon = "download";
                 _action.Text = "Download";
             }
-            _action.Enabled = !string.IsNullOrEmpty(Rel.Url);
-            if (string.IsNullOrEmpty(Rel.Url) && !Installed)
+            /* An installed build is always removable. Builds the publisher no longer lists come
+               through with an empty Url, and under the old rule their Remove button was
+               permanently disabled - those kernels could never be deleted. */
+            _action.Enabled = Installed || !string.IsNullOrEmpty(Rel.Url);
+            if (!Installed && string.IsNullOrEmpty(Rel.Url))
             {
                 _action.Kind = BtnKind.Soft;
                 _action.Text = "Unavailable";

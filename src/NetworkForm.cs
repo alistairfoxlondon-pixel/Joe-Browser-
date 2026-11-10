@@ -146,11 +146,15 @@ namespace JoeBrowser
                 _report = new IpReport { Error = ex.Message };
             }
             if (IsDisposed) return;
-            _busy = false;
-            _run.Enabled = true;
-            Apply();
-            LayoutCore();
-            Invalidate();
+            try
+            {
+                _busy = false;
+                _run.Enabled = true;
+                Apply();
+                LayoutCore();
+                Invalidate();
+            }
+            catch { /* laid out on a dying handle: the close path owns it now */ }
         }
 
         /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>

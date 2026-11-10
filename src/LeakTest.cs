@@ -167,6 +167,11 @@ new Promise(function (resolve) {
                 result.Error = "Open the profile first.";
                 return result;
             }
+            if (fp == null)
+            {
+                result.Error = "This profile has no fingerprint to compare against.";
+                return result;
+            }
             if (session.IsFirefox)
             {
                 result.Error = "The live check needs a Chromium-based engine. Firefox profiles keep the host values by design.";
@@ -305,8 +310,7 @@ new Promise(function (resolve) {
             }
             else
             {
-                bool localOnly = string.IsNullOrEmpty(rtc) || rtc == "127.0.0.1" || rtc.StartsWith("127.0.0.1,") ||
-                                 rtc.IndexOf(".local", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool localOnly = LocalAddressesOnly(rtc);
                 string mode = fp.WebRtcMode ?? "proxy";
                 bool expectOpen = mode.Equals("public", StringComparison.OrdinalIgnoreCase);
                 /* "public" means the profile deliberately lets WebRTC reveal the exit address;
@@ -376,6 +380,28 @@ new Promise(function (resolve) {
             if (!d.TryGetValue(key, out v) || v == null) return 0;
             long n;
             return long.TryParse(Convert.ToString(v), out n) ? n : 0;
+        }
+
+        /// <summary>True when every reported candidate address is private: loopback, link-local
+        /// or an mDNS name. IPv6 loopback and link-local counted as leaks under the old check,
+        /// so protected sessions were flagged for addresses that never leave the machine.</summary>
+        private static bool LocalAddressesOnly(string rtc)
+        {
+            if (string.IsNullOrEmpty(rtc)) return true;
+            foreach (string part in rtc.Split(','))
+            {
+                string a = part.Trim();
+                if (a.Length == 0) continue;
+                if (a.EndsWith(".local", StringComparison.OrdinalIgnoreCase)) continue;
+                if (a == "127.0.0.1" || a.StartsWith("127.", StringComparison.Ordinal)) continue;
+                if (a == "::1" || a == "0.0.0.0") continue;
+                if (a.StartsWith("fe80:", StringComparison.OrdinalIgnoreCase) ||
+                    a.StartsWith("fc00:", StringComparison.OrdinalIgnoreCase) ||
+                    a.StartsWith("fd", StringComparison.OrdinalIgnoreCase) ||
+                    a.StartsWith("169.254.", StringComparison.Ordinal)) continue;
+                return false;
+            }
+            return true;
         }
     }
 }

@@ -23,7 +23,7 @@ namespace JoeBrowser
         {
             "en-US", "en-GB", "en-CA", "en-AU", "de-DE", "fr-FR", "es-ES", "es-MX", "pt-BR", "pt-PT",
             "it-IT", "nl-NL", "pl-PL", "sv-SE", "da-DK", "nb-NO", "fi-FI", "tr-TR", "ru-RU", "uk-UA",
-            "ar-SA", "he-IL", "hi-IN", "ja-JP", "ko-KR", "zh-CN", "zh-HK", "id-ID", "th-TH", "vi-VN", "ms-MY"
+            "ro-RO", "el-GR", "ar-SA", "he-IL", "hi-IN", "ja-JP", "ko-KR", "zh-CN", "zh-HK", "id-ID", "th-TH", "vi-VN", "ms-MY"
         };
 
         /// <summary>Profile targets. The first entry is the honest default: mirror this machine.</summary>
@@ -419,6 +419,17 @@ namespace JoeBrowser
         /// </summary>
         public static void Regenerate(FingerprintConfig fp, string os, ProxyConfig proxy, bool widePool)
         {
+            Regenerate(fp, os, proxy, widePool, false);
+        }
+
+        /// <summary>
+        /// Hardware-only roll: the de-duplication paths (MakeUnique, the audit's fix button)
+        /// promise to re-roll the machine, not the user's privacy settings - flipping DNT,
+        /// WebRTC or geo mode, or discarding a hand-written UA override, is a silent
+        /// reconfiguration that nobody asked for.
+        /// </summary>
+        public static void Regenerate(FingerprintConfig fp, string os, ProxyConfig proxy, bool widePool, bool hardwareOnly)
+        {
             if (string.IsNullOrEmpty(os) || os == "System default") os = SystemOsName();
             fp.Seed = NewSeed();
             var r = new Random(fp.Seed);
@@ -490,17 +501,20 @@ namespace JoeBrowser
             fp.Cores = cores[r.Next(cores.Length)];
             fp.Memory = mem[r.Next(mem.Length)];
 
-            fp.CanvasNoise = true;
-            fp.AudioNoise = true;
-            fp.FontsNoise = true;
-            fp.WebRtcProtect = true;
-            fp.WebRtcMode = "proxy";
-            fp.SpoofBattery = true;
-            fp.SpoofMac = true;
-            fp.DoNotTrack = false;
-            fp.GeoMode = "proxy";
-            fp.AutoUserAgent = true;
-            fp.UserAgentOverride = "";
+            if (!hardwareOnly)
+            {
+                fp.CanvasNoise = true;
+                fp.AudioNoise = true;
+                fp.FontsNoise = true;
+                fp.WebRtcProtect = true;
+                fp.WebRtcMode = "proxy";
+                fp.SpoofBattery = true;
+                fp.SpoofMac = true;
+                fp.DoNotTrack = false;
+                fp.GeoMode = "proxy";
+                fp.AutoUserAgent = true;
+                fp.UserAgentOverride = "";
+            }
             /* Regenerating rolls the hardware, not the user's explicit picks: an Android
                version or font list chosen by hand is a decision, not a random value. */
             if (string.IsNullOrEmpty(fp.AndroidVersion)) fp.AndroidVersion = "auto";
@@ -985,7 +999,11 @@ namespace JoeBrowser
             if (tz.StartsWith("Europe/Warsaw", StringComparison.Ordinal)) return "pl-PL";
             if (tz.StartsWith("Europe/Lisbon", StringComparison.Ordinal)) return "pt-PT";
             if (tz.StartsWith("Europe/Moscow", StringComparison.Ordinal)) return "ru-RU";
-            if (tz.StartsWith("Europe/Kyiv", StringComparison.Ordinal) || tz.StartsWith("Europe/Bucharest", StringComparison.Ordinal)) return "uk-UA";
+            if (tz.StartsWith("Europe/Kyiv", StringComparison.Ordinal)) return "uk-UA";
+            /* Bucharest is Romania, not Ukraine: a profile on Europe/Bucharest advertising a
+               Ukrainian UI language was a geo/language incoherence of the exact kind the locale
+               pass exists to prevent. */
+            if (tz.StartsWith("Europe/Bucharest", StringComparison.Ordinal)) return "ro-RO";
             if (tz.StartsWith("Europe/Istanbul", StringComparison.Ordinal)) return "tr-TR";
             if (tz.StartsWith("Europe/Stockholm", StringComparison.Ordinal)) return "sv-SE";
             if (tz.StartsWith("Europe/Oslo", StringComparison.Ordinal)) return "nb-NO";
@@ -1207,13 +1225,19 @@ namespace JoeBrowser
         private static void ApplyPlatformFromUa(FingerprintConfig fp)
         {
             string ua = fp.UserAgent ?? "";
-            if (ua.IndexOf("iPhone", StringComparison.OrdinalIgnoreCase) >= 0) { fp.Platform = "iPhone"; fp.Brand = "Safari"; }
-            else if (ua.IndexOf("iPad", StringComparison.OrdinalIgnoreCase) >= 0) { fp.Platform = "iPad"; fp.Brand = "Safari"; }
-            else if (ua.IndexOf("Android", StringComparison.OrdinalIgnoreCase) >= 0) { fp.Platform = "Linux armv8l"; fp.Brand = "Chrome"; }
-            else if (ua.IndexOf("Firefox/", StringComparison.OrdinalIgnoreCase) >= 0) { fp.Brand = "Firefox"; fp.Platform = "Win32"; }
-            else if (ua.IndexOf("Mac OS X", StringComparison.OrdinalIgnoreCase) >= 0) { fp.Platform = "MacIntel"; fp.Brand = "Chrome"; }
-            else if (ua.IndexOf("Linux", StringComparison.OrdinalIgnoreCase) >= 0) { fp.Platform = "Linux x86_64"; fp.Brand = "Chrome"; }
-            else { fp.Platform = "Win32"; fp.Brand = "Chrome"; }
+            /* OS tokens first, engine token second: a Firefox UA on a Mac must answer with
+               MacIntel, not with the engine's home platform, and an Android Firefox UA must
+               stay Android instead of turning into a desktop Chrome. */
+            if (ua.IndexOf("iPhone", StringComparison.OrdinalIgnoreCase) >= 0) fp.Platform = "iPhone";
+            else if (ua.IndexOf("iPad", StringComparison.OrdinalIgnoreCase) >= 0) fp.Platform = "iPad";
+            else if (ua.IndexOf("Android", StringComparison.OrdinalIgnoreCase) >= 0) fp.Platform = "Linux armv8l";
+            else if (ua.IndexOf("Mac OS X", StringComparison.OrdinalIgnoreCase) >= 0) fp.Platform = "MacIntel";
+            else if (ua.IndexOf("Linux", StringComparison.OrdinalIgnoreCase) >= 0) fp.Platform = "Linux x86_64";
+            else fp.Platform = "Win32";
+
+            if (ua.IndexOf("Firefox/", StringComparison.OrdinalIgnoreCase) >= 0) fp.Brand = "Firefox";
+            else if (fp.Platform == "iPhone" || fp.Platform == "iPad") fp.Brand = "Safari";
+            else fp.Brand = "Chrome";
         }
 
         public static string LocaleFromLanguage(string language)

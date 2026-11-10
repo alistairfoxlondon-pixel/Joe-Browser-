@@ -18,7 +18,7 @@ the Browsers page can fetch Chromium for you.
 
 | | |
 |---|---|
-| **Unlimited profiles** | Every profile is its own browser with its own cookies, storage, logins and cache, in its own `--user-data-dir`. The free plan holds three and runs one at a time. |
+| **Unlimited profiles** | Every profile is its own browser with its own cookies, storage, logins and cache, in its own `--user-data-dir`. Free means free: no profile cap and no one-at-a-time limit. |
 | **A real identity per profile** | User agent and client hints, platform, language, screen, timezone, memory, cores, WebGL, canvas and audio noise, and a WebRTC guard. Locale, clock and proxy country are kept in agreement. |
 | **No two profiles alike** | A new identity is compared against every profile you already have across twelve surfaces and re rolled until it is unique. Every profile also gets its own browser build - a real version from a real release, never the one installed on your PC - and the user agent, the client hints and the version on the card all report it. |
 | **Pinned builds** | Download whole Chrome, Brave or Chromium builds once and pin a profile to an exact version, so a vendor update never moves it. |
@@ -67,17 +67,15 @@ the Browsers page can fetch Chromium for you.
 **Portable mode:** put an empty file called `portable.txt` next to `JoeBrowser.exe` and
 everything is stored in a `userdata` folder beside it instead.
 
-## The plan
+## Free, entirely
 
-The free plan holds **three profiles** and runs **one at a time**. Everything else in the app
-is available on it. **$1 a month** removes both caps.
+Joe Browser is free to use. There is no plan, no account tier and no payment anywhere in the
+app: unlimited profiles, unlimited open browsers, every tool enabled. The old crypto-payment
+and referral system has been removed from the code completely, not switched off.
 
-Payment is a plain transfer of crypto to a published address. There is no third party
-checkout and no server: the app reads the chain itself. USDC, USDT and DAI on BNB Chain,
-USDC on Polygon, USDT on Tron, USDC, USDT and SOL on Solana, BNB, and Litecoin. Pick the
-network first, because the same USDT exists on three chains and the wrong one destroys the
-funds. A ledger entry remembers each redeemed transaction so one payment can never unlock
-two subscriptions.
+There is no Google sign-in either. The optional local account is an email and a password
+stored encrypted on this PC, and it exists only so profiles and history can be kept together
+on one machine.
 
 ## How the fingerprint works, and its limits
 

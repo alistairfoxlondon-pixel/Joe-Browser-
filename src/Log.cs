@@ -41,13 +41,18 @@ namespace JoeBrowser
 
                     /* Rotation DELETED the file with the day's whole history in it, so the one
                        moment a log matters - a user hitting the same error over and over - was
-                       the moment it was thrown away. Keep the previous part as .1 instead. */
+                       the moment it was thrown away. Keep the previous part as .1 instead, and
+                       if another process (an antivirus, a second instance) holds the file, fall
+                       back to a timestamped part file so the cap still applies. */
                     var info = new FileInfo(file);
                     if (info.Exists && info.Length > 4 * 1024 * 1024)
                     {
                         string previous = file + ".1";
                         try { if (File.Exists(previous)) File.Delete(previous); } catch { }
-                        try { File.Move(file, previous); } catch { }
+                        bool moved = false;
+                        try { File.Move(file, previous); moved = true; } catch { }
+                        if (!moved)
+                            try { File.Move(file, file + "." + DateTime.Now.ToString("HHmmss") + ".part"); } catch { }
                     }
                 }
             }

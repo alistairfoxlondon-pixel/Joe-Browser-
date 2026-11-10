@@ -375,7 +375,8 @@ namespace JoeBrowser
 
             var sb = new StringBuilder();
             sb.AppendLine("(function(){");
-            sb.AppendLine("if (window.__JB_TOOLS__) return; window.__JB_TOOLS__ = 1;");
+            /* No named window flag: a re-injection guard that lives on window.__JB_TOOLS__ is a
+               one-line detection shortcut. The runtime's own symbol guard below is enough. */
             sb.AppendLine("var CFG = {");
             sb.AppendLine("  human: " + (tools.HumanPaste ? "true" : "false") + ",");
             sb.AppendLine("  minDelay: " + minDelay + ", maxDelay: " + maxDelay + ",");
@@ -838,10 +839,19 @@ window.addEventListener('message', function(e){
 
 if (cfg.rightClick) {
   var UNBLOCK = { contextmenu:1, copy:1, cut:1, selectstart:1, dragstart:1, mousedown:1, mouseup:1 };
-  Event.prototype.preventDefault = function(){
+  var jbPd = function preventDefault(){
     try { if (this && UNBLOCK[this.type] && this.isTrusted) return; } catch(e){}
     return nativePrevent.call(this);
   };
+  /* Look native. The fingerprint realm exposes its own function marker under a symbol; using
+     it keeps Function.prototype.toString() printing [native code] for this replacement too -
+     an anonymous replacement used to print its source on every page of every profile with
+     the unlock enabled. */
+  try {
+    var jbMark = Function.prototype[Symbol.for('jb.nativeMark')];
+    if (typeof jbMark === 'function') jbMark.call(jbPd, 'preventDefault', 0);
+  } catch (e) {}
+  Event.prototype.preventDefault = jbPd;
   function unlock(root){
     try {
       if (!root) return;

@@ -6,15 +6,15 @@ using System.Windows.Forms;
 namespace JoeBrowser
 {
     /// <summary>
-    /// The start-up gate: sign in with an email account, register a new one, or continue
-    /// with Google. Registration asks for an address and a password and creates the account
-    /// immediately - no verification mail, exactly as the product specifies.
+    /// The start-up gate: sign in with an email account, or register a new one. Registration
+    /// asks for an address and a password and creates the account immediately - no
+    /// verification mail, exactly as the product specifies.
     /// </summary>
     internal sealed class AccountGate : JBForm
     {
         private readonly JBTextBox _email, _password, _name;
         private readonly JBLabel _title, _subtitle, _error;
-        private readonly JBButton _signIn, _signUp, _google;
+        private readonly JBButton _signIn, _signUp;
         private readonly JBLink _toggle;
         private bool _registering;
 
@@ -62,9 +62,8 @@ namespace JoeBrowser
             {
                 ForeColor = Theme.Danger,
                 AutoSize = false,
-                /* Two lines, wrapping: a Google failure explains what to do next, and a single
-                   22 px line clipped every useful word of it. One line when it only carries the
-                   "waiting for Google" status, so it does not sit over the Sign in button. */
+                /* Two lines, wrapping: a sign-in failure explains what to do next, and a single
+                   22 px line clipped every useful word of it. */
                 Size = new Size(Ui.S(360), Ui.S(34)),
                 Location = new Point(Ui.S(40), Ui.S(186)),
                 Visible = false
@@ -143,11 +142,10 @@ namespace JoeBrowser
         /// One measured pass over the whole form.
         ///
         /// The window used to be a stack of hand written pixel offsets with two sets of them,
-        /// one per mode, and a message box given a fixed 34 px for any text it carried. A Google
-        /// failure is four lines, so its tail was drawn underneath the Sign in button, and the
-        /// title, which is set in the display face, was given one line whether or not it fitted.
-        /// Everything below is placed from what the text actually needs, in one order, and the
-        /// window is then sized to the result so nothing can sit outside it.
+        /// one per mode, and a message box given a fixed 34 px for any text it carried, so a
+        /// four-line failure was drawn underneath the Sign in button. Everything below is
+        /// placed from what the text actually needs, in one order, and the window is then
+        /// sized to the result so nothing can sit outside it.
         /// </summary>
         private void LayoutForm()
         {
@@ -195,9 +193,6 @@ namespace JoeBrowser
 
             _signIn.SetBounds(pad, y, inner, btn);
             _signUp.SetBounds(pad, y, inner, btn);
-            y += btn + gap;
-
-            _google.SetBounds(pad, y, inner, btn);
             y += btn + Ui.S(16);
 
             _toggle.SetBounds(pad, y, inner, Ui.S(24));
@@ -224,9 +219,9 @@ namespace JoeBrowser
 
         private void DoEmail()
         {
-            /* Same guard the Google path has always had: a double Enter, or a double click on
-               Sign up, ran Register twice - the second attempt failed with "already exists"
-               just as the window closed, which read as a broken first sign-up. */
+            /* A double Enter, or a double click on Sign up, ran Register twice - the second
+               attempt failed with "already exists" just as the window closed, which read as a
+               broken first sign-up. */
             if (_busy) return;
             _busy = true;
             try
@@ -279,7 +274,7 @@ namespace JoeBrowser
         private void SetBusy(bool busy, string message)
         {
             _busy = busy;
-            _signIn.Enabled = _signUp.Enabled = _google.Enabled = !busy;
+            _signIn.Enabled = _signUp.Enabled = !busy;
             _email.Enabled = _password.Enabled = _name.Enabled = !busy;
             Cursor = busy ? Cursors.AppStarting : Cursors.Default;
             UseWaitCursor = busy;
@@ -289,93 +284,11 @@ namespace JoeBrowser
                 _error.ForeColor = Theme.Danger;
                 return;
             }
-            /* A status is not an error: "Waiting for Google" shown in the error colour made a
+            /* A status is not an error: a waiting message shown in the error colour made a
                normal step look like a failure. */
             _error.ForeColor = Theme.TextDim;
             _error.Text = message;
             _error.Visible = true;
-        }
-
-        /// <summary>
-        /// Google sign-up and sign-in are the same flow: a first-time Google account creates a
-        /// local account on the spot, which is what "Continue with Google" promises.
-        /// </summary>
-        private async void DoGoogle()
-        {
-            if (_busy) return;
-            _error.Visible = false;
-
-            try
-            {
-                /* The client id belongs to the publisher's Google Cloud project and is the one
-                   thing the app cannot invent, so when it is missing this opens the guided
-                   setup instead of refusing with a message pointing at a Settings card the
-                   first-run window cannot even reach - which is why users described sign-up as
-                   simply broken. */
-                string clientId = GoogleSignIn.ClientId();
-                if (!GoogleSignIn.LooksValid(clientId))
-                {
-                    if (!GoogleSetupDialog.Ensure(this, clientId))
-                    {
-                        _error.ForeColor = Theme.Danger;
-                        Fail("Google sign-in is not set up yet.");
-                        return;
-                    }
-                    clientId = GoogleSignIn.ClientId();
-                    if (!GoogleSignIn.LooksValid(clientId))
-                    {
-                        Fail("Google sign-in is not set up yet.");
-                        return;
-                    }
-                }
-
-                SetBusy(true, "Waiting for Google\u2026 finish in your browser.");
-                GoogleResult result;
-                try
-                {
-                    /* On a worker thread: the listener and the token exchange must not block
-                       the message loop, or the window cannot repaint the status above. */
-                    string id = clientId;
-                    result = await Task.Run(new Func<GoogleResult>(delegate { return GoogleSignIn.SignIn(id); }));
-                }
-                finally
-                {
-                    SetBusy(false, null);
-                }
-
-                if (result == null || !result.Ok)
-                {
-                    _error.ForeColor = Theme.Danger;
-                    string message = result == null ? "Google sign-in failed." : result.Message;
-                    if (result != null && GoogleSignIn.IsSetupProblem(result.Code))
-                        message += "  Use \u201cContinue with Google\u201d again once the client id is fixed.";
-                    Fail(message);
-                    return;
-                }
-
-                Account account = Accounts.SignInGoogle(result.Identity.Id, result.Identity.Email,
-                    result.Identity.Name, result.Identity.Picture);
-                if (account == null)
-                {
-                    _error.ForeColor = Theme.Danger;
-                    Fail("Google accepted the sign-in but the account could not be created on this PC. "
-                       + "Check that %APPDATA%\\JoeBrowser is writable.");
-                    return;
-                }
-
-                SignedIn = account;
-                DialogResult = DialogResult.OK;
-                Close();
-            }
-            catch (Exception ex)
-            {
-                /* An async void handler that throws takes the whole process down through the
-                   global handler; this keeps a Google problem inside the form. */
-                Log.Error("Google sign-in failed", ex);
-                SetBusy(false, null);
-                _error.ForeColor = Theme.Danger;
-                Fail("Google sign-in failed: " + ex.Message);
-            }
         }
 
     }

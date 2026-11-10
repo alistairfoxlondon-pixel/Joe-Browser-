@@ -1132,11 +1132,14 @@ namespace JoeBrowser
             }
         }
 
-        /// <summary>windows-ui focus-visible: a single 1px outline in the text colour.</summary>
+        /// <summary>windows-ui focus-visible: a single 1px outline in the text colour.
+        /// Drawn just INSIDE the rect: the ring used to expand outward by 1.5 px, but a
+        /// control's own paint is clipped to its bounds, so on buttons and selects the ring
+        /// landed exactly where nothing could draw it - keyboard focus was invisible.</summary>
         public static void FocusRing(Graphics g, RectangleF r, float radius)
         {
-            var ring = new RectangleF(r.X - S(1.5f), r.Y - S(1.5f), r.Width + S(3f), r.Height + S(3f));
-            Stroke(g, ring, radius + S(1.5f), Theme.Text, S(1f));
+            var ring = new RectangleF(r.X + S(1.5f), r.Y + S(1.5f), r.Width - S(3f), r.Height - S(3f));
+            Stroke(g, ring, radius, Theme.Text, S(1f));
         }
 
         /// <summary>

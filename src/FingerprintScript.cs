@@ -101,6 +101,7 @@ namespace JoeBrowser
             c["memory"] = Math.Min(8, fp.Memory > 0 ? fp.Memory : 8);
             c["touch"] = fp.TouchPoints;
             c["tz"] = fp.Timezone ?? "";
+            c["brand"] = fp.Brand ?? "";
             c["glVendor"] = fp.WebGlVendor ?? "";
             c["glRenderer"] = fp.WebGlRenderer ?? "";
             c["canvas"] = fp.CanvasNoise;
@@ -124,6 +125,10 @@ namespace JoeBrowser
       F.canvas = false; F.audio = false; F.webgl = false; F.hwNoise = false;
     }
   } catch (e) {}
+  /* The realm guard: a second registration of this script (a stamped worker, a replayed
+     injection) must not double-wrap every function. It used to reference GUARD before
+     declaring it, which threw, was swallowed, and left the realm unmarked. */
+  var GUARD = Symbol.for('jb.realm');
   var NP = (typeof Navigator !== 'undefined' && Navigator.prototype) ? Navigator.prototype : Object.getPrototypeOf(navigator);
   try { if (NP[GUARD]) return; Object.defineProperty(NP, GUARD, { value: 1, configurable: true }); } catch (e) {}
 
@@ -380,12 +385,20 @@ namespace JoeBrowser
         },
         OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
         PlatformArch: { ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
-        PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' },
-        connect: function () { throw new Error('Could not establish connection. Receiving end does not exist.'); },
-        sendMessage: function () { throw new Error('Could not establish connection. Receiving end does not exist.'); }
+        PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' }
       };
-      chromeStub.loadTimes = function () { return null; };
-      chromeStub.csi = function () { return null; };
+      chromeStub.runtime.connect = mark(function connect() { throw new Error('Could not establish connection. Receiving end does not exist.'); }, 'connect', 0);
+      chromeStub.runtime.sendMessage = mark(function sendMessage() { throw new Error('Could not establish connection. Receiving end does not exist.'); }, 'sendMessage', 1);
+      /* Real Chrome returns an object from both; null is what a broken stub returns. */
+      chromeStub.loadTimes = mark(function loadTimes() {
+        return { requestTime: 0, startLoad: 0, commitLoad: 0, finishDocumentLoad: 0, finishLoad: 0,
+          firstPaintTime: 0, firstPaintAfterLoadTime: 0, navigationType: 'Other',
+          wasFetchedViaSpdy: false, wasNpnNegotiated: true, npnNegotiatedProtocol: 'h2',
+          wasAlternateProtocolAvailable: false, connectionInfo: 'h2' };
+      }, 'loadTimes', 0);
+      chromeStub.csi = mark(function csi() {
+        return { startE: 0, onloadT: 0, pageT: Math.round(performance.now()), tran: 15 };
+      }, 'csi', 0);
       Object.defineProperty(window, 'chrome', { value: chromeStub, writable: true, configurable: true, enumerable: true });
     }
   } catch (e) {}
@@ -510,6 +523,10 @@ namespace JoeBrowser
             try {
               if (name === 'geolocation' && F.geo === 'block')
                 Object.defineProperty(st, 'state', { value: 'denied', configurable: true });
+              /* Notification.permission is forced to 'default' below; a query that answers
+                 with the real state would contradict the other read. */
+              if (name === 'notifications')
+                Object.defineProperty(st, 'state', { value: 'default', configurable: true });
             } catch (e) {}
             return st;
           });
@@ -658,10 +675,17 @@ namespace JoeBrowser
           var v = 0;
           try { v = real.call(this); } catch (e) { return 0; }
           if (typeof v !== 'number' || v <= 0) return v;
-          // Elements only report a gutter when they actually scroll; subtracting it from every
-          // element would make every non-scrolling box too narrow by one scrollbar.
+          // Elements only report a gutter when they actually scroll with a classic bar;
+          // subtracting it from every clipped box would make overflow:hidden containers
+          // too narrow by one scrollbar.
           var scrolls = false;
-          try { scrolls = this.scrollHeight > (this.clientHeight || 0); } catch (e) { scrolls = false; }
+          try {
+            var cs = (this.ownerDocument && this.ownerDocument.defaultView)
+              ? this.ownerDocument.defaultView.getComputedStyle(this) : null;
+            var oy = cs ? String(cs.overflowY || '') : '';
+            scrolls = (oy === 'auto' || oy === 'scroll' || oy === 'overlay')
+              && this.scrollHeight > (this.clientHeight || 0);
+          } catch (e) { scrolls = false; }
           return Math.max(0, v - (scrolls ? SBW : 0));
         }, 'get ' + prop, 0)
       });
@@ -670,26 +694,9 @@ namespace JoeBrowser
       layoutOverride(Element.prototype, 'clientWidth');
     }
 
-    /* window.innerWidth is authoritative for the page's layout width, so it keeps its value.
-       What must change is the difference between it and the document's client width, which is
-       how a script measures the scrollbar without asking for anything. */
-    if (typeof Document !== 'undefined' && Document.prototype) {
-      var cwDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
-      if (cwDesc && cwDesc.get) {
-        var realCw = cwDesc.get;
-        Object.defineProperty(Document.prototype, 'clientWidth', {
-          configurable: true,
-          get: mark(function () {
-            var v = 0;
-            try { v = realCw.call(this.documentElement); } catch (e) { return 0; }
-            if (typeof v !== 'number' || v <= 0) return v;
-            var scrolls = false;
-            try { scrolls = this.documentElement.scrollHeight > (this.documentElement.clientHeight || 0); } catch (e) { scrolls = false; }
-            return Math.max(0, v - (scrolls ? SBW : 0));
-          }, 'get clientWidth', 0)
-        });
-      }
-    }
+    /* documentElement is an Element, so the patch above already answers it; adding a second
+       clientWidth on Document would be an own property real Chrome does not have, and the
+       value captured here would already be gutter-reduced, doubling the subtraction. */
 
     /* CSS media queries answer the same question independently:
          (scrollbar-width: none)  - true when the platform overlays its scrollbars
@@ -730,6 +737,9 @@ namespace JoeBrowser
        'WebGL exception' most scanners print for a misconfigured spoof. */
     glParams[7936] = 'WebKit';
     glParams[7937] = 'WebKit WebGL';
+    /* The host adapter's vendor-specific extensions (NV_*) answer under a renderer string
+       that claims a different GPU family - a one-line mismatch scanners check. */
+    var claimedNv = /nvidia/i.test(String(F.glVendor || '') + ' ' + String(F.glRenderer || ''));
     var glNames = ['WebGLRenderingContext', 'WebGL2RenderingContext'];
     for (var gi = 0; gi < glNames.length; gi++) {
       var G = window[glNames[gi]];
@@ -744,15 +754,52 @@ namespace JoeBrowser
           return orig.call(this, pname);
         }, 1);
         var origExt = proto.getExtension;
-        if (isSafari && typeof origExt === 'function') {
-          /* Answering the extension with an object and its constants with null is a
-             contradiction of a different kind: WebKit simply does not hand it out. */
+        if (typeof origExt === 'function') {
           method(proto, 'getExtension', function getExtension(name) {
-            try { if (String(name).toLowerCase() === 'webgl_debug_renderer_info') return null; } catch (e) {}
+            try {
+              var n = String(name || '').toLowerCase();
+              if (!claimedNv && n.indexOf('nv_') === 0) return null;
+              /* Answering the debug-renderer extension with an object and its constants with
+                 null is a contradiction of a different kind: WebKit simply does not hand it
+                 out, so under a Safari identity the extension itself goes away. */
+              if (isSafari && n === 'webgl_debug_renderer_info') return null;
+            } catch (e) {}
             return origExt.call(this, name);
           }, 1);
         }
+        var origSup = proto.getSupportedExtensions;
+        if (typeof origSup === 'function' && !claimedNv) {
+          method(proto, 'getSupportedExtensions', function getSupportedExtensions() {
+            var list = origSup.apply(this, arguments);
+            try {
+              var out = [];
+              for (var xi = 0; xi < list.length; xi++)
+                if (!/^NV_/i.test(String(list[xi]))) out.push(list[xi]);
+              return out;
+            } catch (e) { return list; }
+          }, 0);
+        }
       })(G.prototype);
+    }
+  } catch (e) {}
+
+  /* ---- WebGPU ----
+     A modern checker reads adapter.info straight out of navigator.gpu and reads the real
+     host GPU even when every WebGL surface is spoofed. The adapter object answers from the
+     same identity the WebGL renderer string claims. */
+  try {
+    if (typeof GPUAdapter !== 'undefined' && GPUAdapter.prototype && 'info' in GPUAdapter.prototype) {
+      var r0 = String(F.glRenderer || '');
+      var inner0 = r0.replace(/^ANGLE\s*\((.*)\)\s*$/, '$1');
+      var vlow0 = String(F.glVendor || '').toLowerCase().replace('google inc.', '');
+      var wvendor = 'unknown';
+      if (/nvidia/.test(vlow0)) wvendor = 'nvidia';
+      else if (/apple/.test(vlow0)) wvendor = 'apple';
+      else if (/intel/.test(vlow0)) wvendor = 'intel';
+      else if (/amd|radeon/.test(vlow0)) wvendor = 'amd';
+      else if (/qualcomm|adreno/.test(vlow0)) wvendor = 'qualcomm';
+      else if (/mali|arm/.test(vlow0)) wvendor = 'arm';
+      getter(GPUAdapter.prototype, 'info', { vendor: wvendor, architecture: '', device: '', description: inner0 });
     }
   } catch (e) {}
 
@@ -835,28 +882,15 @@ namespace JoeBrowser
           tmp.width = w; tmp.height = h;
           var ctx = origGetCtx.call(tmp, '2d');
           if (!ctx) return null;
-          var kind = canvasKind ? canvasKind.get(self) : null;
-          if (kind === 'gl' || kind === 'gl2') {
-            var gl = null;
-            try { gl = origGetCtx.call(self, kind === 'gl2' ? 'webgl2' : 'webgl'); } catch (e) {}
-            if (!gl) return null;
-            var rp = null;
-            for (var qi = 0; qi < rpPairs.length; qi++) {
-              try { if (rpPairs[qi][0].isPrototypeOf(gl)) { rp = rpPairs[qi][1]; break; } } catch (e) {}
-            }
-            if (!rp) return null;
-            var px = new Uint8Array(w * h * 4);
-            rp.call(gl, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
-            var img = ctx.createImageData(w, h);
-            img.data.set(px);
-            perturb(img.data, w, h, 0, 0);
-            ctx.putImageData(img, 0, 0);
-          } else {
-            ctx.drawImage(self, 0, 0);
-            var raw = origData.call(ctx, 0, 0, w, h);
-            perturb(raw.data, w, h, 0, 0);
-            ctx.putImageData(raw, 0, 0);
-          }
+          /* One path for every canvas kind. drawImage of a WebGL canvas snapshots the same
+             composited frame the real encode path uses, so a context without
+             preserveDrawingBuffer encodes exactly what real Chrome would encode - whereas
+             readPixels on that same context answers zeros once the frame has been presented,
+             which is a blank PNG and an instant 'WebGL render failed' verdict. */
+          ctx.drawImage(self, 0, 0);
+          var raw = origData.call(ctx, 0, 0, w, h);
+          perturb(raw.data, w, h, 0, 0);
+          ctx.putImageData(raw, 0, 0);
           return encode(tmp);
         } catch (e) { return null; }
       }
@@ -923,19 +957,33 @@ namespace JoeBrowser
             ctx.putImageData(raw, 0, 0);
             return origOffConv.apply(tmp, arguments);
           } catch (e) { return origOffConv.apply(self, arguments); }
-        }, 1);
+        }, 0);
       }
     } catch (e) {}
   }
 
-  /* ---- Audio ---- */
+  /* ---- Audio ----
+     getChannelData hands back the buffer's LIVE internal array, so an additive delta drifts:
+     a second read lands on top of the first and the two hashes disagree - the exact
+     'call it twice and compare' check the audio test runs. The perturbation is the same
+     idempotent quantisation the canvas uses: each sampled index snaps to the nearest value
+     congruent to a per-index target mod 3, so reading again cannot move it. */
   if (F.audio) {
     try {
       if (typeof AudioBuffer !== 'undefined') {
         var origChannel = AudioBuffer.prototype.getChannelData;
         method(AudioBuffer.prototype, 'getChannelData', function getChannelData(index) {
           var arr = origChannel.apply(this, arguments);
-          try { for (var i = 0; i < arr.length; i += 1000) arr[i] += (noise(i) - 0.5) * 1e-7; } catch (e) {}
+          try {
+            var q = 3e-7;
+            for (var i = 0; i < arr.length; i += 1000) {
+              var tgt = Math.floor(noise(i) * 3) % 3;
+              var m = Math.round(arr[i] / q);
+              var r = m % 3; if (r < 0) r += 3;
+              var d = tgt - r; if (d > 1) d -= 3; else if (d < -1) d += 3;
+              arr[i] = (m + d) * q;
+            }
+          } catch (e) {}
           return arr;
         }, 1);
       }
@@ -947,9 +995,9 @@ namespace JoeBrowser
         }, 1);
       }
       if (typeof AudioContext !== 'undefined') {
-        var BAP = Object.getPrototypeOf(AudioContext.prototype);
-        /* A real device runs at 44.1 or 48 kHz; the host's exact rate is a stable hardware id. */
-        if (BAP) getter(BAP, 'sampleRate', 48000);
+        /* Only the interactive context: forcing BaseAudioContext also rewrote
+           OfflineAudioContext(44100, ...), which then reported a rate it did not render at. */
+        getter(AudioContext.prototype, 'sampleRate', 48000);
       }
     } catch (e) {}
   }
@@ -1216,22 +1264,50 @@ namespace JoeBrowser
         method(md, 'getUserMedia', function getUserMedia() {
           return Promise.reject(new DOMException('Permission denied', 'NotAllowedError'));
         }, 1);
-        if (md.enumerateDevices) {
-          var origEnum = md.enumerateDevices;
-          method(md, 'enumerateDevices', function enumerateDevices() {
-            return origEnum.call(md).then(function (list) {
-              try {
-                return list.map(function (d) {
-                  try { Object.defineProperty(d, 'deviceId', { value: '', configurable: true }); } catch (e) {}
-                  try { Object.defineProperty(d, 'label', { value: '', configurable: true }); } catch (e) {}
-                  return d;
-                });
-              } catch (e) { return list; }
-            });
-          }, 0);
-        }
+        /* The always-on enumerateDevices wrapper above already blanks labels and ids; a
+           second wrapper here only stacked and achieved the same result twice. */
       }
     }
+  } catch (e) {}
+
+  /* ---- Element rects ----
+   getBoundingClientRect is a font-and-DPI fingerprint of its own: a page that measures a
+   hidden probe span reads the host's exact text metrics. The answer carries a deterministic
+   sub-0.01 px offset, cached per element so repeated reads agree, and small enough that no
+   layout or hit test can notice it. */
+  try {
+    if (typeof Element !== 'undefined' && Element.prototype && Element.prototype.getBoundingClientRect) {
+      var origGBCR = Element.prototype.getBoundingClientRect;
+      var rectCache = (typeof WeakMap === 'function') ? new WeakMap() : null;
+      method(Element.prototype, 'getBoundingClientRect', function getBoundingClientRect() {
+        var r = origGBCR.apply(this, arguments);
+        try {
+          var dj = rectCache ? rectCache.get(this) : null;
+          if (!dj) {
+            var tag = '';
+            try { tag = String(this.tagName || ''); } catch (e0) {}
+            var h = (SEED ^ Math.imul(tag.length + 3, 2654435761)) | 0;
+            h = Math.imul(h ^ (h >>> 13), 1274126177) | 0;
+            dj = [((h >>> 0) % 7) - 3, (((h >>> 3) % 7) - 3)];   // -0.003..+0.003 px each axis
+            if (rectCache) rectCache.set(this, dj);
+          }
+          r.x += dj[0] / 1000; r.y += dj[1] / 1000;
+        } catch (e) {}
+        return r;
+      }, 0);
+    }
+  } catch (e) {}
+
+  /* Shared hook: the tool scripts patch page APIs too (right-click unlock, clipboard
+     watchers). Without it their replacements printed their own source through
+     Function.prototype.toString - a tampering tell on every page of every profile that
+     enabled them. The symbol is not enumerable, so a property scan finds nothing. */
+  try {
+    var MK = Symbol.for('jb.nativeMark');
+    Object.defineProperty(Function.prototype, MK, {
+      value: function (name, len) { return mark(this, name, len); },
+      writable: true, enumerable: false, configurable: true
+    });
   } catch (e) {}
 })();
 ";
@@ -1254,8 +1330,26 @@ namespace JoeBrowser
   var G = Symbol.for('jb.realm');
   try { if (NP[G]) return; Object.defineProperty(NP, G, { value: 1, configurable: true }); } catch (e) {}
 
+  /* Native-looking functions, same as the page realm: a worker that prints JS source for its
+     patched getters is its own tampering signal, and the bootstrap runs before the full
+     stamp can arrive. */
+  var wFakes = (typeof WeakMap === 'function') ? new WeakMap() : null;
+  var wOrigTS = Function.prototype.toString;
+  try {
+    Object.defineProperty(Function.prototype, 'toString', {
+      value: named(function toString() {
+        try { if (wFakes && wFakes.has(this)) return wFakes.get(this); } catch (e) {}
+        return wOrigTS.call(this);
+      }, 'toString'),
+      writable: true, enumerable: false, configurable: true
+    });
+  } catch (e) {}
+
   function named(fn, n) {
-    try { Object.defineProperty(fn, 'name', { value: n, configurable: true }); } catch (e) {}
+    try {
+      if (wFakes) wFakes.set(fn, 'function ' + n + '() { [native code] }');
+      Object.defineProperty(fn, 'name', { value: n, configurable: true });
+    } catch (e) {}
     return fn;
   }
   function get(o, p, v) {
@@ -1281,7 +1375,9 @@ namespace JoeBrowser
     });
   } catch (e) {}
   get(NP, 'hardwareConcurrency', F.cores);
-  if (!F.safari) get(NP, 'deviceMemory', F.memory);
+  /* deviceMemory is Chromium-only; shipping it under a Firefox identity is a self-inflicted
+     contradiction in both realms. */
+  if (!F.safari && F.brand !== 'Firefox') get(NP, 'deviceMemory', F.memory);
   get(NP, 'maxTouchPoints', F.touch);
   get(NP, 'webdriver', false);
 
@@ -1352,7 +1448,7 @@ namespace JoeBrowser
             ctx.putImageData(raw, 0, 0);
             return conv.apply(tmp, arguments);
           } catch (e) { return conv.apply(self, arguments); }
-        }, 1);
+        }, 0);
       }
     } catch (e) {}
   }

@@ -23,7 +23,6 @@ namespace JoeBrowser
         private readonly JBScrollHost _host;
         private readonly List<ProxyRow> _rows = new List<ProxyRow>();
         private JBButton _addBtn, _importBtn, _checkBtn;
-        private PromoCard _promo;
         private JBPanel _empty;
         private bool _layingOut;
         private bool _ready;
@@ -49,9 +48,6 @@ namespace JoeBrowser
             _column.Controls.Add(_addBtn);
             _column.Controls.Add(_importBtn);
             _column.Controls.Add(_checkBtn);
-
-            _promo = new PromoCard();
-            _column.Controls.Add(_promo);
 
             _empty = new JBPanel();
             _empty.Paint += PaintEmpty;
@@ -115,9 +111,15 @@ namespace JoeBrowser
 
         public void SetBusy(bool busy, string text)
         {
+            /* Every action on the page waits for the same answer, so all three rest at once:
+               a second "Check all" or an edit during a run used to interleave two results. */
             _checkBtn.Text = busy ? text : "Check all";
             _checkBtn.Enabled = !busy;
+            _addBtn.Enabled = !busy;
+            _importBtn.Enabled = !busy;
             _checkBtn.Invalidate();
+            _addBtn.Invalidate();
+            _importBtn.Invalidate();
         }
 
         private void PaintEmpty(object sender, PaintEventArgs e)
@@ -148,7 +150,6 @@ namespace JoeBrowser
             BackColor = Theme.Bg;
             _column.BackColor = Theme.Bg;
             foreach (var r in _rows) r.ReStyle();
-            _promo.Invalidate();
             _empty.Invalidate();
             Invalidate(true);
         }
@@ -186,9 +187,6 @@ namespace JoeBrowser
                     y += Ui.S(72) + Ui.S(8);
                 }
                 if (Items.Count > 0) y += Ui.S(10);
-
-                _promo.SetBounds(pad, y, inner, PromoCard.CardH);
-                y += PromoCard.CardH + Ui.S(24);
 
                 _column.SetBounds(0, 0, Math.Max(inner + pad * 2, w), Math.Max(y, _host.Height));
                 _host.SyncExtent();
@@ -233,13 +231,12 @@ namespace JoeBrowser
             try { Tips.SetToolTip(this, key); } catch { }
         }
 
-        /// <summary>The row tooltip: everything the row knows, including credentials.</summary>
+        /// <summary>The row tooltip: what is saved, without ever showing the credentials.</summary>
         private string RowTip()
         {
             if (Item == null || Item.Config == null || !Item.Config.Enabled) return "Click to apply this proxy live";
             var c = Item.Config;
             string addr = (c.Type == "socks5" ? "socks5://" : c.Type == "https" ? "https://" : "http://")
-                + (string.IsNullOrEmpty(c.User) ? "" : c.User + (string.IsNullOrEmpty(c.Password) ? "" : ":" + c.Password) + "@")
                 + c.Host + ":" + c.Port;
             string tip = addr + "\nClick to apply this proxy live · right-click to copy";
             if (!string.IsNullOrEmpty(Item.LastIp)) tip += "\nLast check: " + Item.LastIp + (Item.LastLatencyMs > 0 ? " · " + Item.LastLatencyMs + " ms" : "");
@@ -257,7 +254,7 @@ namespace JoeBrowser
                 + c.Host + ":" + c.Port;
         }
 
-        private static void CopyTo(string text, string what)
+        private static void CopyTo(string text)
         {
             try { Clipboard.SetText(text ?? ""); } catch { }
         }
@@ -329,20 +326,23 @@ namespace JoeBrowser
 
         private void ShowRowMenu(Point at)
         {
-            if (Item == null || Item.Config == null || !Item.Config.Enabled) return;
+            if (Item == null || Item.Config == null) return;
             var c = Item.Config;
+            /* Every row answers the inspect gesture, enabled or not: a disabled proxy is still
+               a saved proxy the user may want to copy or delete. */
             var menu = JBMenu.Create();
             string full = FullAddress();
             string hostPort = c.Host + ":" + c.Port;
-            JBMenu.Add(menu, "Copy full address", "copy", delegate { CopyTo(full, "address"); });
-            JBMenu.Add(menu, "Copy IP / host and port", "globe", delegate { CopyTo(hostPort, "host"); });
+            if (!string.IsNullOrEmpty(full))
+                JBMenu.Add(menu, "Copy full address", "copy", delegate { CopyTo(full); });
+            JBMenu.Add(menu, "Copy IP / host and port", "globe", delegate { CopyTo(hostPort); });
             if (!string.IsNullOrEmpty(c.User))
-                JBMenu.Add(menu, "Copy username", "user", delegate { CopyTo(c.User ?? "", "user"); });
+                JBMenu.Add(menu, "Copy username", "user", delegate { CopyTo(c.User ?? ""); });
             if (!string.IsNullOrEmpty(c.Password))
-                JBMenu.Add(menu, "Copy password", "key", delegate { CopyTo(c.Password ?? "", "password"); });
+                JBMenu.Add(menu, "Copy password", "key", delegate { CopyTo(c.Password ?? ""); });
             if (!string.IsNullOrEmpty(Item.LastIp))
-                JBMenu.Add(menu, "Copy last checked IP", "check-circle", delegate { CopyTo(Item.LastIp ?? "", "ip"); });
-            menu.Items.Add(new ToolStripSeparator { Font = Theme.Body });
+                JBMenu.Add(menu, "Copy last checked IP", "check-circle", delegate { CopyTo(Item.LastIp ?? ""); });
+            if (menu.Items.Count > 0) menu.Items.Add(new ToolStripSeparator { Font = Theme.Body });
             JBMenu.Add(menu, "Check now", "bolt", delegate { var h = TestRequested; if (h != null) h(this, EventArgs.Empty); });
             JBMenu.Add(menu, "Apply live", "sync", delegate { var h = LiveRequested; if (h != null) h(this, EventArgs.Empty); });
             JBMenu.Add(menu, "Edit", "pencil", delegate { var h = EditRequested; if (h != null) h(this, EventArgs.Empty); });
@@ -414,72 +414,6 @@ namespace JoeBrowser
                     new RectangleF(a[i].X + (a[i].Width - s) / 2f, a[i].Y + (a[i].Height - s) / 2f, s, s),
                     _hover == i ? Theme.Accent : Theme.TextDim);
             }
-        }
-    }
-
-    /// <summary>Buy-proxy placeholder. Honest "Coming soon" badge, no fake checkout.</summary>
-    internal sealed class PromoCard : Control, IReStyle
-    {
-        public PromoCard()
-        {
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
-            Ui.Opaque(this);
-            Height = CardH;
-        }
-
-        public void ReStyle() { Invalidate(); }
-        protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(Ui.SurfaceColor(this)); }
-
-        /// <summary>
-        /// A 46 px chip and three measured lines, with the same inset above and below. Derived
-        /// from the type scale so the card grows with the text instead of clipping it.
-        /// </summary>
-        public static int CardH
-        {
-            get
-            {
-                int text = Theme.LineHeight(Theme.H2) + Theme.LineHeight(Theme.Small) +
-                           Theme.LineHeight(Theme.Caption) + Ui.S(8);
-                return Math.Max(Ui.S(112), Math.Max(text, Ui.S(46)) + Ui.S(24));
-            }
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            var g = e.Graphics;
-            Ui.Quality(g);
-            var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Theme.Panel);
-            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), Theme.Line);
-
-            float chip = Ui.S(46);
-            var cr = new RectangleF(Ui.S(20), (Height - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
-            float ic = Ui.S(24);
-            Icons.Draw(g, "globe", new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), Theme.Accent);
-
-            float tx = cr.Right + Ui.S(18);
-            /* The text and the badge share one row, and the text used to reserve a fixed 180 px
-               for the badge. On a narrow window the badge is what ran out of room, so the badge is
-               measured and the text takes what is left. */
-            float bw = Math.Max(Ui.S(96), Ui.Measure(g, "Coming soon", Theme.SmallBold).Width + Ui.S(28));
-            float bh = Ui.S(32);
-            float textW = Math.Max(Ui.S(120), Width - tx - bw - Ui.S(36));
-            /* Three lines at 20, 50 and 74 from the top were one line of arithmetic for one font
-               size. They are measured and centred as a block now, so the card holds at any scale. */
-            float h2 = Theme.LineHeight(Theme.H2);
-            float sm = Theme.LineHeight(Theme.Small);
-            float cap = Theme.LineHeight(Theme.Caption);
-            float blockTop = Math.Max(Ui.S(10), (Height - (h2 + sm + cap + Ui.S(8))) / 2f);
-            Ui.Text(g, "Static residential proxy", Theme.H2, Theme.Text, tx, blockTop, textW);
-            Ui.Text(g, "1 proxy  ·  $3.50 / month  ·  clean, dedicated home IP", Theme.Small, Theme.TextDim,
-                tx, blockTop + h2 + Ui.S(2), textW);
-
-            var badge = new RectangleF(Width - Ui.S(20) - bw, (Height - bh) / 2f, bw, bh);
-            Ui.Fill(g, badge, Ui.S(Theme.ButtonRadius), Theme.AccentOnBg);
-            Ui.Stroke(g, badge, Ui.S(Theme.ButtonRadius), Theme.AccentBorder);
-            Ui.Text(g, "Coming soon", Theme.SmallBold, Theme.AccentText, badge.X,
-                badge.Y + (bh - Theme.SmallBold.GetHeight(g)) / 2f, bw, "center");
         }
     }
 }

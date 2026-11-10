@@ -24,8 +24,12 @@ namespace JoeBrowser
             _current = account;
             try
             {
+                /* Only the identity goes to disk - never the password hash or the live TOTP
+                   secret. Everything else is reloaded from the store on the next start. */
                 var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
-                byte[] payload = Encoding.UTF8.GetBytes(ser.Serialize(account));
+                var marker = account == null ? null
+                    : new { account.Email, DisplayName = account.DisplayName };
+                byte[] payload = Encoding.UTF8.GetBytes(ser.Serialize(marker));
                 System.IO.File.WriteAllBytes(File, ProtectedData.Protect(payload, null, DataProtectionScope.CurrentUser));
             }
             catch (Exception ex) { Log.Error("Cannot persist session", ex); }
@@ -48,9 +52,9 @@ namespace JoeBrowser
                 var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
                 Account a = ser.Deserialize<Account>(Encoding.UTF8.GetString(plain));
                 if (a == null || string.IsNullOrEmpty(a.Email)) return null;
-                /* The marker is only a convenience; the account must still exist in the store. */
-                Account stored = Accounts.FindByEmail(a.Email);
-                return stored ?? a;
+                /* The marker is only a convenience; the account must still exist in the store.
+                   A deleted account must not keep signing in off its stale marker. */
+                return Accounts.FindByEmail(a.Email);
             }
             catch { return null; }
         }

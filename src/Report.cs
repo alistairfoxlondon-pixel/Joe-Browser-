@@ -31,17 +31,16 @@ namespace JoeBrowser
                 sb.Append(Environment.Is64BitOperatingSystem ? " x64" : " x86");
             }
             catch { }
-            try { sb.Append(" \u00b7 " + (Plan.IsPro ? "Pro" : "Free")); } catch { }
             return sb.ToString();
         }
 
         public static string VersionText()
         {
             try { return Application.ProductVersion; }
-            catch { return "1.8.3"; }
+            catch { return "unknown"; }
         }
 
-        /// <summary>Everything a developer needs: build, plan, browsers found, kernels, log tail.</summary>
+        /// <summary>Everything a developer needs: build, browsers found, kernels, log tail.</summary>
         public static string Details()
         {
             var sb = new StringBuilder();
@@ -184,7 +183,7 @@ namespace JoeBrowser
             _send.Click += delegate { Send(); };
             Controls.Add(_send);
 
-            _copy = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy details", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = "App version, browser, plan and the last log lines" };
+            _copy = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = "Copy details", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = "App version, browser, kernels and the last log lines" };
             _copy.Click += delegate
             {
                 Report.CopyDetails(_what.Value);

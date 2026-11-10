@@ -64,7 +64,13 @@ namespace JoeBrowser
     internal static class ProxyVault
     {
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("JoeBrowser.Proxy.v1");
-        private static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
+
+        /* A fresh serializer per call: the shared JavaScriptSerializer is not thread-safe for
+           concurrent calls, and its default ~2 MB cap made a long proxy list fail Save/Load. */
+        private static JavaScriptSerializer NewJson()
+        {
+            return new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+        }
 
         public static string FilePath { get { return Path.Combine(AppPaths.Root, "proxies.json"); } }
 
@@ -83,16 +89,23 @@ namespace JoeBrowser
                     return list;
                 }
                 List<ProxyEntry> items;
-                try { items = Json.Deserialize<List<ProxyEntry>>(text); }
+                try { items = NewJson().Deserialize<List<ProxyEntry>>(text); }
                 catch (Exception ex)
                 {
                     /* A corrupt or half-written vault used to come back as an empty list, the
                        page then said "No proxies saved yet", and the next Save overwrote the
                        file with that emptiness - the user's whole proxy library gone, quietly.
-                       The unreadable file is set aside under a name the user can send instead,
-                       exactly like the extension library does. */
+                       The unreadable file is set aside under a timestamped name the user can
+                       send, exactly like the extension library does. A fixed ".broken" name
+                       threw when a previous copy was already there, and then nothing was set
+                       aside at all. */
                     Log.Error("Proxy library is unreadable; setting it aside", ex);
-                    try { File.Move(FilePath, FilePath + ".broken"); } catch { }
+                    try
+                    {
+                        string bak = FilePath + ".broken-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+                        File.Move(FilePath, bak);
+                    }
+                    catch (Exception ex2) { Log.Error("Proxy library backup failed", ex2); }
                     return list;
                 }
                 if (items == null) return list;
@@ -131,7 +144,7 @@ namespace JoeBrowser
                     }
                 }
                 string tmp = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                File.WriteAllText(tmp, Json.Serialize(items ?? new List<ProxyEntry>()), new UTF8Encoding(true));
+                File.WriteAllText(tmp, NewJson().Serialize(items ?? new List<ProxyEntry>()), new UTF8Encoding(true));
                 if (File.Exists(FilePath))
                 {
                     try { File.Replace(tmp, FilePath, null); }

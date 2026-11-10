@@ -34,20 +34,29 @@ namespace JoeBrowser
             return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "JoeBrowser");
         }
 
-        public static void EnsureAll()
+        public static bool EnsureAll()
         {
-            Directory.CreateDirectory(Root);
-            Directory.CreateDirectory(Profiles);
-            Directory.CreateDirectory(Data);
-            Directory.CreateDirectory(Logs);
-            Directory.CreateDirectory(Extensions);
-            Directory.CreateDirectory(Trash);
-            Directory.CreateDirectory(Exports);
+            try
+            {
+                Directory.CreateDirectory(Root);
+                Directory.CreateDirectory(Profiles);
+                Directory.CreateDirectory(Data);
+                Directory.CreateDirectory(Logs);
+                Directory.CreateDirectory(Extensions);
+                Directory.CreateDirectory(Trash);
+                Directory.CreateDirectory(Exports);
 
-            /* A .NET file dialog will not open a folder that does not exist, and the
-               "add an extension" and "browse browser" actions start in these two. */
-            Directory.CreateDirectory(Browsers);
-            Directory.CreateDirectory(Kernels);
+                /* A .NET file dialog will not open a folder that does not exist, and the
+                   "add an extension" and "browse browser" actions start in these two. */
+                Directory.CreateDirectory(Browsers);
+                Directory.CreateDirectory(Kernels);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error("App data folders could not be created", ex);
+                return false;
+            }
         }
 
         /// <summary>
@@ -61,9 +70,16 @@ namespace JoeBrowser
             {
                 Directory.CreateDirectory(Root);
                 string probe = Path.Combine(Root, ".write-test");
-                File.WriteAllText(probe, "ok");
-                File.Delete(probe);
-                return true;
+                try
+                {
+                    File.WriteAllText(probe, "ok");
+                    File.Delete(probe);
+                    return true;
+                }
+                finally
+                {
+                    try { File.Delete(probe); } catch { }
+                }
             }
             catch { return false; }
         }
