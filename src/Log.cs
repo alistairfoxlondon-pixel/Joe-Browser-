@@ -12,6 +12,19 @@ namespace JoeBrowser
         public static void Error(string message, Exception ex = null) { Write("ERROR", message, ex); }
 
         /// <summary>
+        /// Extra network tracing. Off by default so the log stays readable, and switched on
+        /// from the command line when a machine's network behaviour has to be traced.
+        /// </summary>
+        public static bool IsDiagnostic
+        {
+            get
+            {
+                try { return System.Environment.GetEnvironmentVariable("JOEBROWSER_TRACE_NET") == "1"; }
+                catch { return false; }
+            }
+        }
+
+        /// <summary>
         /// Where the log is, for the "open the log" affordance in the report window and for the
         /// support instructions. Null when logging has never succeeded.
         /// </summary>

@@ -54,6 +54,13 @@ namespace JoeBrowser
         private ContextMenuStrip _menu;
 
         /// <summary>
+        /// The hover is a tween, not a flip. A card that changes colour the instant the
+        /// pointer arrives reads as a picture being swapped; one that eases into it reads as
+        /// a surface under the pointer.
+        /// </summary>
+        private readonly AnimValue _hoverT, _openHoverT, _checkHoverT;
+
+        /// <summary>
         /// Short signature of the whole fingerprint, set by the list once it can compare cards.
         /// It is computed there, not here, because a card cannot know whether its own signature
         /// also appears on a sibling - and that is the whole point of showing it.
@@ -80,19 +87,25 @@ namespace JoeBrowser
             Cursor = Cursors.Hand;
             TabStop = true;
             Font = Theme.Body;
+            _hoverT = new AnimValue(this);
+            _openHoverT = new AnimValue(this);
+            _checkHoverT = new AnimValue(this);
             Disposed += delegate { if (_menu != null) _menu.Dispose(); };
         }
 
         public static int PreferredHeight() { return Ui.S(CardH); }
         public static int PreferredMinWidth() { return Ui.S(CardMinW); }
 
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; _hoverT.Toward(true, 0.24f); Invalidate(); base.OnMouseEnter(e); }
         protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
 
         protected override void OnMouseLeave(EventArgs e)
         {
             _hover = false; _kebabHover = false; _openHover = false; _checkHover = false;
+            _hoverT.Toward(false, 0.2f);
+            _openHoverT.Toward(false, 0.2f);
+            _checkHoverT.Toward(false, 0.2f);
             Invalidate();
             base.OnMouseLeave(e);
         }
@@ -263,9 +276,16 @@ namespace JoeBrowser
                one step and an accent hairline, which is a state you can see from across the
                grid instead of only in the status pill. */
             if (Running) Ui.Shadow(g, r, rad, 2, Theme.Dark);
-            Ui.Fill(g, r, rad, Picked ? Theme.AccentOnBg : (_hover ? Theme.PanelHover : Theme.Card));
-            Ui.Stroke(g, r, rad,
-                Picked ? Theme.AccentBorder : Running ? Theme.AccentBorder : (_hover ? Theme.HoverStrong : Theme.Line));
+            /* The surface eases into its hovered colour. The border follows the same value,
+               so the card does not change shape while it changes colour. */
+            float hov = _hoverT.Value;
+            Color fill = Picked ? Theme.AccentOnBg
+                : Ui.Blend(Theme.Card, Theme.PanelHover, hov);
+            Color edge = Picked ? Theme.AccentBorder
+                : Running ? Theme.AccentBorder
+                : Ui.Blend(Theme.Line, Theme.HoverStrong, hov);
+            Ui.Fill(g, r, rad, fill);
+            Ui.Stroke(g, r, rad, edge);
 
             PaintHeader(g, r);
             bool proxyWrapped;

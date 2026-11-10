@@ -198,7 +198,7 @@ namespace JoeBrowser
                         int h3 = Theme.LineHeight(Theme.H3);
                         if (Theme.Row < cap + Ui.S(2)) sb.Append(" [row is shorter than a caption at " + scale + "]");
                         if (Theme.Field < body + Ui.S(8)) sb.Append(" [field is shorter than a line of text at " + scale + "]");
-                        if (EngineRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [browser row cannot hold its two lines at " + scale + "]");
+                        if (BuildRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [browser row cannot hold its two lines at " + scale + "]");
                         if (KernelRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [kernel row cannot hold its two lines at " + scale + "]");
                         if (ExtensionRow.RowH < h3 + cap + Ui.S(8)) sb.Append(" [extension row cannot hold its two lines at " + scale + "]");
                         /* A measured row is only right if the text it is measured against grows
@@ -431,6 +431,10 @@ namespace JoeBrowser
 
             try { ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12; } catch { }
 
+            /* One clock for the whole start, so a slow launch can be read from the log
+               instead of guessed at. */
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
             /* Deliberately no SetCurrentProcessExplicitAppUserModelID here. An explicit id
                only helps when every shortcut carries the same id; when it does not, Windows
                cannot resolve the identity and falls back to a generic taskbar icon. Without
@@ -489,6 +493,7 @@ namespace JoeBrowser
             Log.Info("Display scale " + Ui.Scale.ToString("0.##"));
 
             Theme.LoadFonts();
+            Log.Info("Fonts ready " + sw.ElapsedMilliseconds + " ms");
 
             /* A data folder that cannot be written is the quiet cause of a whole family of
                reports ("my profiles vanish", "settings never stick", "sign-in works but the
@@ -543,6 +548,7 @@ namespace JoeBrowser
             try
             {
                 AppPaths.EnsureAll();
+                Log.Info("Data folder ready " + sw.ElapsedMilliseconds + " ms");
                 /* Small drives fill up quietly: browser caches are the one thing the app owns
                    that is always safe to drop, so a low volume triggers a background clean of
                    every closed profile's cache. Cookies and logins are never touched. */
@@ -551,6 +557,7 @@ namespace JoeBrowser
                    update never leaves stale manifests or scripts behind. Writes only files
                    whose content actually changed. */
                 ExtensionManager.EnsureAll();
+                Log.Info("Extensions prepared " + sw.ElapsedMilliseconds + " ms");
                 /* Three of the brief's named defaults already exist as first party extensions -
                    paste as human, enable right click, proxy watch - and are written above. What
                    was missing is that the extensions page never learned about them on a machine

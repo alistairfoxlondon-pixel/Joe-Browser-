@@ -22,7 +22,7 @@ namespace JoeBrowser
         private readonly JBLabel _note;
         private readonly JBButton _refresh, _close;
         private readonly JBIconButton _x;
-        private string _engine = "chrome";
+        private string _engine = "chromium";
         private string _channel = "All";
         private bool _loading;
         private bool _built;
@@ -32,14 +32,15 @@ namespace JoeBrowser
         /* Every engine the kernel store manages gets a segment tab here. Firefox and Edge were
            added to the store in 1.9.1, so they are now first-class kernel engines with their
            own download / unpack / pin pipeline - no longer a pointer to the user's local
-           install. */
-        private static readonly string[] EngineKeys = { "chromium", "chrome", "brave", "firefox", "edge" };
-        private static readonly string[] EngineLabels = { "Chromium", "Chrome", "Brave", "Firefox", "Edge" };
-        private static readonly string[] ChannelKeys = { "All", "Stable", "Beta", "Dev", "Canary", "Snapshot" };
+           install. The names and the channels come from the browsers page, so the two can
+           never drift apart. */
+        private static readonly string[] EngineKeys = BrowsersPage.EngineKeys;
+        private static readonly string[] EngineLabels = BrowsersPage.EngineLabels;
+        private static readonly string[] ChannelKeys = BrowsersPage.ChannelKeys;
 
         public KernelForm()
         {
-            Text = "Browser kernels";
+            Text = "Browser builds";
             Resizable = true;
             DraggableSidebar = false;
             HeaderHit = 60;
@@ -53,7 +54,11 @@ namespace JoeBrowser
             _engines.SelectedIndexChanged += delegate
             {
                 int i = _engines.SelectedIndex;
-                _engine = i >= 0 && i < EngineKeys.Length ? EngineKeys[i] : "chromium";
+                /* The engine the tab shows and the engine whose builds are listed have to be
+                   the same one. They were not: the window opened on the Chromium tab and
+                   listed Chrome builds, because the field the loader read was still holding
+                   the old default. */
+                _engine = i >= 0 && i < EngineKeys.Length ? EngineKeys[i] : EngineKeys[0];
                 LoadAsync();
             };
             Controls.Add(_engines);
@@ -180,7 +185,14 @@ namespace JoeBrowser
                half-way through the list used to leave the page stuck on "Loading builds". */
             try
             {
-                if (_loading) return;
+                if (_loading)
+                {
+                    /* A load is already running. Dropping the new one left the list showing
+                       the engine that was asked for first, so switching tabs quickly could
+                       end on the wrong catalogue. The request is remembered instead. */
+                    _reload = true;
+                    return;
+                }
                 _loading = true;
                 _refresh.Enabled = false;
                 ClearRows();
@@ -246,8 +258,17 @@ namespace JoeBrowser
             {
                 _loading = false;
                 if (_refresh != null) _refresh.Enabled = true;
+                /* A request that arrived while the list was loading runs now. */
+                if (_reload)
+                {
+                    _reload = false;
+                    LoadAsync();
+                }
             }
         }
+
+        /// <summary>Set when a load is asked for while another one is still running.</summary>
+        private bool _reload;
 
         /// <summary>Guarded entry point so a failed await never reaches the crash dialog.</summary>
         private void LoadAsync() { Guarded.Run("LoadAsync", this, delegate { return LoadAsyncCore(); }); }
@@ -310,9 +331,7 @@ namespace JoeBrowser
 
         private static string KernelStoreLabel(KernelRelease rel)
         {
-            string name = rel.Engine == "chrome" ? "Chrome"
-                : rel.Engine == "brave" ? "Brave" : "Chromium";
-            return name + " " + rel.Version;
+            return BrowsersPage.Label(rel.Engine) + " " + rel.Version;
         }
     }
 

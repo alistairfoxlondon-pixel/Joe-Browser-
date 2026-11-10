@@ -78,6 +78,56 @@ namespace JoeBrowser
 
         private static Pal P = DarkPal;
 
+        /// <summary>Palette the dissolve starts from and the one it ends on.</summary>
+        private static Pal _fadeFrom, _fadeTo;
+        private static readonly object _fadeKey = new object();
+
+        /// <summary>True while a theme change is dissolving from one palette into the other.</summary>
+        public static bool Fading { get; private set; }
+
+        /// <summary>
+        /// Mixes two palettes. Every colour in the app comes from the palette, so moving
+        /// the palette is what moves the interface - a label, a card and the window behind
+        /// them all change together instead of one of them arriving early.
+        /// </summary>
+        private static Pal LerpPal(Pal a, Pal b, float t)
+        {
+            if (t <= 0f) return a;
+            if (t >= 1f) return b;
+            var p = new Pal();
+            p.Bg = Lerp(a.Bg, b.Bg, t);
+            p.BgSoft = Lerp(a.BgSoft, b.BgSoft, t);
+            p.Sidebar = Lerp(a.Sidebar, b.Sidebar, t);
+            p.Card = Lerp(a.Card, b.Card, t);
+            p.Panel = Lerp(a.Panel, b.Panel, t);
+            p.PanelHover = Lerp(a.PanelHover, b.PanelHover, t);
+            p.Panel2 = Lerp(a.Panel2, b.Panel2, t);
+            p.Input = Lerp(a.Input, b.Input, t);
+            p.Line = Lerp(a.Line, b.Line, t);
+            p.LineSoft = Lerp(a.LineSoft, b.LineSoft, t);
+            p.Text = Lerp(a.Text, b.Text, t);
+            p.TextDim = Lerp(a.TextDim, b.TextDim, t);
+            p.TextFaint = Lerp(a.TextFaint, b.TextFaint, t);
+            p.OnAccent = Lerp(a.OnAccent, b.OnAccent, t);
+            p.Accent = Lerp(a.Accent, b.Accent, t);
+            p.AccentHover = Lerp(a.AccentHover, b.AccentHover, t);
+            p.AccentPressed = Lerp(a.AccentPressed, b.AccentPressed, t);
+            p.ButtonBg = Lerp(a.ButtonBg, b.ButtonBg, t);
+            p.ButtonBorder = Lerp(a.ButtonBorder, b.ButtonBorder, t);
+            p.Success = Lerp(a.Success, b.Success, t);
+            p.Danger = Lerp(a.Danger, b.Danger, t);
+            return p;
+        }
+
+        private static Color Lerp(Color a, Color b, float t)
+        {
+            return Color.FromArgb(
+                (int)Math.Round(a.A + (b.A - a.A) * t),
+                (int)Math.Round(a.R + (b.R - a.R) * t),
+                (int)Math.Round(a.G + (b.G - a.G) * t),
+                (int)Math.Round(a.B + (b.B - a.B) * t));
+        }
+
         public static Color Bg { get { return P.Bg; } }
         public static Color BgSoft { get { return P.BgSoft; } }
         public static Color Sidebar { get { return P.Sidebar; } }
@@ -876,32 +926,61 @@ namespace JoeBrowser
 
         public static event EventHandler ModeChanged;
 
+        /// <summary>
+        /// Raised before <see cref="ModeChanged"/>, so the controls that keep a cached
+        /// background colour can pick up the new one before anything is painted. A window
+        /// that repaints first would put the new background under the old controls, and the
+        /// frame in between shows two themes at once.
+        /// </summary>
+        public static event EventHandler BeforeModeChanged;
+
         /// <summary>True while a theme change is being applied, so painted controls can hold.</summary>
         public static bool Restyling { get; private set; }
 
+        /// <summary>
+        /// Moves the interface from one theme to the other.
+        ///
+        /// The change used to be one step: the palette was replaced and every window was
+        /// repainted, which put a light window on screen for a frame and then a dark one -
+        /// the flash. It is a dissolve now. The palette moves a step at a time, and every
+        /// window is told about every step, so a single frame never contains two themes.
+        /// A window that is not on screen yet (there is none at start-up) simply takes the
+        /// new palette in one go.
+        /// </summary>
         public static void SetMode(bool dark)
         {
             if (Dark == dark) return;
-            Dark = dark;
-            P = dark ? DarkPal : LightPal;
             var h = ModeChanged;
-            if (h == null) return;
-            /* One window, one repaint.
-            
-               Every control on the page used to repaint itself the moment it heard the mode
-               changed - a hundred Invalidate calls, each painting against a palette the next one
-               was about to contradict - and that is the flash and the half-styled frame reported
-               when switching between light and dark. The listeners now run with repainting
-               suppressed, and the invalidation happens once, at the end, from the top of each
-               window. A single paint cannot show a mixture of two themes. */
-            Restyling = true;
-            try { h(null, EventArgs.Empty); }
-            finally { Restyling = false; }
+            _fadeFrom = P;
+            _fadeTo = dark ? DarkPal : LightPal;
+            Dark = dark;
+            if (h == null) { P = _fadeTo; return; }
+
+            Fading = true;
+            UiAnim.Animate(_fadeKey, delegate(float t)
+            {
+                P = LerpPal(_fadeFrom, _fadeTo, t);
+                Restyling = true;
+                try
+                {
+                    var before = BeforeModeChanged;
+                    if (before != null) before(null, EventArgs.Empty);
+                    var hh = ModeChanged;
+                    if (hh != null) hh(null, EventArgs.Empty);
+                }
+                finally { Restyling = false; }
+            }, 0.17f, UiAnim.EaseInOut, delegate { Fading = false; });
         }
 
         public static void Restyle(Control root)
         {
             if (root == null) return;
+
+            /* The window's own surface is part of the theme. It was left at the colour it
+               was built with, so every control that copies its parent's background kept a
+               panel of the old theme inside the new one. */
+            var form = root as Form;
+            if (form != null) form.BackColor = Bg;
 
             var re = root as IReStyle;
             if (re != null) re.ReStyle();
@@ -991,9 +1070,13 @@ namespace JoeBrowser
         {
             c.BackColor = SurfaceColor(c);
             c.ParentChanged += delegate { if (!c.IsDisposed) c.BackColor = SurfaceColor(c); };
+            /* The colour has to be refreshed BEFORE the window that contains this control is
+               painted, so this listens to the event that runs first and not to the one that
+               repaints. Listening to the repaint event instead left every control showing the
+               previous theme's surface for one frame. */
             EventHandler onMode = delegate { if (!c.IsDisposed) c.BackColor = SurfaceColor(c); };
-            Theme.ModeChanged += onMode;
-            c.Disposed += delegate { Theme.ModeChanged -= onMode; };
+            Theme.BeforeModeChanged += onMode;
+            c.Disposed += delegate { Theme.BeforeModeChanged -= onMode; };
         }
 
         /// <summary>
