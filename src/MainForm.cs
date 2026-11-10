@@ -129,26 +129,11 @@ namespace JoeBrowser
                had actually finished, and a profile launched in that window started without the
                pair. The event arrives on the worker, so everything below marshals first. */
             ExtensionCatalog.DefaultsChanged += OnDefaultsChanged;
-            /* Competitors ship a browser inside their download; Joe Browser drives the Chrome
-               already on the PC. When there is neither - a clean machine - the app used to sit
-               on the launch error until the user went looking for a download button. Now it
-               fetches its own official Chromium (~180 MB, one time) the moment the window
-               opens, so the first profile can start. */
-            Shown += delegate
-            {
-                try
-                {
-                    /* The built-in kernel is the product, not a fallback: on every machine that
-                       does not have it yet, fetch it - even when Chrome or Edge are installed.
-                       Profiles run on Joe Browser's own Chromium unless the user explicitly
-                       picks a local browser in the profile editor. */
-                    if (BrowserFetcher.IsInstalled("chromium")) return;
-                    if (KernelStore.Installed().Any(k => k.Ready)) return;
-                    Toast("Downloading Joe Browser's own Chromium (~180 MB, one-time) - profiles run on it, not your local browser", ToastKind.Info);
-                    var _ = DownloadBrowserAsync("chromium");
-                }
-                catch (Exception ex) { Log.Error("Auto browser download failed", ex); }
-            };
+            /* Browser downloads never start because the window opened - only because a profile
+               that is being opened needs a kernel it does not have. That is the AdsPower
+               behaviour: create the profile, open it, and only then the required engine is
+               fetched, behind the dialog that asked for permission. Nothing pulls ~180 MB off
+               the wire just because the app came up. */
         }
 
         private void OnDefaultsChanged()
@@ -671,7 +656,7 @@ namespace JoeBrowser
                     case "cookies": CookieManager(); break;
                     case "ext": OpenExtensionFolder(); break;
                     case "trash": RecycleBin(); break;
-                    case "shortcuts": ShortcutHelp(); break;
+                    case "shortcuts": break; // removed: the shortcut wall was noise, not a tool
                     case "human": ToolExplainer("human"); break;
                     case "pastehelp": ToolExplainer("rightclick"); break;
                     case "watcher": ToolExplainer("watch"); break;
@@ -1131,23 +1116,6 @@ namespace JoeBrowser
                 dlg.Secondary.Visible = false;
                 dlg.AddNote(where);
                 dlg.AddReadOnlyText(what + "\r\n\r\n" + how, 200);
-                dlg.ShowDialog(this);
-            }
-        }
-
-        private void ShortcutHelp()
-        {
-            using (var dlg = new ToolDialog("Keyboard shortcuts", "Close", "", 560, 560))
-            {
-                dlg.Secondary.Visible = false;
-                string text = "";
-                foreach (var s in ShortcutDisplay())
-                {
-                    // A row with no key is a group heading.
-                    if (s[0].Length == 0) text += (text.Length > 0 ? "\r\n" : "") + s[1] + "\r\n";
-                    else text += s[0].PadRight(18) + s[1] + "\r\n";
-                }
-                dlg.AddReadOnlyText(text, 360);
                 dlg.ShowDialog(this);
             }
         }
@@ -4144,53 +4112,11 @@ namespace JoeBrowser
 
             float afterTiles = tileY + (float)Math.Ceiling(features.Length / (double)cols) * (tileH + gap);
 
-            // keyboard shortcuts, two columns of key chips
-            float scSect = afterTiles + Ui.S(10);
-            Ui.Text(g, L10n.T("about.shortcuts"), Theme.Micro, Theme.TextFaint, x + Ui.S(2), scSect, colW - Ui.S(4));
-
-            var shortcuts = ShortcutDisplay();
-            int scCols = colW >= Ui.S(900) ? 2 : 1;
-            int perCol = (int)Math.Ceiling(shortcuts.Count / (double)scCols);
-            float rowH = Math.Max(Ui.S(38), Theme.LineHeight(Theme.Caption) + Ui.S(14));
-            var sc = new RectangleF(x, scSect + Ui.S(26), colW, perCol * rowH + Ui.S(14));
-            Ui.Fill(g, sc, Ui.S(Theme.ButtonRadius), Theme.Panel);
-            Ui.Stroke(g, sc, Ui.S(Theme.ButtonRadius), Theme.Line);
-
-            float halfW = colW / scCols;
-            for (int i = 0; i < shortcuts.Count; i++)
-            {
-                int col = i / perCol, line = i % perCol;
-                float ry = sc.Y + Ui.S(7) + line * rowH;
-                float kx = sc.X + col * halfW + Ui.S(18);
-                float cy = ry + (rowH - Ui.S(24)) / 2f;
-
-                // A row with no key is a heading, not a shortcut: no chip, no divider above it.
-                if (shortcuts[i][0].Length == 0)
-                {
-                    Ui.Text(g, shortcuts[i][1], Theme.Micro, Theme.TextFaint, kx, cy, halfW - Ui.S(36));
-                    continue;
-                }
-
-                if (line > 0)
-                    using (var p = new Pen(Theme.Line))
-                    {
-                        float dy = ry + 0.5f;
-                        g.DrawLine(p, x + col * halfW + Ui.S(16), dy, x + (col + 1) * halfW - Ui.S(16), dy);
-                    }
-
-                int keyW = (int)Math.Ceiling(Ui.Measure(g, shortcuts[i][0], Theme.Caption).Width) + Ui.S(18);
-                var chipR = new RectangleF(kx, cy, keyW, Math.Min(Ui.S(24), rowH - Ui.S(8)));
-                Ui.Fill(g, chipR, Ui.S(Theme.ButtonRadius), Theme.Card);
-                Ui.Stroke(g, chipR, Ui.S(Theme.ButtonRadius), Theme.Line, 1f);
-                Ui.Text(g, shortcuts[i][0], Theme.Caption, Theme.Text, chipR.X, chipR.Y, chipR.Width, "center");
-
-                Ui.Text(g, shortcuts[i][1], Theme.Small, Theme.TextDim, chipR.Right + Ui.S(12),
-                    ry + (rowH - Theme.Small.GetHeight(g)) / 2f,
-                    sc.X + (col + 1) * halfW - (chipR.Right + Ui.S(30)));
-            }
-
             // this workspace: live counts of what the app holds on this machine
-            float wsSect = sc.Bottom + Ui.S(26);
+            /* The keyboard-shortcut wall used to sit here. It read as documentation glued onto
+               a product page, and every one of those gestures is discoverable where it is
+               used - the section was removed, the About page keeps features and counts. */
+            float wsSect = afterTiles + Ui.S(26);
             Ui.Text(g, L10n.T("about.workspace"), Theme.Micro, Theme.TextFaint, x + Ui.S(2), wsSect, colW - Ui.S(4));
 
             string[][] stats =

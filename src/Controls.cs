@@ -547,8 +547,12 @@ namespace JoeBrowser
                     try { Native.WindowBorderColor(Handle, Theme.Line); } catch { }
                     try { Native.ImmersiveDarkMode(Handle, Theme.Dark); } catch { }
                 }
-                Invalidate(true);
-                Update();
+                /* ComposeNow is Update() plus the children: RDW_ALLCHILDREN | RDW_UPDATENOW
+                   paints the whole tree synchronously, so the first frame after the switch is
+                   the finished one. Invalidate(true) + Update() only synchronized the form's
+                   own surface - child windows kept their old-palette invalid regions and
+                   painted them on the next message-loop turns, which was the flicker. */
+                if (IsHandleCreated) Native.ComposeNow(Handle);
             }
         }
 

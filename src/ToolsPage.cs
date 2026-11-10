@@ -89,7 +89,8 @@ namespace JoeBrowser
             Add("pastehelp", "copy", "tools.rightclick", "tools.rightclick.desc", "btn.how");
             Add("watcher", "route", "tools.watch", "tools.watch.desc", "btn.how");
             Add("trash", "trash", "tools.trash", "tools.trash.desc", "btn.restore");
-            Add("shortcuts", "command", "tools.shortcuts", "tools.shortcuts.desc", "btn.view");
+            /* The keyboard-shortcuts tile is gone on purpose: a shortcut wall inside a tools
+               page read as filler, and every gesture is discoverable in the place that uses it. */
             Add("clean", "sync", "tools.clean", "tools.clean.desc", "btn.clean");
             Add("audit", "fingerprint", "tools.audit", "tools.audit.desc", "btn.audit");
             Add("report", "error", "tools.report", "tools.report.desc", "btn.report");
