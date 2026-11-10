@@ -85,12 +85,12 @@ namespace JoeBrowser
             var rows = new List<string[]>();
             /* The built-in kernel leads the picker: it is what a profile should run on, and the
                local browsers follow as explicit choices for people who really want them. */
-            Add(rows, installed, "chromium", "Chromium (built-in)");
+            Add(rows, "chromium", "Chromium (built-in)");
             rows.Add(new[] { "auto", "Detect automatically" });
-            Add(rows, installed, "chrome", "Google Chrome");
-            Add(rows, installed, "edge", "Microsoft Edge");
-            Add(rows, installed, "brave", "Brave");
-            Add(rows, installed, "firefox", "Firefox");
+            Add(rows, "chrome", "Google Chrome");
+            Add(rows, "edge", "Microsoft Edge");
+            Add(rows, "brave", "Brave");
+            Add(rows, "firefox", "Firefox");
             return rows;
         }
 
@@ -111,9 +111,14 @@ namespace JoeBrowser
             return null;
         }
 
-        private static void Add(List<string[]> rows, Dictionary<string, bool> installed, string key, string label)
+        /// <summary>
+        /// One row per engine. Whether the engine is installed is not written into the name:
+        /// the picker stays short enough to read at a glance, and the editor says plainly
+        /// under it when the engine it names is not on this machine.
+        /// </summary>
+        private static void Add(List<string[]> rows, string key, string label)
         {
-            rows.Add(new[] { key, installed.ContainsKey(key) ? label : label + " (not installed)" });
+            rows.Add(new[] { key, label });
         }
 
         public static List<BrowserInfo> FindAll()

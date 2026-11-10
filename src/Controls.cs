@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -25,6 +25,8 @@ namespace JoeBrowser
         {
             public object Key;
             public Action<float> Step;
+            public Action Done;
+            public Func<float, float> Ease;
             public float T;
             public float Speed;
         }
@@ -33,12 +35,37 @@ namespace JoeBrowser
         private static Timer _timer;
         private static readonly object _gate = new object();
 
+        /// <summary>
+        /// Slow in, slow out. Used where both ends of the movement are visible and a
+        /// constant rate reads as mechanical - a theme change, a page arriving.
+        /// </summary>
+        public static float EaseInOut(float t)
+        {
+            if (t <= 0f) return 0f;
+            if (t >= 1f) return 1f;
+            return t * t * (3f - 2f * t);
+        }
+
+        /// <summary>Fast at the start, gentle at the end: the answer arrives first.</summary>
+        public static float EaseOut(float t)
+        {
+            if (t <= 0f) return 0f;
+            if (t >= 1f) return 1f;
+            float u = 1f - t;
+            return 1f - u * u * u;
+        }
+
         private static Timer Clock
         {
             get
             {
                 if (_timer == null)
                 {
+                    /* The clock needs a message pump of its own thread. Creating it on a
+                       worker thread would produce a timer that never ticks and an app whose
+                       animations silently never run, so the thread is checked first. */
+                    if (System.Threading.Thread.CurrentThread.GetApartmentState() !=
+                        System.Threading.ApartmentState.STA) return null;
                     _timer = new Timer { Interval = 16 };
                     _timer.Tick += Tick;
                 }
@@ -53,13 +80,39 @@ namespace JoeBrowser
         /// </summary>
         public static void Animate(object key, Action<float> step, float speed)
         {
+            Animate(key, step, speed, null, null);
+        }
+
+        /// <summary>
+        /// The same, with a chosen easing curve and a callback for the last frame.
+        /// </summary>
+        public static void Animate(object key, Action<float> step, float speed,
+            Func<float, float> ease, Action done)
+        {
             if (key == null) key = new object();
+            var clock = Clock;
+            if (clock == null)
+            {
+                /* No pump on this thread: the value is simply set, so the interface is
+                   correct even when the animation cannot run. */
+                try { step(1f); } catch { }
+                try { if (done != null) done(); } catch { }
+                return;
+            }
             lock (_gate)
             {
                 for (int i = 0; i < _items.Count; i++)
                     if (_items[i].Key == key) { _items.RemoveAt(i); break; }
-                _items.Add(new Item { Key = key, Step = step, T = 0f, Speed = Math.Max(0.02f, speed) });
-                Clock.Start();
+                _items.Add(new Item
+                {
+                    Key = key,
+                    Step = step,
+                    Done = done,
+                    Ease = ease,
+                    T = 0f,
+                    Speed = Math.Max(0.02f, speed)
+                });
+                clock.Start();
             }
         }
 
@@ -88,8 +141,11 @@ namespace JoeBrowser
                 it.T += it.Speed;
                 float t = Math.Min(1f, it.T);
                 /* Ease-out cubic: fast at the start where the eye wants the answer, gentle at
-                   the end where it reads as "settled" rather than "slammed". */
-                float eased = 1f - (1f - t) * (1f - t) * (1f - t);
+                   the end where it reads as "settled" rather than "slammed". A caller that
+                   wants a different curve brings its own. */
+                float eased = it.Ease != null
+                    ? it.Ease(t)
+                    : 1f - (1f - t) * (1f - t) * (1f - t);
                 try { it.Step(eased); }
                 catch
                 {
@@ -101,7 +157,11 @@ namespace JoeBrowser
                     continue;
                 }
                 if (t < 1f) alive = true;
-                else lock (_gate) { _items.Remove(it); }
+                else
+                {
+                    lock (_gate) { _items.Remove(it); }
+                    try { if (it.Done != null) it.Done(); } catch { }
+                }
             }
             if (!alive)
             {
@@ -148,6 +208,7 @@ namespace JoeBrowser
         /// <summary>Sets the value instantly, no animation. Used when a control is rebuilt.</summary>
         public void Set(float v) { _value = Math.Max(0f, Math.Min(1f, v)); }
     }
+
 
     /// <summary>Label that remembers its role so a theme flip restores the right contrast.</summary>
     internal sealed class JBLabel : Label, IReStyle
@@ -303,7 +364,7 @@ namespace JoeBrowser
                 TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
             if (proposed.Width > Width && Width > 0)
             {
-                while (shown.Length > 0 && TextRenderer.MeasureText(shown + "…", Font).Width > Width)
+                while (shown.Length > 0 && TextRenderer.MeasureText(shown + "â€¦", Font).Width > Width)
                     shown = shown.Substring(0, shown.Length - 1);
                 if (b > shown.Length) b = shown.Length;
                 if (a >= b) return;
@@ -437,18 +498,31 @@ namespace JoeBrowser
         private static extern bool RedrawWindow(IntPtr hWnd, IntPtr lprcUpdate, IntPtr hrgnUpdate, uint flags);
 
         public const uint RDW_INVALIDATE = 0x0001;
+        public const uint RDW_ERASE = 0x0004;
         public const uint RDW_NOERASE = 0x0020;
         public const uint RDW_ALLCHILDREN = 0x0080;
         public const uint RDW_UPDATENOW = 0x0100;
 
-        public static void ComposeNow(IntPtr hWnd)
+        public const int WM_SETREDRAW = 0x000B;
+
+        /// <summary>
+        /// Repaints the whole tree in one synchronous pass. With <paramref name="erase"/> the
+        /// background is cleared first, which is what a theme change needs: the old colours
+        /// must not survive under the new ones.
+        /// </summary>
+        public static void ComposeNow(IntPtr hWnd, bool erase)
         {
             try
             {
                 RedrawWindow(hWnd, IntPtr.Zero, IntPtr.Zero,
-                    RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+                    RDW_INVALIDATE | (erase ? RDW_ERASE : RDW_NOERASE) | RDW_ALLCHILDREN | RDW_UPDATENOW);
             }
             catch { }
+        }
+
+        public static void ComposeNow(IntPtr hWnd)
+        {
+            ComposeNow(hWnd, false);
         }
 
 
@@ -522,20 +596,32 @@ namespace JoeBrowser
         private readonly EventHandler _onModeChanged;
 
         /// <summary>
-        /// Applies a theme change to this window in one step: repainting is stopped over the
-        /// whole window, every control is re-styled, the layout is redone and one paint follows.
-        /// Controls that invalidate themselves during the walk are therefore not painted against
-        /// a palette the next control is about to change - which is what the flash was.
+        /// Applies a theme change to this window in one step: every control is re-styled and
+        /// the whole tree is painted once.
+        ///
+        /// The tree is frozen while it is restyled, because a control that invalidates
+        /// itself mid-walk would paint against a palette the next control is about to
+        /// change - and that mixture is the flash. It is thawed again before the paint,
+        /// and the paint covers the window and every control inside it: a repaint that
+        /// reaches only part of the tree leaves the rest showing the old theme, which
+        /// reads as a half-changed window.
         /// </summary>
         private void ApplyModeChange()
         {
-            bool frozen = false;
+            if (!IsHandleCreated) { Theme.Restyle(this); return; }
+
+            /* Every window handle in this tree is frozen, not only the form's. A child control
+               has its own window, so freezing the parent left each one free to repaint the
+               instant the palette changed - the window went light for a frame and then dark,
+               which is exactly the flash this is supposed to remove. */
+            var handles = new List<IntPtr>();
+            CollectHandles(this, handles);
+            foreach (var h in handles)
+            {
+                try { Native.SendMessage(h, Native.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero); } catch { }
+            }
             try
             {
-                if (IsHandleCreated)
-                {
-                    try { Native.SendMessage(Handle, 0x000B, IntPtr.Zero, IntPtr.Zero); frozen = true; } catch { }
-                }
                 /* One restyle walk, not three. Theme.Restyle(this) calls ReStyle() on this
                    IReStyle and then walks every child; calling ReStyle() separately first ran
                    the same walk twice more. */
@@ -543,17 +629,27 @@ namespace JoeBrowser
             }
             finally
             {
-                if (frozen && IsHandleCreated)
+                foreach (var h in handles)
                 {
-                    try { Native.SendMessage(Handle, 0x000B, (IntPtr)1, IntPtr.Zero); } catch { }
+                    try { Native.SendMessage(h, Native.WM_SETREDRAW, (IntPtr)1, IntPtr.Zero); } catch { }
                 }
-                if (IsHandleCreated)
-                {
-                    try { Native.WindowBorderColor(Handle, Theme.Line); } catch { }
-                    try { Native.ImmersiveDarkMode(Handle, Theme.Dark); } catch { }
-                }
-                if (IsHandleCreated) Native.ComposeNow(Handle);
+                try { Native.WindowBorderColor(Handle, Theme.Line); } catch { }
+                try { Native.ImmersiveDarkMode(Handle, Theme.Dark); } catch { }
+                /* Thawing a window does not repaint it, so the whole tree is invalidated and
+                   painted in one pass here. Without the invalidate the controls that were
+                   frozen kept the pixels they had, and the window showed the new background
+                   over the old controls. */
+                Invalidate(true);
+                Native.ComposeNow(Handle, true);
             }
+        }
+
+        /// <summary>Every window handle under <paramref name="root"/>, the root included.</summary>
+        private static void CollectHandles(Control root, List<IntPtr> into)
+        {
+            if (root == null) return;
+            if (root.IsHandleCreated) into.Add(root.Handle);
+            foreach (Control child in root.Controls) CollectHandles(child, into);
         }
 
         public JBForm()
@@ -1880,7 +1976,7 @@ namespace JoeBrowser
 
             if (paged && end < Items.Count)
             {
-                var more = new JBMenu.Item("More…  (" + (Items.Count - end) + ")", "chevron-down");
+                var more = new JBMenu.Item("Moreâ€¦  (" + (Items.Count - end) + ")", "chevron-down");
                 more.Click += delegate { _pagingNav = true; _pageStart = end; ReopenMenu(); };
                 _menu.Items.Add(more);
             }

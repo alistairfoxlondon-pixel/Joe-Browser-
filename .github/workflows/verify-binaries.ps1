@@ -37,6 +37,10 @@ foreach ($f in @('dist\JoeBrowser.exe', 'dist\JoeBrowserSetup.exe')) {
     $err = Join-Path $env:RUNNER_TEMP 'selftest.err'
     $p = Start-Process -FilePath (Join-Path $repoRoot $f) -ArgumentList '--selftest' -PassThru `
          -RedirectStandardOutput $out -RedirectStandardError $err
+    # Touching the handle caches it, and a cached handle is what makes ExitCode readable
+    # afterwards. Without it the property comes back empty on some hosts and the check
+    # below would read an empty code as a failure.
+    $null = $p.Handle
     if (-not $p.WaitForExit(60000)) {
         try { $p.Kill() } catch { }
         throw "$f --selftest did not exit within 60 seconds"

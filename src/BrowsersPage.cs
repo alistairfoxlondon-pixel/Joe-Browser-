@@ -1,7 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace JoeBrowser
@@ -14,22 +16,70 @@ namespace JoeBrowser
     }
 
     /// <summary>
-    /// Everything about the five engines in one place: what is on this PC, which version,
-    /// where it lives, and a Download button that fetches the official installer without
-    /// leaving the app. Reached from the sidebar so a user never has to hunt through Settings.
+    /// The browser manager.
+    ///
+    /// Everything about the engines is in one place, the way AdsPower and GoLogin keep it:
+    /// which engine a build belongs to, which release channel it came from, which exact
+    /// versions are on this machine, and which ones can be fetched. The page does three
+    /// things and nothing else - it lists what is installed, it offers what can be
+    /// installed, and it installs or removes a build without leaving the application.
+    ///
+    /// Nothing is downloaded when the application starts. A build is fetched the first
+    /// time somebody asks for it: from this page, or from opening a profile that is
+    /// pinned to a build this machine does not have yet.
     /// </summary>
     internal sealed class BrowsersPage : Panel, IReStyle, ISyncLayout
     {
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
-        private readonly List<EngineRow> _rows = new List<EngineRow>();
-        private readonly List<EngineInfo> _engines = new List<EngineInfo>();
-        private JBButton _rescan, _openFolder, _kernels;
-        private JBLabel _section, _note;
+        private readonly JBSegment _engines, _channels;
+        private readonly JBButton _refresh, _openFolder;
+        private readonly List<Control> _blocks = new List<Control>();
         private bool _layingOut;
         private bool _ready;
 
+        /// <summary>Engine keys, in the order they are offered.</summary>
+        public static readonly string[] EngineKeys = { "chromium", "chrome", "brave", "firefox", "edge" };
+        public static readonly string[] EngineLabels = { "Chromium", "Chrome", "Brave", "Firefox", "Edge" };
+
+        /// <summary>Release channels, in the order they are offered.</summary>
+        public static readonly string[] ChannelKeys = { "All", "Stable", "Beta", "Dev", "Canary", "ESR", "Nightly" };
+
+        private string _engine = "chromium";
+        private string _channel = "All";
+        private int _token;
+
+        /// <summary>True while a catalogue is being fetched, so a second one is not started.</summary>
+        private bool _loading;
+
+        /// <summary>Set when a load is asked for while another one is still running.</summary>
+        private bool _reload;
+
+        /// <summary>Raised for the actions this page cannot carry out itself.</summary>
         public event EventHandler<BrowserActionEventArgs> ActionRequested;
+
+        /// <summary>Raised when the page has something to tell the user.</summary>
+        public event EventHandler<BrowserMessageEventArgs> MessageRaised;
+
+        /// <summary>
+        /// A publisher that does not answer must not leave the page saying "loading" for
+        /// ever. After this long the row says so, and the answer that arrives later replaces
+        /// it.
+        /// </summary>
+        private readonly System.Windows.Forms.Timer _slow = new System.Windows.Forms.Timer { Interval = 22000 };
+
+        internal sealed class BrowserMessageEventArgs : EventArgs
+        {
+            public readonly string Text;
+            public readonly ToastKind Kind;
+            public BrowserMessageEventArgs(string text, ToastKind kind) { Text = text; Kind = kind; }
+        }
+
+        private void Say(string text, ToastKind kind)
+        {
+            var h = MessageRaised;
+            if (h != null) h(this, new BrowserMessageEventArgs(text, kind));
+        }
 
         public BrowsersPage()
         {
@@ -39,151 +89,339 @@ namespace JoeBrowser
             _host = new JBScrollHost(_column);
             Controls.Add(_host);
 
-            /* No page title here: the header band above already names the page and says what it
-               is for. Repeating it inside the scroll area was the single most common piece of
-               duplicated text across the app. */
-            _rescan = MakeButton("Re-scan", "refresh", BtnKind.Soft, "rescan");
-            _openFolder = MakeButton("Open browsers folder", "folder", BtnKind.Soft, "openfolder");
-            /* Kernels are the pinned builds a profile can be locked to - the same idea as the
-               version picker in an anti-detect browser, and the only way to keep a profile on
-               one exact version after the everyday browser updates. */
-            _kernels = MakeButton("Kernels", "layers", BtnKind.Primary, "kernels");
-            _column.Controls.Add(_rescan);
-            _column.Controls.Add(_openFolder);
-            _column.Controls.Add(_kernels);
-
-            _section = new JBLabel(LabelRole.Accent, "SUPPORTED ENGINES");
-            _column.Controls.Add(_section);
-
-            foreach (var e in EngineCatalog())
+            /* Engine first: it is the bigger decision, and everything below it follows from
+               it. The channel picker narrows what the engine offers. */
+            _engines = new JBSegment { Height = Ui.S(38) };
+            _engines.SetItems(EngineLabels, 0);
+            _engines.SelectedIndexChanged += delegate
             {
-                var row = new EngineRow(e);
-                row.ActionRequested += delegate(object s, EventArgs ev)
-                {
-                    var r = (EngineRow)s;
-                    // The button says what it does; the action has to match the label.
-                    if (!r.Info.Checked) Rescan();
-                    else Raise(r.Info.Installed ? "reveal" : "install", r.Info.Key);
-                };
-                _column.Controls.Add(row);
-                _rows.Add(row);
-                _engines.Add(e);
-            }
+                int i = _engines.SelectedIndex;
+                _engine = i >= 0 && i < EngineKeys.Length ? EngineKeys[i] : "chromium";
+                Load();
+            };
+            Controls.Add(_engines);
 
-            _note = new JBLabel(LabelRole.Faint,
-                "Joe Browser's built-in Chromium installs into this app's folder. Local browsers are optional.");
-            _note.Wrap = true;
-            _column.Controls.Add(_note);
+            _channels = new JBSegment { Height = Ui.S(34) };
+            _channels.SetItems(ChannelKeys, 0);
+            _channels.SelectedIndexChanged += delegate
+            {
+                int i = _channels.SelectedIndex;
+                _channel = i >= 0 && i < ChannelKeys.Length ? ChannelKeys[i] : "All";
+                Load();
+            };
+            Controls.Add(_channels);
+
+            _refresh = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = "Refresh", Radius = Theme.ButtonRadius, Height = Theme.Field };
+            _refresh.Click += delegate { Load(); };
+            Controls.Add(_refresh);
+
+            _openFolder = new JBButton { Kind = BtnKind.Soft, Icon = "folder", Text = "Builds folder", Radius = Theme.ButtonRadius, Height = Theme.Field };
+            _openFolder.Click += delegate { OpenFolder(); };
+            Controls.Add(_openFolder);
+
+            _slow.Tick += delegate
+            {
+                _slow.Stop();
+                if (IsDisposed || Disposing) return;
+                string engine = _engine;
+                /* Still waiting: say so, and offer the one thing that helps. */
+                if (_blocks.Count == 0) return;
+                var last = _blocks[_blocks.Count - 1] as BuildRow;
+                if (last == null || !last.Busy) return;
+                ClearBlocks();
+                AddInstalled(engine);
+                AddHead("AVAILABLE BUILDS");
+                AddMessage("The publisher is not answering. The connection may be slow or blocked.");
+                var again = new BuildRow("Try again", engine, "", "", false);
+                again.ActionRequested += delegate { Load(); };
+                AddBlock(again);
+                LayoutCore();
+            };
 
             _ready = true;
-            Rescan();
+            /* The catalogue is not read here. The page is built while the window is still
+               opening, and asking a publisher for its list of builds is not something the
+               start-up has to wait for: the list is fetched the first time the page is
+               opened, and a page nobody opens costs nothing. */
         }
 
-        private JBButton MakeButton(string text, string icon, BtnKind kind, string key)
+        private void OpenFolder()
         {
-            var b = new JBButton { Kind = kind, Icon = icon, Text = text, Radius = Theme.ButtonRadius, Height = Theme.Field };
-            b.Click += delegate { Raise(key, null); };
-            return b;
-        }
-
-        private void Raise(string key, string engine)
-        {
-            var h = ActionRequested;
-            if (h != null) h(this, new BrowserActionEventArgs(key, engine));
-        }
-
-        /// <summary>Re-reads the disk. Cheap enough to run on every visit to the page.</summary>
-        public void Rescan()
-        {
-            bool ok = true;
-            List<BrowserInfo> found;
-            try { found = BrowserLocator.FindAll(); }
-            catch (Exception ex)
+            try
             {
-                /* Detection runs on whatever Windows will let us read. When it throws, every
-                   engine used to end up "Not installed" - the app then offered to download a
-                   browser the user already had. Say "could not check" instead. */
-                Log.Error("Browser detection failed", ex);
-                found = new List<BrowserInfo>();
-                ok = false;
+                Directory.CreateDirectory(KernelStore.Root);
+                System.Diagnostics.Process.Start("explorer.exe", "\"" + KernelStore.Root + "\"");
             }
-            foreach (var e in _engines)
+            catch (Exception ex) { Log.Error("Could not open the builds folder", ex); }
+        }
+
+        /// <summary>
+        /// Rebuilds the list: what this machine has for the chosen engine, what the engine
+        /// offers, and what is installed on this PC outside the application. The catalogue is
+        /// fetched in the background so the page is never blocked by a slow publisher.
+        /// </summary>
+        public void Load()
+        {
+            if (!_ready) return;
+            /* One catalogue at a time: a second request while the first is in flight is
+               wasted traffic and a wasted second on the page. The request is remembered
+               and run when the first one is done, so switching tabs quickly still ends
+               on the engine that was asked for last. */
+            if (_loading) { _reload = true; return; }
+            _loading = true;
+            string engine = _engine;
+            string channel = _channel;
+            int token = ++_token;
+
+            ClearBlocks();
+            AddInstalled(engine);
+            AddHead("AVAILABLE BUILDS");
+            var wait = new BuildRow("Contacting the publisher\u2026", engine, "", "", false);
+            wait.Busy = true;
+            wait.BusyText = "Loading the catalogue";
+            wait.Progress = 0;
+            AddBlock(wait);
+            LayoutCore();
+
+            _slow.Stop();
+            _slow.Start();
+
+            Task.Run(new Func<object[]>(delegate
             {
-                e.Found = FindInstalled(found, e.Key);
-                e.Checked = ok || e.Found != null;
+                List<KernelRelease> catalog = null;
+                try { catalog = KernelStore.CatalogCached(engine); }
+                catch (Exception ex) { Log.Error("Browser catalogue failed", ex); }
+                /* The browsers installed on this PC are found on the same thread: the search
+                   reads a version resource off disk for every candidate, which is slow enough
+                   to be felt as a stutter on a page that is supposed to answer instantly. */
+                List<BrowserInfo> local = null;
+                try { local = BrowserLocator.FindAll(); } catch { }
+                return new object[] { catalog, local };
+            }))
+                .ContinueWith(delegate(Task<object[]> t)
+                {
+                    List<KernelRelease> catalog = null;
+                    List<BrowserInfo> local = null;
+                    try
+                    {
+                        var r = t.Result;
+                        catalog = r[0] as List<KernelRelease>;
+                        local = r[1] as List<BrowserInfo>;
+                    }
+                    catch (Exception ex) { Log.Error("Browser catalogue failed", ex); }
+                    try
+                    {
+                        if (IsDisposed) return;
+                        if (InvokeRequired) BeginInvoke(new Action(delegate { Fill(engine, channel, catalog, local, token); }));
+                        else Fill(engine, channel, catalog, local, token);
+                    }
+                    catch { }
+                    finally
+                    {
+                        _loading = false;
+                        if (_reload) { _reload = false; Load(); }
+                    }
+                });
+        }
+
+        private void Fill(string engine, string channel, List<KernelRelease> catalog, List<BrowserInfo> local, int token)
+        {
+            /* The user may have switched engine while the catalogue was in flight. */
+            if (token != _token || engine != _engine) return;
+
+            ClearBlocks();
+            AddInstalled(engine);
+            AddHead("AVAILABLE BUILDS");
+
+            var mine = InstalledFor(engine);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int shown = 0;
+            if (catalog != null)
+            {
+                foreach (var rel in catalog)
+                {
+                    if (rel == null) continue;
+                    if (channel != "All" && !string.Equals(rel.Channel, channel, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!seen.Add(rel.Version)) continue;
+                    bool have = false;
+                    foreach (var k in mine)
+                        if (string.Equals(k.Version, rel.Version, StringComparison.OrdinalIgnoreCase)) { have = true; break; }
+                    if (have) continue;
+                    var row = new BuildRow(rel.Version, engine, rel.Version,
+                        (string.IsNullOrEmpty(rel.Channel) ? "" : rel.Channel + "  \u00b7  ") +
+                        (rel.SizeMb > 0 ? rel.SizeMb + " MB" : "Portable build"), false);
+                    row.ActionRequested += delegate { Install(rel, row); };
+                    AddBlock(row);
+                    if (++shown >= 40) break;
+                }
             }
-            foreach (var r in _rows) { r.Apply(); r.Invalidate(); }
+            if (shown == 0)
+            {
+                AddMessage(catalog == null
+                    ? "The publisher could not be reached. Check the connection and press Refresh."
+                    : "No " + (channel == "All" ? "" : channel.ToLowerInvariant() + " ") + Label(engine) +
+                      " build is published for this channel right now.");
+            }
+
+            /* --- browsers that are already on this PC --- */
+            AddHead("ON THIS PC");
+            if (local == null) local = new List<BrowserInfo>();
+            int found = 0;
+            foreach (var b in local)
+            {
+                if (b == null || !b.Found) continue;
+                var row = new BuildRow(b.Name, KeyOf(b), "", "v" + (b.Version ?? "") + "  \u00b7  installed", false);
+                row.ActionRequested += delegate { Reveal(b); };
+                AddBlock(row);
+                found++;
+            }
+            if (found == 0) AddMessage("No browser is installed outside Joe Browser.");
+
             LayoutCore();
         }
 
-        /// <summary>The install of <paramref name="key"/> this PC actually has, or null.</summary>
-        public static BrowserInfo FindInstalled(string key)
+        private void AddInstalled(string engine)
         {
-            return FindInstalled(BrowserLocator.FindAll(), key);
-        }
-
-        private static BrowserInfo FindInstalled(List<BrowserInfo> all, string key)
-        {
-            foreach (var b in all)
+            AddHead("INSTALLED BUILDS");
+            var mine = InstalledFor(engine);
+            if (mine.Count == 0)
             {
-                if (key == "chrome" && b.Name == "Chrome" && !b.IsEdge && !b.IsBrave && !b.IsFirefox && !IsPortable(b)) return b;
-                if (key == "edge" && b.IsEdge) return b;
-                if (key == "brave" && b.IsBrave) return b;
-                if (key == "firefox" && b.IsFirefox) return b;
-                if (key == "chromium" && !b.IsEdge && !b.IsBrave && !b.IsFirefox &&
-                    (b.Name != "Chrome" || IsPortable(b))) return b;
+                AddMessage("No " + Label(engine) + " build is installed yet. Pick a version below.");
+                return;
             }
-            return null;
-        }
-
-        private static bool IsPortable(BrowserInfo b)
-        {
-            return b.Path != null && b.Path.StartsWith(AppPaths.Browsers + Path.DirectorySeparatorChar,
-                StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>The engines Joe Browser supports, in the order a new user meets them.</summary>
-        public static List<EngineInfo> EngineCatalog()
-        {
-            return new List<EngineInfo>
+            foreach (var k in mine)
             {
-                /* The built-in kernel first and described for what it is: this app's own
-                   browser, downloaded here and managed here - never a browser that came
-                   with Windows. */
-                new EngineInfo("chromium", "Joe Browser Chromium (built-in)",
-                    "This app's own kernel. Downloaded into Joe Browser, never your local browser.", true),
-                new EngineInfo("chrome", "Google Chrome",
-                    "Optional. Only used by profiles that pick it by name.", true),
-                new EngineInfo("brave", "Brave",
-                    "Optional Chromium with ad blocking.", true),
-                new EngineInfo("firefox", "Mozilla Firefox",
-                    "Optional Gecko engine. No Chrome extensions.", true),
-                new EngineInfo("edge", "Microsoft Edge",
-                    "Optional. Ships with Windows.", false)
-            };
-        }
-
-        public void SetBusy(string engine, bool busy, string text)
-        {
-            foreach (var r in _rows)
-            {
-                if (engine == null || r.Info.Key == engine)
-                {
-                    r.Busy = busy;
-                    r.BusyText = text;
-                    r.Apply();
-                    r.Invalidate();
-                }
+                var row = new BuildRow(Label(engine) + " " + k.Version, engine, k.Version,
+                    string.IsNullOrEmpty(k.FileVersion) ? "Installed" : "Installed  \u00b7  v" + k.FileVersion, true);
+                row.ActionRequested += delegate { RemoveBuild(k); };
+                AddBlock(row);
             }
-            _rescan.Enabled = !busy;
-            _rescan.Invalidate();
+        }
+
+        private static List<KernelInstall> InstalledFor(string engine)
+        {
+            var mine = new List<KernelInstall>();
+            try
+            {
+                foreach (var k in KernelStore.Installed())
+                    if (k != null && string.Equals(k.Engine, engine, StringComparison.OrdinalIgnoreCase)) mine.Add(k);
+            }
+            catch { }
+            mine.Sort(delegate(KernelInstall a, KernelInstall b)
+            {
+                return string.CompareOrdinal(b.FileVersion ?? "", a.FileVersion ?? "");
+            });
+            return mine;
+        }
+
+        private static string KeyOf(BrowserInfo b)
+        {
+            if (b.IsEdge) return "edge";
+            if (b.IsBrave) return "brave";
+            if (b.IsFirefox) return "firefox";
+            if (b.Name == "Chrome") return "chrome";
+            return "chromium";
+        }
+
+        private async void Install(KernelRelease rel, BuildRow row)
+        {
+            if (rel == null || row == null || row.Busy) return;
+            row.Busy = true;
+            row.BusyText = "Starting\u2026";
+            row.Invalidate();
+            try
+            {
+                await KernelStore.InstallAsync(rel,
+                    delegate(int pct, string msg) { row.Progress = pct; row.BusyText = msg ?? "Working\u2026"; },
+                    CancellationToken.None).ConfigureAwait(true);
+                KernelDiversity.Invalidate();
+                Say(Label(rel.Engine) + " " + rel.Version + " is installed", ToastKind.Success);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Build install failed", ex);
+                Say("The build could not be installed: " + OneLine(ex.Message), ToastKind.Error);
+            }
+            finally
+            {
+                row.Busy = false;
+                Load();
+            }
+        }
+
+        private void RemoveBuild(KernelInstall k)
+        {
+            if (k == null) return;
+            if (!ConfirmForm.Ask(this, "Remove this build",
+                "Remove " + Label(k.Engine) + " " + k.Version + " from this PC?",
+                "Profiles pinned to it will use the installed browser instead.",
+                "Remove", BtnKind.Danger)) return;
+            try
+            {
+                KernelStore.Delete(k);
+                Say("Build removed", ToastKind.Success);
+            }
+            catch (Exception ex)
+            {
+                Say("The build could not be removed: " + OneLine(ex.Message), ToastKind.Error);
+            }
+            Load();
+        }
+
+        private void Reveal(BrowserInfo b)
+        {
+            try { System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + b.Path + "\""); }
+            catch (Exception ex) { Log.Error("Could not reveal the browser", ex); }
+        }
+
+        private static string OneLine(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "unknown error";
+            int i = s.IndexOf('\n');
+            if (i > 0) s = s.Substring(0, i);
+            return s.Trim();
+        }
+
+        /// <summary>The name of an engine, for the interface.</summary>
+        public static string Label(string engine)
+        {
+            if (string.IsNullOrEmpty(engine)) return "Browser";
+            for (int i = 0; i < EngineKeys.Length; i++)
+                if (string.Equals(EngineKeys[i], engine, StringComparison.OrdinalIgnoreCase)) return EngineLabels[i];
+            return engine;
+        }
+
+        // ------------------------------------------------------------------ layout
+
+        private void ClearBlocks()
+        {
+            foreach (var b in _blocks) { _column.Controls.Remove(b); b.Dispose(); }
+            _blocks.Clear();
+        }
+
+        private void AddBlock(Control c) { _column.Controls.Add(c); _blocks.Add(c); }
+
+        private void AddHead(string title)
+        {
+            AddBlock(new JBLabel(LabelRole.Accent, title));
+        }
+
+        private void AddMessage(string text)
+        {
+            var l = new JBLabel(LabelRole.Faint, text);
+            l.Wrap = true;
+            AddBlock(l);
         }
 
         public void ReStyle()
         {
             BackColor = Theme.Bg;
             _column.BackColor = Theme.Bg;
-            foreach (var r in _rows) r.ReStyle();
+            foreach (var b in _blocks)
+            {
+                var re = b as IReStyle;
+                if (re != null) re.ReStyle();
+            }
             Invalidate(true);
         }
 
@@ -199,137 +437,150 @@ namespace JoeBrowser
             _layingOut = true;
             try
             {
-                _host.SetBounds(0, 0, Math.Max(1, Width), Math.Max(1, Height));
+                int w = Width, h = Height;
                 int pad = Ui.S(28);
-                int inner = Math.Max(Ui.S(300), _host.Width - Ui.S(10) - pad * 2);
+                int inner = Math.Max(Ui.S(300), w - Ui.S(10) - pad * 2);
 
-                /* Shared flow: the three wrap on a narrow window instead of the last one
-                   running off the right edge of the page. */
-                int by = Ui.S(6);
-                JBButton[] actions = { _rescan, _openFolder, _kernels };
-                int y = Ui.FlowButtons(actions, pad, by, inner, Ui.S(10), Ui.S(Theme.ControlHeight)) + Ui.S(24);
-                _section.SetBounds(pad, y, inner, Ui.S(18));
-                y += Ui.S(18) + Ui.S(12);
+                /* Engine tabs across the top, then the channel picker under them. Both are
+                   measured, so a long name never runs into the one next to it. */
+                int engW = Math.Max(Ui.S(260), Math.Min(_engines.PreferredWidth(Ui.S(90)), inner));
+                _engines.SetBounds(pad, Ui.S(6), engW, Ui.S(38));
 
-                foreach (var r in _rows)
+                int chW = Math.Max(Ui.S(240), Math.Min(_channels.PreferredWidth(Ui.S(64)), inner));
+                _channels.SetBounds(pad, Ui.S(52), chW, Ui.S(34));
+
+                /* The two buttons sit to the right of the channel picker when there is room,
+                   and under it when there is not. */
+                int btnW = Math.Min(Ui.S(150), Math.Max(Ui.S(110), _refresh.PreferredWidth(Ui.S(110))));
+                int folderW = Math.Min(Ui.S(170), Math.Max(Ui.S(120), _openFolder.PreferredWidth(Ui.S(120))));
+                int right = pad + inner;
+                int contentTop = Ui.S(96);
+                if (right - (pad + chW) >= btnW + folderW + Ui.S(20))
                 {
-                    r.SetBounds(pad, y, inner, EngineRow.RowH);
-                    /* Advance by the row's own height. The fixed 84 was the height at the OLD
-                       type scale: RowH is measured from the fonts and grows past 84 at 150%,
-                       so the rows were placed 84 apart but drawn taller - every engine row
-                       after the first overlapped the one before it. */
-                    y += EngineRow.RowH + Ui.S(10);
+                    _refresh.SetBounds(right - btnW, Ui.S(52), btnW, Ui.S(34));
+                    _openFolder.SetBounds(right - btnW - folderW - Ui.S(8), Ui.S(52), folderW, Ui.S(34));
+                }
+                else
+                {
+                    _refresh.SetBounds(right - btnW, contentTop, btnW, Ui.S(34));
+                    _openFolder.SetBounds(right - btnW - folderW - Ui.S(8), contentTop, folderW, Ui.S(34));
+                    contentTop += Ui.S(34) + Ui.S(10);
                 }
 
-                y += Ui.S(10);
-                _note.SetBounds(pad, y, Math.Min(inner, Ui.S(820)), Ui.S(24));
-                y += Ui.S(24) + Ui.S(24);
+                /* The list scrolls; the filters do not. The host therefore starts under the
+                   filter row instead of under the page, which also keeps the two from
+                   covering each other. */
+                _host.SetBounds(0, contentTop, Math.Max(1, w), Math.Max(1, h - contentTop));
 
-                _column.SetBounds(0, 0, Math.Max(inner + pad * 2, _host.Width - Ui.S(10)),
-                    Math.Max(y, _host.Height));
+                /* The blocks are laid out in the order they were added: a heading, then the
+                   rows and messages under it, then the next heading. One list, so a section
+                   can never drift out of step with the rows it introduces. */
+                int y = 0;
+                foreach (var b in _blocks)
+                {
+                    var head = b as JBLabel;
+                    var row = b as BuildRow;
+                    if (row != null)
+                    {
+                        row.SetBounds(pad, y, inner, BuildRow.RowH);
+                        y += BuildRow.RowH + Ui.S(8);
+                    }
+                    else if (head != null && head.Role == LabelRole.Accent)
+                    {
+                        head.SetBounds(pad, y, inner, Ui.S(18));
+                        y += Ui.S(18) + Ui.S(10);
+                    }
+                    else
+                    {
+                        head.SetBounds(pad, y, inner, Ui.S(22));
+                        y += Ui.S(22) + Ui.S(8);
+                    }
+                }
+
+                y += Ui.S(12);
+                _column.SetBounds(0, 0, Math.Max(inner + pad * 2, _host.Width - Ui.S(10)), Math.Max(y, _host.Height));
                 _host.SyncExtent();
             }
             finally { _layingOut = false; }
         }
     }
 
-    /// <summary>One supported engine and what this PC has of it.</summary>
-    internal sealed class EngineInfo
+    /// <summary>
+    /// One build in the list: the version, where it came from, and the one thing that can be
+    /// done with it. While a build is being fetched the row shows the progress instead of a
+    /// button, so the download is visible in the place it was started from.
+    /// </summary>
+    internal sealed class BuildRow : Control, IReStyle
     {
-        public readonly string Key, Name, Desc;
-        public readonly bool CanDownload;
-        public BrowserInfo Found;
+        public readonly string Title;
+        public readonly string Engine;
+        public readonly string Version;
+        public readonly string Subtitle;
+        public readonly bool Installed;
 
-        public EngineInfo(string key, string name, string desc, bool canDownload)
-        {
-            Key = key; Name = name; Desc = desc; CanDownload = canDownload;
-        }
-
-        public bool Installed { get { return Found != null && Found.Found; } }
-        public string Version { get { return Found == null ? "" : Found.Version ?? ""; } }
-
-        /// <summary>
-        /// False when this engine's detection could not run at all, as opposed to having run and
-        /// found nothing. The row must not say "Not installed" for the former: it is a claim
-        /// about the user's PC that a failed probe cannot support.
-        /// </summary>
-        public bool Checked = true;
-    }
-
-    /// <summary>A single engine card: mark, name, status line and one contextual action.</summary>
-    internal sealed class EngineRow : Control, IReStyle
-    {
-        public readonly EngineInfo Info;
         public bool Busy;
-        public string BusyText = "Installing\u2026";
+        public string BusyText = "Working\u2026";
+        public int Progress;
+
         public event EventHandler ActionRequested;
 
         private readonly JBButton _action;
         private bool _hover;
+        private readonly AnimValue _hoverT;
 
-        public EngineRow(EngineInfo info)
+        public BuildRow(string title, string engine, string version, string subtitle, bool installed)
         {
-            Info = info;
+            Title = title ?? "";
+            Engine = engine ?? "";
+            Version = version ?? "";
+            Subtitle = subtitle ?? "";
+            Installed = installed;
+
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             Ui.Opaque(this);
+            _hoverT = new AnimValue(this);
             _action = new JBButton { Radius = Theme.ButtonRadius, Height = Ui.S(32) };
-            _action.Click += delegate { var h = ActionRequested; if (h != null) h(this, EventArgs.Empty); };
+            _action.Click += delegate { if (!Busy) { var h = ActionRequested; if (h != null) h(this, EventArgs.Empty); } };
             Controls.Add(_action);
             Apply();
-            /* Height last: setting it raises OnResize, which positions the button. */
-            Height = Ui.S(84);
+            Height = RowH;
         }
 
-        public void Apply()
+        private void Apply()
         {
             if (Busy)
             {
                 _action.Kind = BtnKind.Soft;
                 _action.Icon = "download";
-                _action.Text = "Working\u2026";
+                _action.Text = Progress > 0 ? Progress + "%" : "Working\u2026";
                 _action.Enabled = false;
             }
-            else if (Info.Installed)
+            else if (Installed)
             {
                 _action.Kind = BtnKind.Soft;
-                _action.Icon = "folder";
-                _action.Text = "Show file";
-            }
-            else if (!Info.Checked)
-            {
-                /* Unknown, not missing: the honest action is to look again. */
-                _action.Kind = BtnKind.Soft;
-                _action.Icon = "refresh";
-                _action.Text = "Re-scan";
-            }
-            else if (Info.CanDownload)
-            {
-                _action.Kind = BtnKind.Primary;
-                _action.Icon = "download";
-                _action.Text = "Download";
+                _action.Icon = "trash";
+                _action.Text = "Remove";
             }
             else
             {
-                _action.Kind = BtnKind.Soft;
-                _action.Icon = "external";
-                _action.Text = "Get it";
+                _action.Kind = BtnKind.Primary;
+                _action.Icon = "download";
+                _action.Text = "Install";
             }
-            _action.Enabled = !Busy;
-            /* The label changes with the state; the width has to follow or a longer label clips
-               inside the button the resize laid out for the previous text. */
             OnResize(EventArgs.Empty);
         }
 
         public void ReStyle() { Invalidate(); }
+
         protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(Ui.SurfaceColor(this)); }
 
-        /// <summary>A mark, a title, a status line and a description, with the same padding above and below.</summary>
+        /// <summary>Height of one row: two lines of text and a button, with room to breathe.</summary>
         public static int RowH
         {
             get
             {
-                int text = Theme.LineHeight(Theme.H3) + Ui.S(4) + Theme.LineHeight(Theme.Caption) * 2;
-                return Math.Max(Ui.S(84), Math.Max(text + Ui.S(24), Ui.S(44) + Ui.S(28)));
+                int text = Theme.LineHeight(Theme.H3) + Ui.S(4) + Theme.LineHeight(Theme.Caption);
+                return Math.Max(Ui.S(58), Math.Max(text + Ui.S(20), Theme.Field + Ui.S(16)));
             }
         }
 
@@ -337,75 +588,47 @@ namespace JoeBrowser
         {
             base.OnResize(e);
             if (_action == null) return;
-            /* The button is kept inside the row: a long translation makes a preferred width
-               wider than the row, and the old placement then put its left edge at 8 px while its
-               right edge stayed off the card. */
             int bh = Math.Min(Theme.Field, Math.Max(Ui.S(28), Height - Ui.S(16)));
-            int w = Math.Min(Math.Max(Ui.S(96), Width - Ui.S(120)), _action.PreferredWidth(Ui.S(132)));
-            _action.SetBounds(Math.Max(Ui.S(8), Width - Ui.S(16) - w), (Height - bh) / 2, w, bh);
+            int w = Math.Min(Math.Max(Ui.S(92), Width - Ui.S(110)), _action.PreferredWidth(Ui.S(108)));
+            _action.SetBounds(Math.Max(Ui.S(8), Width - Ui.S(14) - w), (Height - bh) / 2, w, bh);
         }
 
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; _hoverT.Toward(true, 0.28f); Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; _hoverT.Toward(false, 0.2f); Invalidate(); base.OnMouseLeave(e); }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
             Ui.Quality(g);
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), _hover ? Theme.PanelHover : Theme.Card);
-            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), _hover ? Theme.AccentBorder : Theme.Line, 1f);
+            Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Ui.Blend(Theme.Card, Theme.PanelHover, _hoverT.Value));
+            Ui.Stroke(g, r, Ui.S(Theme.ButtonRadius), Ui.Blend(Theme.Line, Theme.AccentBorder, _hoverT.Value * 0.7f));
 
-            float d = Ui.S(44);
-            var mark = new RectangleF(Ui.S(18), (Height - d) / 2f, d, d);
-            BrowserMark.Draw(g, mark, Info.Key);
+            float x = Ui.S(16);
+            float tw = Math.Max(Ui.S(80), _action.Left - x - Ui.S(12));
 
-            float x = mark.Right + Ui.S(16);
-            float rightEdge = _action.Left - Ui.S(14);
-            float tw = Math.Max(Ui.S(120), rightEdge - x);
-
-            /* Three lines, measured and centred as a block. They used to be pinned to the centre
-               with fixed offsets of 24, 6 and 12, which only lines up for one font size: at 150%
-               the description sat on the status line. */
             float titleH = Theme.LineHeight(Theme.H3);
             float capH = Theme.LineHeight(Theme.Caption);
-            float blockH = titleH + Ui.S(2) + capH + Ui.S(2) + capH;
+            float blockH = titleH + Ui.S(4) + capH;
             float top = Math.Max(Ui.S(8), (Height - blockH) / 2f);
 
-            Ui.Text(g, Info.Name, Theme.H3, Theme.Text, x, top, tw);
+            Ui.Text(g, Title, Theme.H3, Theme.Text, x, top, tw);
 
-            // status line: a coloured dot, then "Installed · version" or "Not installed"
-            float dot = Ui.S(7);
-            float statusY = top + titleH + Ui.S(2);
-            var dr = new RectangleF(x, statusY + (capH - dot) / 2f, dot, dot);
-            Color dotColor = Busy ? Theme.Accent : Info.Installed ? Theme.Success : Theme.TextFaint;
-            using (var b = new SolidBrush(dotColor)) g.FillEllipse(b, dr);
+            Color ink = Installed ? Theme.Success : Theme.TextDim;
+            string sub = Busy ? (BusyText ?? "") : Subtitle;
+            if (Busy && Progress > 0) sub = Progress + "%  \u00b7  " + sub;
+            Ui.Text(g, sub, Theme.Caption, Busy ? Theme.Accent : ink, x, top + titleH + Ui.S(4), tw);
 
-            /* "Not installed" is a claim about the user's PC. When the detector itself could not
-               run, saying so is the difference between "install a browser" and "this app is
-               broken" - and it stops a Download from being offered for something already there. */
-            string status = Busy
-                ? (string.IsNullOrEmpty(BusyText) ? "Working\u2026" : BusyText)
-                : Info.Installed
-                    ? (string.IsNullOrEmpty(Info.Version) ? "Installed" : "Installed  \u00b7  " + ShortVersion(Info.Version))
-                    : !Info.Checked ? "Could not check, re-scan" : "Not installed";
-            /* Theme.Warn IS the warning colour the toasts use; the amber was hardcoded here and
-               drifted whenever the palette moved. */
-            Color statusInk = Busy ? Theme.Accent
-                : Info.Installed || Info.Checked ? Theme.TextDim
-                : Ui.Blend(Theme.TextDim, Theme.Warn, 0.75f);
-            Ui.Text(g, status, Theme.Caption, statusInk, dr.Right + Ui.S(8), statusY, tw - dot - Ui.S(8));
-
-            Ui.Text(g, Info.Desc, Theme.Caption, Theme.TextFaint, x, statusY + capH + Ui.S(2), tw, "left", 1);
-        }
-
-        /// <summary>Chrome reports a four-part product version; two parts is plenty on one line.</summary>
-        private static string ShortVersion(string v)
-        {
-            if (string.IsNullOrEmpty(v)) return v;
-            string[] bits = v.Split('.');
-            if (bits.Length >= 3) return "v" + bits[0] + "." + bits[1] + "." + bits[2];
-            return "v" + v;
+            /* A progress bar under the text, so a download that takes a minute is visibly
+               making progress instead of only saying that it is. */
+            if (Busy && Progress > 0)
+            {
+                float barY = Math.Min(Height - Ui.S(12), top + blockH + Ui.S(6));
+                var track = new RectangleF(x, barY, tw, Ui.S(4));
+                Ui.Fill(g, track, Ui.S(2), Theme.Panel2);
+                float w = tw * Math.Max(0.02f, Math.Min(1f, Progress / 100f));
+                Ui.Fill(g, new RectangleF(track.X, track.Y, w, track.Height), Ui.S(2), Theme.Accent);
+            }
         }
     }
 }

@@ -9,8 +9,9 @@ profile, and pinned browser builds. Nothing leaves your PC.
 · [All releases](../../releases) · [What changed](../../releases/latest)
 
 Windows 10 or 11, 64 bit. The installer is per user: no administrator prompt, nothing
-written outside your profile. Any Chromium based browser or Firefox is optional, because
-the Browsers page can fetch Chromium for you.
+written outside your profile. A browser of your own is optional: the Browsers page can
+fetch Chromium, Chrome, Brave, Firefox and Edge builds for you and keep them inside
+this application.
 
 ---
 
@@ -21,26 +22,51 @@ the Browsers page can fetch Chromium for you.
 | **Unlimited profiles** | Every profile is its own browser with its own cookies, storage, logins and cache, in its own `--user-data-dir`. Free means free: no profile cap and no one-at-a-time limit. |
 | **A real identity per profile** | User agent and client hints, platform, language, screen, timezone, memory, cores, WebGL, canvas and audio noise, and a WebRTC guard. Locale, clock and proxy country are kept in agreement. |
 | **No two profiles alike** | A new identity is compared against every profile you already have across twelve surfaces and re rolled until it is unique. Every profile also gets its own browser build - a real version from a real release, never the one installed on your PC - and the user agent, the client hints and the version on the card all report it. |
-| **Pinned builds** | Download whole Chrome, Brave or Chromium builds once and pin a profile to an exact version, so a vendor update never moves it. |
-| **Any browser you have** | Chrome, Chromium, Brave, Edge and Firefox. The Browsers page shows what is installed, with its version and path, and installs what is missing. |
+| **A real browser manager** | The Browsers page manages **Chromium, Chrome, Brave, Firefox and Edge** the way AdsPower and GoLogin do: every published build, every release channel, installed side by side, removable, and pinnable to a profile. |
+| **Nothing downloads itself** | A build is fetched the first time something needs it - when you ask for it, or when you open a profile pinned to a build this machine does not have yet. Opening the application never starts a download. |
+| **Pinned builds** | Pin a profile to an exact version, so a vendor update never moves it. Chrome reaches back over the last eight majors, so 157, 156, 155 and 154 are all available. |
+| **Any browser you have** | Chrome, Chromium, Brave, Edge and Firefox already on the PC are detected with their version and path, and can be used as they are. |
 | **Proxies** | HTTP, HTTPS and SOCKS5 with authentication. Credentials are applied by a local relay, so a password never appears in a browser command line. Swap the proxy of a running profile without closing its tabs. |
 | **Fingerprint check** | A fifteen point probe inside the profile's own session, plus one click buttons that open the well known checkers in that same session. |
 | **History per profile** | Every page a profile visits, including the redirect hops, isolated per account and clearable. |
 | **Extensions** | Three first party tools written by this app, two store extensions included on Chrome and Brave, and anything you add from a Chrome Web Store link, a `.crx` or a folder. The included pair show their state, so a download that failed says why instead of vanishing. |
-| **Built to be read** | 16 px body text, square corners, one measured layout at every window width, and no control that cuts its own label. |
+| **Built to be read** | 16 px body text, one measured layout at every window width, and no control that cuts its own label. |
 | **Private by default** | Profile data stays in `%APPDATA%\JoeBrowser`. Proxy passwords and the account store are encrypted with Windows DPAPI. No telemetry, no server, no cloud. |
 
-## What changed in 1.8.1
+## What changed in 1.10.0
 
-- The included store pair now loads on **Chrome and Brave only** - not Chromium, not Edge, never Firefox - exactly as specified.
-- Every profile creation fetches the missing pair, so a profile made in the first seconds after launch (or after a failed first fetch) no longer starts without them.
-- A removal mark now beats a stale library entry: a shipped extension the user removed can no longer ride back onto the command line.
-- "Add extension by store link" leaves through the proxy library when one is configured; on proxied machines the bare request it used was what failed.
-- Proxy add/edit and store-link dialogs show their validation error **inside the dialog** (the toast used to sit behind the modal and read as a dead button), and the parser accepts a full-width `：` colon.
-- An outage where neither the proxy nor a direct route works now says so in the window, once per outage; a relay accept loop that dies is logged instead of going silent.
-- The "This PC (direct)" proxy baseline really bypasses proxies now (an empty `WebProxy`, not `null`, which meant the system proxy).
-- Tool-script registration failures (human paste, right-click, proxy banner) are logged instead of vanishing.
-- The Account page gained a **usage card**: profile slots bar, days the subscription still runs, and the invite code with the days it has earned, one click to copy.
+**The Browsers page is a browser manager.** Chromium, Chrome, Brave, Firefox and Edge
+each get a tab; every release channel (Stable, Beta, Dev, Canary, ESR, Nightly) gets a
+filter; every published build is listed with its size and can be installed, removed and
+pinned to a profile. The install progress is shown in the row it started from. A build
+that is already installed is never downloaded twice.
+
+**Versions and channels are real.** Chromium builds now carry their real version numbers
+and channels - 159.0.8154.0 Canary, 159.0.8144.0 Dev, 158.0.8127.18 Beta and so on - and
+Chrome reaches back over the last eight majors, so 157, 156, 155 and 154 are all one
+click away. The kernel window opened on the Chromium tab and listed Chrome builds; it
+now lists the engine whose tab is selected.
+
+**Nothing downloads itself.** Opening the application fetches no browser. A build is
+fetched when it is asked for, and when a profile pinned to a build that is not here yet
+is opened: that build is downloaded, unpacked and launched, with the progress on screen.
+
+**The theme change is a dissolve.** Switching between dark and light moves the whole
+palette a step at a time and repaints the window as one piece, so no frame ever contains
+two themes. The window used to be frozen only at the top level, which let every child
+control repaint on its own and produced the flash.
+
+**The interface moves.** Pages arrive from the side instead of appearing, buttons and
+cards ease into their hover state, and the app answers a click the way a desktop
+application should.
+
+**Less, and better.** The keyboard shortcut wall is gone, tooltips no longer carry
+keyboard hints, the engine picker no longer repeats "not installed" next to a line that
+already says so, and the first profile you create now appears on the grid instead of
+waiting for you to visit another page and come back.
+
+**Faster.** The browser search, the engine detection and the Browsers catalogue all run
+in the background, so the window opens without waiting for a disk read or a publisher.
 
 ## Getting started
 

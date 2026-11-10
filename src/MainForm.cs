@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -64,6 +64,8 @@ namespace JoeBrowser
         private JBButton _setSecurity, _setSignOut;
         private JBButton _emptyBtn, _clearFilter, _aboutTelegram;
         private JBToast _toast;
+
+        /// <summary>The veil that lets a new page arrive instead of appearing.</summary>
 
         // Settings controls
         private JBLabel _setBrowserInfo, _setStoragePath;
@@ -216,15 +218,44 @@ namespace JoeBrowser
         /// <summary>
         /// Profiles created with "auto" detection have no engine recorded, so the card would show
         /// a placeholder. Resolve the engine once and let the marks draw the real browser logo.
+        ///
+        /// The lookup reads the version resource out of every browser on the machine, which
+        /// is a disk round-trip per browser and took half a second. It ran on the thread that
+        /// draws the window, so the application was blank for that half second before it
+        /// appeared at all. It runs in the background now: the window is on screen first and
+        /// the marks settle a moment later.
         /// </summary>
         private void ResolveAutoBrowserKind()
         {
             try
             {
-                var info = BrowserLocator.Detect("auto", _settings.BrowserPath);
-                BrowserMark.AutoKind = info.Found ? info.EngineKey : "";
+                string path = _settings != null ? _settings.BrowserPath : null;
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                {
+                    string engine = "";
+                    try
+                    {
+                        var info = BrowserLocator.Detect("auto", path);
+                        engine = info != null && info.Found ? info.EngineKey : "";
+                    }
+                    catch (Exception ex) { Log.Error("Auto engine lookup failed", ex); }
+                    if (IsDisposed) return;
+                    try
+                    {
+                        if (InvokeRequired) { BeginInvoke(new Action(delegate { ApplyAutoKind(engine); })); }
+                        else ApplyAutoKind(engine);
+                    }
+                    catch { }
+                });
             }
             catch (Exception ex) { Log.Error("Auto engine lookup failed", ex); }
+        }
+
+        private void ApplyAutoKind(string engine)
+        {
+            BrowserMark.AutoKind = engine ?? "";
+            foreach (var c in _cards.Values) c.Invalidate();
+            Invalidate();
         }
 
         private void ApplyScale()
@@ -346,7 +377,7 @@ namespace JoeBrowser
             _newBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("btn.new"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _newBtn.Click += delegate { NewProfile(); };
 
-            _sortBtn = new JBButton { Text = "Sort: recent", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = "Change the order of the list (Ctrl+O)" };
+            _sortBtn = new JBButton { Text = "Sort: recent", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = "Change the order of the list" };
             _sortBtn.Click += delegate { CycleSort(); };
 
             _bulk = new JBPanel { Visible = false };
@@ -355,7 +386,7 @@ namespace JoeBrowser
             _bulkStop = new JBButton { Kind = BtnKind.Soft, Icon = "power", Text = L10n.T("btn.stop"), Radius = Theme.ButtonRadius, Height = Ui.S(32) };
             _bulkDup = new JBButton { Kind = BtnKind.Soft, Icon = "copy", Text = L10n.T("btn.duplicate"), Radius = Theme.ButtonRadius, Height = Ui.S(32) };
             _bulkDel = new JBButton { Kind = BtnKind.Danger, Icon = "trash", Text = L10n.T("btn.delete"), Radius = Theme.ButtonRadius, Height = Ui.S(32) };
-            _bulkCancel = new JBButton { Kind = BtnKind.Ghost, Icon = "close", Radius = Theme.ButtonRadius, Height = Ui.S(32), Tip = "Clear selection (Esc)" };
+            _bulkCancel = new JBButton { Kind = BtnKind.Ghost, Icon = "close", Radius = Theme.ButtonRadius, Height = Ui.S(32), Tip = "Clear selection" };
             _bulkOpen.Click += delegate { BulkOpen(); };
             _bulkStop.Click += delegate { BulkStop(); };
             _bulkDup.Click += delegate { BulkDuplicate(); };
@@ -424,6 +455,10 @@ namespace JoeBrowser
 
             _browsersPage = new BrowsersPage { Visible = false };
             _browsersPage.ActionRequested += delegate(object sender, BrowserActionEventArgs e) { BrowserAction(e.Key, e.Engine); };
+            _browsersPage.MessageRaised += delegate(object sender, BrowsersPage.BrowserMessageEventArgs e)
+            {
+                Toast(e.Text, e.Kind);
+            };
 
             /* History opens on the last profile that was opened, which is the one a user is
                most likely to have forgotten a URL in. */
@@ -585,7 +620,7 @@ namespace JoeBrowser
                    word of warning reads as a broken app rather than a work in progress. */
                 int coverage = L10n.Coverage(l.Key);
                 if (l.Key != "en" && coverage < 100)
-                    subtitle = (subtitle.Length == 0 ? "" : subtitle + "  ·  ") + coverage + "% translated";
+                    subtitle = (subtitle.Length == 0 ? "" : subtitle + "  Â·  ") + coverage + "% translated";
                 list.Add(new LangItem(l.Key, l.Flag, l.English, subtitle));
             }
             return list;
@@ -730,7 +765,7 @@ namespace JoeBrowser
                     new[] { "5", "10", "25", "50", "100" }, 1, "layers");
                 var groupBox = dlg.AddField("GROUP / FOLDER", _settings.DefaultGroup ?? "",
                     L10n.T("set.group.hint"), "folder", false, 33);
-                var proxyBox = dlg.AddField("PROXIES · ONE PER LINE (OPTIONAL)", "",
+                var proxyBox = dlg.AddField("PROXIES Â· ONE PER LINE (OPTIONAL)", "",
                     "http://user:pass@host:port", "proxy", true, 120);
                 dlg.AddNote("Also accepts socks5:// or host:port:user:pass.");
 
@@ -854,8 +889,8 @@ namespace JoeBrowser
                 }
                 ReloadCards(true);
                 Toast(rerolled > 0
-                    ? list.Count + " profiles imported · " + rerolled + " fingerprints re-rolled · re-enter proxy passwords"
-                    : list.Count + " profiles imported · re-enter proxy passwords", ToastKind.Success);
+                    ? list.Count + " profiles imported Â· " + rerolled + " fingerprints re-rolled Â· re-enter proxy passwords"
+                    : list.Count + " profiles imported Â· re-enter proxy passwords", ToastKind.Success);
             }
         }
 
@@ -873,7 +908,7 @@ namespace JoeBrowser
             {
                 if (sfd.ShowDialog(this) != DialogResult.OK) return;
                 int n = _store.ExportTo(sfd.FileName, _profiles);
-                Toast(n + " profiles exported · proxy secrets excluded", ToastKind.Success);
+                Toast(n + " profiles exported Â· proxy secrets excluded", ToastKind.Success);
             }
         }
 
@@ -882,7 +917,7 @@ namespace JoeBrowser
             using (var dlg = new ToolDialog("Proxy batch test", "Close", "", 620, 640))
             {
                 dlg.Secondary.Visible = false;
-                var input = dlg.AddField("PROXIES · ONE PER LINE", "",
+                var input = dlg.AddField("PROXIES Â· ONE PER LINE", "",
                     "http://user:pass@host:port", "proxy", true, 150);
                 var output = dlg.AddReadOnlyText("Results appear here.", 210);
                 dlg.AddAction("Test every proxy", "bolt", async delegate
@@ -896,7 +931,7 @@ namespace JoeBrowser
                         return;
                     }
 
-                    output.Text = "Checking " + lines.Length + " proxies…";
+                    output.Text = "Checking " + lines.Length + " proxiesâ€¦";
                     var sb = new StringBuilder();
                     foreach (string line in lines)
                     {
@@ -939,7 +974,7 @@ namespace JoeBrowser
                 var names = running.Select(s => s.Profile.Name ?? s.Profile.Id).ToArray();
                 var sel = dlg.AddSelect("RUNNING BROWSER", names, names.Length > 0 ? 0 : -1, "window");
                 var status = dlg.AddReadOnlyText("", 90);
-                dlg.AddAction("Export cookies…", "download", async delegate
+                dlg.AddAction("Export cookiesâ€¦", "download", async delegate
                 {
                     if (sel.SelectedIndex < 0 || status.IsDisposed) return;
                     if (running.Count <= sel.SelectedIndex) { status.Text = "Open a profile first."; return; }
@@ -961,7 +996,7 @@ namespace JoeBrowser
                     }
                     catch (Exception ex) { if (!status.IsDisposed) status.Text = ex.Message; }
                 });
-                dlg.AddAction("Import cookies…", "external", async delegate
+                dlg.AddAction("Import cookiesâ€¦", "external", async delegate
                 {
                     if (sel.SelectedIndex < 0 || status.IsDisposed) return;
                     if (running.Count <= sel.SelectedIndex) { status.Text = "Open a profile first."; return; }
@@ -1040,46 +1075,6 @@ namespace JoeBrowser
             else Toast("Could not restore that profile", ToastKind.Error);
         }
 
-        /// <summary>
-        /// Shortcut table shared by the help dialog and the About page. A non-empty third column
-        /// starts a new group; the renderer prints it as a heading. Two of the old entries were
-        /// not shortcuts at all ("Right click", "On-page alert") and belonged nowhere near this
-        /// list, so they were removed rather than dressed up as keyboard commands.
-        /// </summary>
-        private static readonly string[][] ShortcutRows =
-        {
-            new[] { "Ctrl + N", "New profile", "PROFILE LIST" },
-            new[] { "Ctrl + F", "Search profiles", "" },
-            new[] { "Ctrl + O", "Change sort order", "" },
-            new[] { "Ctrl + A", "Select every visible profile", "" },
-            new[] { "F2", "Edit the focused profile", "" },
-            new[] { "F5", "Reload profiles from disk", "" },
-            new[] { "Esc", "Clear the search, then the selection", "" },
-            new[] { "Shift + click", "Select a range of profiles", "" },
-            new[] { "Arrows", "Move between profile cards", "" },
-            new[] { "Enter", "Open the focused profile", "" },
-            new[] { "Shift + F10", "Open the card menu", "" },
-            new[] { "Tab", "Move through every control on the page", "EVERYWHERE" },
-            new[] { "Page Up/Down", "Scroll the page", "" },
-            new[] { "F4", "Open a dropdown list", "" },
-            new[] { "Enter", "Submit the dialog you are in", "" }
-        };
-
-        /// <summary>
-        /// The same table with group headings folded in, so both renderers walk one list and
-        /// neither can silently drop the grouping.
-        /// </summary>
-        private static List<string[]> ShortcutDisplay()
-        {
-            var rows = new List<string[]>();
-            foreach (var r in ShortcutRows)
-            {
-                if (!string.IsNullOrEmpty(r[2])) rows.Add(new[] { "", r[2] });
-                rows.Add(new[] { r[0], r[1] });
-            }
-            return rows;
-        }
-
         private void ClearCaches()
         {
             if (!ConfirmForm.Ask(this, "Clear browser caches",
@@ -1143,7 +1138,7 @@ namespace JoeBrowser
                 dlg.AddNote(isNew
                     ? "Available when creating a profile."
                     : "Applies next time a profile uses it.");
-                var nameBox = dlg.AddField("NAME", isNew ? "" : entry.Name, "Home IP · Frankfurt", "pencil", false, 33);
+                var nameBox = dlg.AddField("NAME", isNew ? "" : entry.Name, "Home IP Â· Frankfurt", "pencil", false, 33);
                 var typeBox = dlg.AddSelect("TYPE", new[] { "HTTP", "HTTPS", "SOCKS5" },
                     cfg.Type == "socks5" ? 2 : cfg.Type == "https" ? 1 : 0, "proxy");
                 var lineBox = dlg.AddField("ADDRESS",
@@ -1267,7 +1262,7 @@ namespace JoeBrowser
         private async System.Threading.Tasks.Task CheckAllProxiesCore()
         {
             if (_proxies.Count == 0) { Toast("Add a proxy first", ToastKind.Info); return; }
-            _proxyPage.SetBusy(true, "Checking…");
+            _proxyPage.SetBusy(true, "Checkingâ€¦");
             try
             {
                 for (int i = 0; i < _proxies.Count; i++)
@@ -1300,7 +1295,7 @@ namespace JoeBrowser
                 e.LastChecked = DateTime.Now;
                 ProxyVault.Save(_proxies);
                 _proxyPage.RefreshRows();
-                Toast(r.Ok ? "Working · " + r.Ip + " · " + r.LatencyMs + " ms" : "Offline · " + r.Error,
+                Toast(r.Ok ? "Working Â· " + r.Ip + " Â· " + r.LatencyMs + " ms" : "Offline Â· " + r.Error,
                     r.Ok ? ToastKind.Success : ToastKind.Error);
             }
             catch (Exception ex) { Toast(ShortError(ex), ToastKind.Error); }
@@ -1391,8 +1386,8 @@ namespace JoeBrowser
                proxy once, from the command line. Saying "live" there would be a lie the user
                only discovers at a leak test, so the two cases get different words. */
             Toast(session.HasRelay
-                ? "Proxy changed live · your tab and session are still open"
-                : "Proxy saved · reopen this profile to route it through it",
+                ? "Proxy changed live Â· your tab and session are still open"
+                : "Proxy saved Â· reopen this profile to route it through it",
                 session.HasRelay ? ToastKind.Success : ToastKind.Info);
         }
 
@@ -1433,79 +1428,75 @@ namespace JoeBrowser
         {
             try
             {
-                if (key == "rescan")
+                /* The browsers page carries out its own installs, removals and reveals; the
+                   window only has to open the folder and refresh the numbers the header
+                   shows. */
+                if (key == "openfolder")
                 {
-                    _browsersPage.Rescan();
-                    int n = 0;
-                    foreach (var e in BrowsersPage.EngineCatalog())
-                        if (BrowsersPage.FindInstalled(e.Key) != null) n++;
-                    Toast(n + " of 5 engines available on this PC", ToastKind.Info);
+                    Directory.CreateDirectory(KernelStore.Root);
+                    Process.Start("explorer.exe", "\"" + KernelStore.Root + "\"");
                     return;
                 }
 
-                if (key == "openfolder")
+                if (key == "rescan")
                 {
-                    Directory.CreateDirectory(AppPaths.Browsers);
-                    Process.Start("explorer.exe", "\"" + AppPaths.Browsers + "\"");
+                    _browsersPage.Load();
+                    int n = KernelDiversity.Available().Count;
+                    Toast(n == 0 ? "No browser build is installed" : n + " browser build" +
+                        (n == 1 ? "" : "s") + " installed", ToastKind.Info);
+                    RefreshKernelInfo();
                     return;
                 }
 
                 if (key == "kernels")
                 {
                     using (var dlg = new KernelForm()) dlg.ShowDialog(this);
-                    _browsersPage.Rescan();
+                    _browsersPage.Load();
+                    RefreshKernelInfo();
                     return;
                 }
-
-                if (string.IsNullOrEmpty(engine)) return;
-
-                if (key == "reveal")
-                {
-                    var info = BrowsersPage.FindInstalled(engine);
-                    if (info == null || !info.Found)
-                    {
-                        _browsersPage.Rescan();
-                        Toast(BrowserFetcher.Label(engine) + " is no longer installed", ToastKind.Warn);
-                        return;
-                    }
-                    Process.Start("explorer.exe", "/select,\"" + info.Path + "\"");
-                    return;
-                }
-
-                if (key != "install") return;
-
-                /* Edge ships with Windows; a "download" button there would only open a page. */
-                if (!BrowserFetcher.Supports(engine))
-                {
-                    OpenUrl(BrowserFetcher.HomePage(engine));
-                    return;
-                }
-
-                string label = BrowserFetcher.Label(engine);
-                /* Chromium is unpacked into this app's folder; the other three run the vendor's
-                   own installer, which writes outside the app. That deserves a yes first. */
-                if (engine != "chromium")
-                {
-                    if (!ConfirmForm.Ask(this, "Install " + label,
-                        "Download and run " + label + "'s official installer now?",
-                        "It is fetched from " + HostOf(BrowserFetcher.HomePage(engine)) +
-                        " and installed the normal way. Windows may ask for permission, and " + label +
-                        " will be available to every app on this PC, not only Joe Browser.",
-                        "Install", BtnKind.Primary)) return;
-                }
-
-                _browsersPage.SetBusy(engine, true, "Downloading " + label + "\u2026");
-                bool ok = await DownloadBrowserAsync(engine);
-                _browsersPage.SetBusy(null, false, null);
-                _browsersPage.Rescan();
-                if (ok) Invalidate();
             }
             catch (Exception ex)
             {
-                _browsersPage.SetBusy(null, false, null);
                 Log.Error("Browser action failed: " + key, ex);
                 Toast(ShortError(ex), ToastKind.Error);
             }
+        }
+
+        /// <summary>
+        /// Fetches the build a profile is pinned to, when this machine does not have it yet.
+        /// Returns false when the fetch did not happen, and says why.
+        /// </summary>
+        private async Task<bool> EnsureKernelAsync(Profile p)
+        {
+            string label = BrowsersPage.Label(p.KernelEngine) + " " + p.KernelVersion;
+            var dlg = new DownloadDialog("Get " + label);
+            dlg.CenterOn(this);
+            dlg.Show(this);
+            dlg.Activate();
+            try
+            {
+                await KernelStore.EnsureAsync(p.KernelEngine, p.KernelVersion,
+                    delegate(int pct, string msg) { dlg.UpdateProgress(pct, msg); },
+                    dlg.Token).ConfigureAwait(true);
+                CloseQuietly(dlg);
+                KernelDiversity.Invalidate();
+                _browsersPage.Load();
+                RefreshKernelInfo();
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                CloseQuietly(dlg);
+                Toast("The download was cancelled", ToastKind.Info);
+            }
+            catch (Exception ex)
+            {
+                CloseQuietly(dlg);
+                Log.Error("Pinned build download failed", ex);
+                Toast(ShortError(ex), ToastKind.Error);
+            }
+            return false;
         }
 
         /// <summary>Guarded entry point: an exception lands in the log and a message, not a crash dialog.</summary>
@@ -1597,7 +1588,7 @@ namespace JoeBrowser
                 url = (field.Value ?? "").Trim();
             }
 
-            _extensionPage.SetBusy(true, "Importing…");
+            _extensionPage.SetBusy(true, "Importingâ€¦");
             try
             {
                 var item = await Task.Run(new Func<ExtensionItem>(delegate { return ExtensionCatalog.ImportFromUrl(url); }));
@@ -1780,7 +1771,7 @@ namespace JoeBrowser
 
         private void BuildSettingsPage(Panel page)
         {
-            _setBrowserInfo = Label(LabelRole.Strong, "Detecting…");
+            _setBrowserInfo = Label(LabelRole.Strong, "Detectingâ€¦");
             _setBrowserInfo.TextAlign = ContentAlignment.MiddleRight;
             _setStoragePath = Label(LabelRole.Body, AppPaths.Root);
             _setStoragePath.TextAlign = ContentAlignment.MiddleRight;
@@ -1817,7 +1808,7 @@ namespace JoeBrowser
                    words that remain do not look like a bug. */
                 int coverage = L10n.Coverage(_setLang.Value);
                 if (_setLang.Value != "en" && coverage < 100)
-                    Toast("Interface language set to " + L10n.NameOf(_setLang.Value) + " · "
+                    Toast("Interface language set to " + L10n.NameOf(_setLang.Value) + " Â· "
                         + coverage + "% translated, the rest stays in English", ToastKind.Info);
             };
 
@@ -1975,11 +1966,39 @@ namespace JoeBrowser
             }
         }
 
+        /// <summary>
+        /// Shows which browser this PC would use. The lookup reads a version resource off
+        /// disk for every browser it knows about, so it runs in the background: the settings
+        /// page opens at once and the answer arrives a moment later.
+        /// </summary>
         private void UpdateBrowserInfo()
         {
             if (_setBrowserInfo == null) return;
-            var info = BrowserLocator.Detect("auto", _setBrowserPath.Value.Trim());
-            _setBrowserInfo.Text = info.Found
+            string path = _setBrowserPath.Value.Trim();
+            _setBrowserInfo.Text = "Detecting\u2026";
+            _setBrowserInfo.Invalidate();
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                BrowserInfo info = null;
+                try { info = BrowserLocator.Detect("auto", path); }
+                catch (Exception ex) { Log.Error("Browser detection failed", ex); }
+                if (IsDisposed) return;
+                try
+                {
+                    if (InvokeRequired)
+                    {
+                        BeginInvoke(new Action(delegate { ApplyBrowserInfo(info); }));
+                    }
+                    else ApplyBrowserInfo(info);
+                }
+                catch { }
+            });
+        }
+
+        private void ApplyBrowserInfo(BrowserInfo info)
+        {
+            if (_setBrowserInfo == null) return;
+            _setBrowserInfo.Text = info != null && info.Found
                 ? info.Name + " " + info.Version
                 : "No Chromium browser found. Install Chrome or Edge, or download Chromium.";
             _setBrowserInfo.Invalidate();
@@ -2626,7 +2645,62 @@ namespace JoeBrowser
         private void SetPage(int page)
         {
             FreezeRedraw(delegate { SetPageCore(page); });
+            /* The new page arrives from the side instead of appearing. The page container is
+               moved, not covered, so nothing can swallow a click while it moves and the
+               layout is not recalculated: a moved control keeps its children where they are. */
+            SlidePageIn();
         }
+
+        /// <summary>How far the arriving page starts from the right.</summary>
+        private const int PageSlide = 16;
+
+        /// <summary>The page container that is currently on screen.</summary>
+        private Control _pageControl;
+
+        /// <summary>How far the arriving page is still from its place.</summary>
+        private int _pageOffset;
+
+        private void SlidePageIn()
+        {
+            Control page = VisiblePage();
+            if (page == null) return;
+            _pageControl = page;
+            _pageOffset = Ui.S(PageSlide);
+            UiAnim.Animate(_slideKey, delegate(float t)
+            {
+                _pageOffset = (int)Math.Round(Ui.S(PageSlide) * (1f - t));
+                if (_pageControl == null || _pageControl.IsDisposed) return;
+                try
+                {
+                    _pageControl.Left = ContentLeft() + _pageOffset;
+                }
+                catch { }
+            }, 0.18f, UiAnim.EaseOut, delegate
+            {
+                _pageOffset = 0;
+                if (_pageControl == null || _pageControl.IsDisposed) return;
+                try { _pageControl.Left = ContentLeft(); } catch { }
+            });
+        }
+
+        private readonly object _slideKey = new object();
+
+        /// <summary>The page container that is on screen, or null.</summary>
+        private Control VisiblePage()
+        {
+            foreach (var p in PageContainers())
+                if (p.Visible) return p;
+            return null;
+        }
+
+        /// <summary>Every page container, in the order they are stacked.</summary>
+        private Control[] PageContainers()
+        {
+            return new Control[] { _host, _emptyPanel, _proxyPage, _extensionPage, _browsersPage, _settingsPage, _toolsPage, _aboutPage, _historyPage, _accountPage };
+        }
+
+        /// <summary>Where the page area starts on the left.</summary>
+        private int ContentLeft() { return Ui.S(SidebarW); }
 
         private void SetPageCore(int page)
         {
@@ -2691,7 +2765,7 @@ namespace JoeBrowser
             }
             else if (page == 3)
             {
-                _browsersPage.Rescan();
+                _browsersPage.Load();
             }
             else if (page == 4)
             {
@@ -2878,6 +2952,12 @@ namespace JoeBrowser
                 if (!_cards.TryGetValue(_picks[i], out c) || !c.Visible) _picks.RemoveAt(i);
             }
             if (_picks.Count == 0) _pickAnchor = null;
+            /* The grid and the empty state are two views of the same page, and which one is
+               showing depends on how many cards the filter left. The grid used to be shown
+               and hidden only when the page changed, so the first profile a user created
+               never appeared: the count in the header said one and the page stayed empty
+               until the user visited another page and came back. */
+            _host.Visible = _page == 0 && shown > 0;
             _emptyPanel.Visible = _page == 0 && shown == 0;
             SyncPicks();
             /* Z-order first, then layout: raising the host after the grid was measured but
@@ -3046,7 +3126,8 @@ namespace JoeBrowser
             var p = SeedNewProfile(null, null);
             using (var dlg = new EditorForm(p, true, _settings, 0, new List<Profile>(_profiles)))
             {
-                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                var shown = dlg.ShowDialog(this);
+                if (shown != DialogResult.OK) return;
                 _store.Save(dlg.Result);
                 /* The shipped store pair has to ride every new profile. It used to be a
                    fire-and-forget background task: the first launch of the profile raced the
@@ -3077,12 +3158,10 @@ namespace JoeBrowser
         {
             if (_kernelAsked) return;
             _kernelAsked = true;
-            bool go = ConfirmForm.Ask(this, "Give every profile its own browser version",
-                "Only one browser build is installed on this PC.",
-                "New profiles then share its version, which is the first thing a fingerprint test " +
-                "compares against your own browser. Joe Browser can download another build and " +
-                "spread new profiles across them.",
-                "Download a second build", BtnKind.Primary);
+            bool go = ConfirmForm.Ask(this, "Give every profile its own browser build",
+                "Only one browser build is installed on this PC, so every new profile reports the same version.",
+                "The Browsers page can fetch another build, and new profiles then spread across them.",
+                "Get a build", BtnKind.Primary);
             if (go) SetPage(3);
         }
 
@@ -3455,7 +3534,7 @@ namespace JoeBrowser
                 trash
                     ? "Move " + list.Count + " profiles to the recycle bin?"
                     : "Delete " + list.Count + " profiles and all of their browsing data? This cannot be undone.",
-                trash ? "You can restore them from Tools & data → Recycle bin."
+                trash ? "You can restore them from Tools & data â†’ Recycle bin."
                       : "Proxy settings stored in them are removed too."))
                 return;
             /* Each DeleteProfile(..., false) takes its card out of the grid, so the grid is
@@ -3580,6 +3659,16 @@ namespace JoeBrowser
             if (!_pulse.Enabled) _pulse.Start();
             try
             {
+                /* A profile pinned to a build this machine does not have gets that build
+                   first. Nothing is fetched when the application starts; a build is fetched
+                   when a profile needs it, and the download is visible while it happens.
+                   Without this the profile quietly opened with whatever browser was
+                   installed, and reported a version it was not running. */
+                if (KernelDiversity.IsPinned(p) && !KernelStore.IsReady(p.KernelEngine, p.KernelVersion))
+                {
+                    if (!await EnsureKernelAsync(p)) return;
+                }
+
                 if (!BrowserFetcher.IsInstalled(p.BrowserKind) && BrowserFetcher.Supports(p.BrowserKind))
                 {
                     string label = BrowserFetcher.Label(p.BrowserKind);
@@ -3782,7 +3871,7 @@ namespace JoeBrowser
             int i = m.IndexOf("\r\n", StringComparison.Ordinal);
             if (i < 0) i = m.IndexOf('\n');
             if (i > 0) m = m.Substring(0, i);
-            if (m.Length > 140) m = m.Substring(0, 137) + "…";
+            if (m.Length > 140) m = m.Substring(0, 137) + "â€¦";
             return m;
         }
 

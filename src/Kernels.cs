@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -96,6 +96,14 @@ namespace JoeBrowser
            lands on, so a pinned kernel catalog needs the latest two or three versions. */
         private const string EdgeVersions =
             "https://edgeupdates.microsoft.com/api/v1/edge/business/stable?arch=x64&platform=windows&appid=Microsoft Edge";
+
+        /* Chromium publishes a version number for every snapshot through the dashboard API,
+           and the same call carries the branch position - the snapshot revision the zip is
+           published under. That is what makes a real Chromium build with a real version
+           number possible, instead of the single "latest snapshot" the storage bucket
+           names on its own. */
+        private const string ChromiumReleaseApi =
+            "https://chromiumdash.appspot.com/fetch_releases?channel={0}&platform=Windows&num={1}";
 
         public static string Root { get { return AppPaths.Kernels; } }
 
@@ -246,12 +254,129 @@ namespace JoeBrowser
 
         // ------------------------------------------------------------------ catalog
 
+        /// <summary>
+        /// The catalogue of an engine, kept for the length of the session. Fetching it costs
+        /// a round-trip to the publisher, and the profile that opens a pinned build asks for
+        /// the same list the browsers page just looked at.
+        /// </summary>
+        private static readonly Dictionary<string, List<KernelRelease>> CatalogCache =
+            new Dictionary<string, List<KernelRelease>>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, DateTime> CatalogCacheAt =
+            new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        private static readonly object CatalogGate = new object();
+
+        /// <summary>Forgets the cached catalogue, so the next read goes to the publisher.</summary>
+        public static void ClearCatalogCache()
+        {
+            lock (CatalogGate)
+            {
+                CatalogCache.Clear();
+                CatalogCacheAt.Clear();
+            }
+        }
+
+        /// <summary>
+        /// The published build of one engine and one version, or null when the publisher does
+        /// not offer it. The catalogue is read once per engine.
+        /// </summary>
+        public static KernelRelease FindRelease(string engine, string version)
+        {
+            if (string.IsNullOrEmpty(engine) || string.IsNullOrEmpty(version)) return null;
+            List<KernelRelease> list = CatalogCached(engine);
+            foreach (var r in list)
+                if (r != null && string.Equals(r.Version, version, StringComparison.OrdinalIgnoreCase)) return r;
+            return null;
+        }
+
+        /// <summary>
+        /// The catalogue of an engine, read once and kept for a while. Asking a publisher for
+        /// the same list twice costs the user two slow round trips, and the list changes once
+        /// a week at most.
+        /// </summary>
+        public static List<KernelRelease> CatalogCached(string engine)
+        {
+            List<KernelRelease> list;
+            lock (CatalogGate)
+            {
+                DateTime when;
+                if (CatalogCache.TryGetValue(engine, out list) &&
+                    CatalogCacheAt.TryGetValue(engine, out when) &&
+                    (DateTime.UtcNow - when).TotalMinutes < 20)
+                    return list;
+            }
+            list = Catalog(engine);
+            lock (CatalogGate)
+            {
+                CatalogCache[engine] = list;
+                CatalogCacheAt[engine] = DateTime.UtcNow;
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// Installs the newest build an engine publishes. This is what the profile editor
+        /// calls when the user asks for an engine that is not on this machine: the build goes
+        /// into the application's own folder, is managed from the Browsers page, and can be
+        /// pinned to a profile - rather than an installer that writes all over Windows and
+        /// leaves the app dependent on the machine's browser.
+        /// </summary>
+        public static async Task<KernelInstall> InstallNewestAsync(string engine,
+            Action<int, string> progress, CancellationToken ct)
+        {
+            var catalog = CatalogCached(engine);
+            if (catalog == null || catalog.Count == 0)
+                throw new InvalidOperationException(
+                    "No " + (engine ?? "") + " build is published right now. Try again later, or pick another engine.");
+            var rel = catalog[0];
+            var installed = await InstallAsync(rel, progress, ct).ConfigureAwait(false);
+            KernelDiversity.Invalidate();
+            return installed;
+        }
+
+        /// <summary>True when the build a profile is pinned to is on this machine and ready.</summary>
+        public static bool IsReady(string engine, string version)
+        {
+            var k = Find(engine, version);
+            return k != null && k.Ready;
+        }
+
+        /// <summary>
+        /// Makes sure a pinned build is on this machine, fetching it when it is not.
+        ///
+        /// This is the rule the whole browser manager is built around: nothing is downloaded
+        /// until something needs it. A profile pinned to a build that is not here yet asks
+        /// for exactly that build, and gets it - with the download visible - instead of
+        /// quietly falling back to whatever browser happens to be installed.
+        /// </summary>
+        public static async Task<KernelInstall> EnsureAsync(string engine, string version,
+            Action<int, string> progress, CancellationToken ct)
+        {
+            var have = Find(engine, version);
+            if (have != null && have.Ready) return have;
+
+            var rel = FindRelease(engine, version);
+            if (rel == null)
+            {
+                throw new InvalidOperationException(
+                    "The publisher no longer offers " + (engine ?? "") + " " + (version ?? "") +
+                    ". Choose another build on the Browsers page, or let the profile use the installed browser.");
+            }
+            var installed = await InstallAsync(rel, progress, ct).ConfigureAwait(false);
+            KernelDiversity.Invalidate();
+            return installed;
+        }
+
         public static Task<List<KernelRelease>> CatalogAsync(string engine)
         {
             return Task.Run(new Func<List<KernelRelease>>(() => Catalog(engine)));
         }
 
-        private static List<KernelRelease> Catalog(string engine)
+        /// <summary>
+        /// The builds an engine publishes, newest first. A call that cannot reach the
+        /// publisher returns an empty list rather than throwing: the caller shows the
+        /// difference between "nothing published" and "could not ask".
+        /// </summary>
+        public static List<KernelRelease> Catalog(string engine)
         {
             switch (engine)
             {
@@ -261,14 +386,34 @@ namespace JoeBrowser
                    the newest channel build is also the newest entry in the history. */
                 case "chrome":
                 {
-                    var current = ChromeReleases();
-                    var older = ChromeHistoryReleases(24);
+                    /* The channel list and the history are asked for at the same time. The
+                       history file carries every release Chrome ever published and takes
+                       seconds on its own; asking for the two one after the other doubled the
+                       wait for the page. */
+                    var currentTask = Task.Run(new Func<List<KernelRelease>>(ChromeReleases));
+                    var olderTask = Task.Run(new Func<List<KernelRelease>>(delegate
+                    {
+                        return ChromeHistoryReleases(ChromeMajors, ChromePerMajor);
+                    }));
+                    List<KernelRelease> current = null, older = null;
+                    try { current = currentTask.Result; } catch (Exception ex) { Log.Error("Chrome catalogue failed", ex); }
+                    try { older = olderTask.Result; } catch (Exception ex) { Log.Error("Chrome history failed", ex); }
                     var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     var merged = new List<KernelRelease>();
-                    foreach (var r in current)
-                        if (r != null && seen.Add(r.Engine + "|" + r.Version)) merged.Add(r);
-                    foreach (var r in older)
-                        if (r != null && seen.Add(r.Engine + "|" + r.Version)) merged.Add(r);
+                    if (current != null)
+                        foreach (var r in current)
+                            if (r != null && seen.Add(r.Engine + "|" + r.Version)) merged.Add(r);
+                    if (older != null)
+                        foreach (var r in older)
+                            if (r != null && seen.Add(r.Engine + "|" + r.Version)) merged.Add(r);
+                    /* Newest first, the way every browser manager lists them. */
+                    merged.Sort(delegate(KernelRelease a, KernelRelease b)
+                    {
+                        int ma = BrowserVersions.MajorOf(a.Version);
+                        int mb = BrowserVersions.MajorOf(b.Version);
+                        if (ma != mb) return mb.CompareTo(ma);
+                        return string.CompareOrdinal(b.Version, a.Version);
+                    });
                     return merged;
                 }
                 case "brave": return BraveReleases();
@@ -319,8 +464,13 @@ namespace JoeBrowser
         /// The newest <paramref name="want"/> stable Chrome builds before the current one, so a
         /// workspace can be given distinct versions. Best effort: an offline machine gets an
         /// empty list and keeps working on what it has.
+        ///
+        /// The history is walked by MAJOR, not by release: the last twenty-four releases are
+        /// all one major, and a user who asks for version 156 wants 156 - not four more
+        /// builds of 159 with a different patch number. So the list covers the last few
+        /// majors, with a few builds from each.
         /// </summary>
-        private static List<KernelRelease> ChromeHistoryReleases(int want)
+        private static List<KernelRelease> ChromeHistoryReleases(int majors, int perMajor)
         {
             var list = new List<KernelRelease>();
             try
@@ -329,14 +479,20 @@ namespace JoeBrowser
                 var versions = root != null && root.ContainsKey("versions") ? root["versions"] as object[] : null;
                 if (versions == null) return list;
 
+                var perRelease = new Dictionary<int, int>();
                 /* Walk backwards from the newest: the array is in release order, and the last
                    entries are the most recent builds. */
-                for (int i = versions.Length - 1; i >= 0 && list.Count < want; i--)
+                for (int i = versions.Length - 1; i >= 0 && perRelease.Count < majors; i--)
                 {
                     var v = versions[i] as Dictionary<string, object>;
                     if (v == null) continue;
                     string version = Str(v, "version");
                     if (string.IsNullOrEmpty(version)) continue;
+                    int major = BrowserVersions.MajorOf(version);
+                    if (major <= 0) continue;
+                    int taken;
+                    perRelease.TryGetValue(major, out taken);
+                    if (taken >= perMajor) continue;
                     var downloads = v.ContainsKey("downloads") ? v["downloads"] as Dictionary<string, object> : null;
                     if (downloads == null) continue;
                     var chrome = downloads.ContainsKey("chrome") ? downloads["chrome"] as object[] : null;
@@ -352,6 +508,7 @@ namespace JoeBrowser
                            build, so two profiles pinned to 131.0.6778.86 and .204 are two builds
                            that a page can tell apart. */
                         list.Add(new KernelRelease("chrome", version, "Stable", url, "zip") { SizeMb = 170 });
+                        perRelease[major] = taken + 1;
                         break;
                     }
                 }
@@ -359,6 +516,12 @@ namespace JoeBrowser
             catch (Exception ex) { Log.Error("Chrome version history failed", ex); }
             return list;
         }
+
+        /// <summary>How many majors of Chrome the catalogue reaches back to.</summary>
+        private const int ChromeMajors = 8;
+
+        /// <summary>How many builds of each of those majors are offered.</summary>
+        private const int ChromePerMajor = 3;
 
         private static List<KernelRelease> BraveReleases()
         {
@@ -371,10 +534,25 @@ namespace JoeBrowser
                 {
                     var r = o as Dictionary<string, object>;
                     if (r == null) continue;
-                    if (Bool(r, "prerelease")) continue;
                     string tag = Str(r, "tag_name");
                     if (string.IsNullOrEmpty(tag)) continue;
                     string version = tag.TrimStart('v', 'V');
+                    /* Brave publishes its beta as a pre-release with the same file naming, so
+                       the channel is taken from the tag instead of the release being dropped.
+                       A user who wants the beta channel gets the beta channel. */
+                    string channel = "Stable";
+                    if (version.IndexOf("-beta", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        channel = "Beta";
+                        int dash = version.IndexOf('-');
+                        if (dash > 0) version = version.Substring(0, dash);
+                    }
+                    else if (version.IndexOf("-nightly", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        channel = "Dev";
+                        int dash = version.IndexOf('-');
+                        if (dash > 0) version = version.Substring(0, dash);
+                    }
                     var assets = r.ContainsKey("assets") ? r["assets"] as object[] : null;
                     if (assets == null) continue;
                     foreach (object a in assets)
@@ -390,36 +568,172 @@ namespace JoeBrowser
                         long size = 0;
                         object sz;
                         if (asset.TryGetValue("size", out sz)) long.TryParse(Convert.ToString(sz), out size);
-                        list.Add(new KernelRelease("brave", version, "Stable", Str(asset, "browser_download_url"), "zip")
+                        list.Add(new KernelRelease("brave", version, channel, Str(asset, "browser_download_url"), "zip")
                         {
                             SizeMb = size / 1048576
                         });
                         break;
                     }
-                    if (list.Count >= 8) break;
+                    if (list.Count >= 16) break;
                 }
             }
             catch (Exception ex) { Log.Error("Brave kernel catalog failed", ex); }
             return list;
         }
 
+        /// <summary>
+        /// Chromium builds with their real version numbers, taken from the dashboard API.
+        /// Every release carries the branch position it was cut from, and that position is
+        /// the snapshot revision the archive is published under - so the catalogue can offer
+        /// "159.0.8154.0" and know exactly which zip holds it.
+        ///
+        /// The four channels Chromium ships are all listed, and every one of them offers
+        /// several releases, so a workspace can spread across versions the way it can with
+        /// Chrome.
+        /// </summary>
         private static List<KernelRelease> ChromiumReleases()
+        {
+            /* How many releases of each channel are read. The stable list is the long one:
+               it is the list that carries the history of older majors, which is what a
+               workspace needs when it wants profiles on several different versions. */
+            string[] channels = { "Canary", "Dev", "Beta", "Stable" };
+            int[] counts = { 6, 8, 10, 30 };
+
+            /* The channels are asked for at the same time. Asked one after the other they
+               took twenty seconds, and the page sat on "loading" for all of it - which reads
+               as a broken application rather than a slow network. */
+            var tasks = new Task<List<KernelRelease>>[channels.Length];
+            for (int i = 0; i < channels.Length; i++)
+            {
+                int index = i;
+                tasks[i] = Task.Run(new Func<List<KernelRelease>>(delegate
+                {
+                    return ChromiumChannelReleases(channels[index], counts[index]);
+                }));
+            }
+            try { Task.WaitAll(tasks, 45000); } catch { }
+
+            var perChannel = new List<KernelRelease>[channels.Length];
+            for (int i = 0; i < channels.Length; i++)
+            {
+                List<KernelRelease> part = null;
+                try { part = tasks[i].Result; } catch { }
+                perChannel[i] = part ?? new List<KernelRelease>();
+            }
+
+            /* A release belongs to one channel, and the publishers list a build under
+               several of them once it has been promoted. The current release of a channel is
+               the newest entry of its list and is labelled with that channel; anything else
+               is labelled with the least advanced channel that lists it, because a build
+               that was stable stays stable. */
+            var channelsOf = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            var newest = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var urls = new Dictionary<string, KernelRelease>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < channels.Length; i++)
+            {
+                var part = perChannel[i];
+                if (part.Count == 0) continue;
+                newest[channels[i]] = part[0].Version;
+                foreach (var r in part)
+                {
+                    if (r == null) continue;
+                    urls[r.Version] = r;
+                    List<string> owners;
+                    if (!channelsOf.TryGetValue(r.Version, out owners))
+                    {
+                        owners = new List<string>();
+                        channelsOf[r.Version] = owners;
+                    }
+                    if (!owners.Contains(channels[i])) owners.Add(channels[i]);
+                }
+            }
+
+            /* Stable, Beta, Dev, Canary: the order the channels sit in. */
+            string[] rank = { "Stable", "Beta", "Dev", "Canary" };
+            var list = new List<KernelRelease>();
+            foreach (var kv in urls)
+            {
+                string version = kv.Key;
+                var owners = channelsOf[version];
+                string label = null;
+                /* The current release of a channel is labelled with that channel. */
+                foreach (string ch in owners)
+                    if (newest.ContainsKey(ch) && string.Equals(newest[ch], version, StringComparison.OrdinalIgnoreCase))
+                        label = ch;
+                if (label == null)
+                {
+                    /* Otherwise the least advanced channel that lists it. */
+                    foreach (string ch in rank)
+                        if (owners.Contains(ch)) { label = ch; break; }
+                }
+                if (label == null && owners.Count > 0) label = owners[0];
+                var src = kv.Value;
+                list.Add(new KernelRelease("chromium", version, label ?? "Snapshot", src.Url, src.Kind)
+                {
+                    SizeMb = src.SizeMb
+                });
+            }
+
+            /* Newest first: the build a user is most likely to want is at the top, and the
+               older majors are still there underneath it. */
+            list.Sort(delegate(KernelRelease a, KernelRelease b)
+            {
+                int ma = BrowserVersions.MajorOf(a.Version);
+                int mb = BrowserVersions.MajorOf(b.Version);
+                if (ma != mb) return mb.CompareTo(ma);
+                return string.CompareOrdinal(b.Version, a.Version);
+            });
+            return list;
+        }
+
+        /// <summary>Compares two four part versions. Returns a negative number when a is older.</summary>
+        private static int CompareVersions(string a, string b)
+        {
+            if (string.IsNullOrEmpty(a)) return string.IsNullOrEmpty(b) ? 0 : -1;
+            if (string.IsNullOrEmpty(b)) return 1;
+            string[] pa = a.Split('.'), pb = b.Split('.');
+            for (int i = 0; i < 4; i++)
+            {
+                int x = 0, y = 0;
+                if (i < pa.Length) int.TryParse(pa[i], out x);
+                if (i < pb.Length) int.TryParse(pb[i], out y);
+                if (x != y) return x.CompareTo(y);
+            }
+            return 0;
+        }
+
+        /// <summary>One channel's Chromium releases.</summary>
+        private static List<KernelRelease> ChromiumChannelReleases(string channel, int count)
         {
             var list = new List<KernelRelease>();
             try
             {
-                string rev = Get(ChromiumBase + "LAST_CHANGE").Trim();
-                if (rev.Length == 0 || rev.Length > 20) return list;
-                list.Add(new KernelRelease("chromium", "r" + rev, "Snapshot",
-                    ChromiumBase + rev + "/chrome-win.zip", "zip") { SizeMb = 360 });
+                string url = string.Format(ChromiumReleaseApi, channel, count);
+                var arr = Json(Get(url)) as object[];
+                if (arr == null) return list;
+                foreach (object o in arr)
+                {
+                    var r = o as Dictionary<string, object>;
+                    if (r == null) continue;
+                    string version = Str(r, "version");
+                    if (string.IsNullOrEmpty(version)) continue;
+                    long position = 0;
+                    object pos;
+                    if (!r.TryGetValue("chromium_main_branch_position", out pos)) continue;
+                    long.TryParse(Convert.ToString(pos), out position);
+                    if (position <= 0) continue;
+                    list.Add(new KernelRelease("chromium", version, channel,
+                        ChromiumBase + position + "/chrome-win.zip", "zip") { SizeMb = 360 });
+                }
             }
-            catch (Exception ex) { Log.Error("Chromium kernel catalog failed", ex); }
+            catch (Exception ex) { Log.Error("Chromium " + channel + " catalogue failed", ex); }
             return list;
         }
 
-        /// <summary>Firefox portable zips from the Mozilla archive. Stable and Beta are the two
-        /// channels Mozilla officially ships for Windows; the URL pattern is stable across every
-        /// version, so a pinned kernel is one fetch away for any release the catalog lists.</summary>
+        /// <summary>Firefox portable zips from the Mozilla archive. Stable, Beta, ESR and Nightly
+        /// are the four releases Mozilla ships for Windows; the URL pattern is stable across
+        /// every version, so a pinned kernel is one fetch away for any release the catalog
+        /// lists.</summary>
         private static List<KernelRelease> FirefoxReleases()
         {
             var list = new List<KernelRelease>();
@@ -429,12 +743,17 @@ namespace JoeBrowser
                 if (root == null) return list;
                 string stable = Str(root, "LATEST_FIREFOX_VERSION");
                 string beta = Str(root, "LATEST_FIREFOX_DEVEL_VERSION");
+                string esr = Str(root, "LATEST_FIREFOX_ESR_VERSION");
                 if (!string.IsNullOrEmpty(stable))
                     list.Add(new KernelRelease("firefox", stable, "Stable",
                         string.Format(FirefoxZipUrl, stable), "zip") { SizeMb = 60 });
                 if (!string.IsNullOrEmpty(beta) && !string.Equals(beta, stable, StringComparison.OrdinalIgnoreCase))
                     list.Add(new KernelRelease("firefox", beta, "Beta",
                         string.Format(FirefoxZipUrl, beta), "zip") { SizeMb = 60 });
+                if (!string.IsNullOrEmpty(esr) && !string.Equals(esr, stable, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(esr, beta, StringComparison.OrdinalIgnoreCase))
+                    list.Add(new KernelRelease("firefox", esr, "ESR",
+                        string.Format(FirefoxZipUrl, esr), "zip") { SizeMb = 60 });
             }
             catch (Exception ex) { Log.Error("Firefox kernel catalog failed", ex); }
             return list;
@@ -615,16 +934,51 @@ namespace JoeBrowser
 
         private static string Get(string url)
         {
+            /* One request per call, but the catalogues are fetched in the background while
+               the user is already looking at the page, so the connection limit is raised.
+               Two is the framework default and it is not enough when four publishers are
+               asked at once. */
+            try { if (ServicePointManager.DefaultConnectionLimit < 8) ServicePointManager.DefaultConnectionLimit = 8; }
+            catch { }
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-            var req = (HttpWebRequest)WebRequest.Create(url);
-            req.UserAgent = "JoeBrowser/1.0";
-            req.Timeout = 20000;
-            req.ReadWriteTimeout = 20000;
-            req.KeepAlive = false;
-            req.CachePolicy = new System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.BypassCache);
-            using (var resp = (HttpWebResponse)req.GetResponse())
-            using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
-                return sr.ReadToEnd();
+            Exception last = null;
+            /* Two goes: a publisher that answers slowly once is a publisher that answers
+               slowly again, and the page should not be left on "loading" because of it. */
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    var req = (HttpWebRequest)WebRequest.Create(url);
+                    req.UserAgent = "JoeBrowser/1.0";
+                    req.Timeout = attempt == 0 ? 15000 : 30000;
+                    req.ReadWriteTimeout = 30000;
+                    req.KeepAlive = false;
+                    req.CachePolicy = new System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.BypassCache);
+                    if (Log.IsDiagnostic)
+                    {
+                        var sw = System.Diagnostics.Stopwatch.StartNew();
+                        try
+                        {
+                            var px = req.Proxy == null ? "(none)" : req.Proxy.GetProxy(req.RequestUri).ToString();
+                            Log.Info("NET " + url + " via " + px);
+                            var ips = System.Net.Dns.GetHostAddresses(req.RequestUri.Host);
+                            foreach (var ip in ips) Log.Info("NET  dns " + req.RequestUri.Host + " -> " + ip);
+                        }
+                        catch (Exception ex) { Log.Info("NET  dns failed: " + ex.Message); }
+                        Log.Info("NET  started in " + sw.ElapsedMilliseconds + "ms");
+                    }
+                    using (var resp = (HttpWebResponse)req.GetResponse())
+                    using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                        return sr.ReadToEnd();
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                    Log.Error("Catalogue request failed: " + url, ex);
+                }
+            }
+            if (last != null) throw last;
+            return null;
         }
 
         private static object Json(string text)

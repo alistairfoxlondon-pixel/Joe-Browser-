@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -349,7 +349,7 @@ namespace JoeBrowser
                 }
                 LayoutAll();
             };
-            _kernelManage = new JBButton { Kind = BtnKind.Soft, Icon = "download", Text = "Kernels" };
+            _kernelManage = new JBButton { Kind = BtnKind.Soft, Icon = "download", Text = "Get a build" };
             _kernelManage.Click += delegate
             {
                 using (var dlg = new KernelForm()) dlg.ShowDialog(this);
@@ -416,11 +416,19 @@ namespace JoeBrowser
         {
             var labels = new List<string> { "Installed browser" };
             _kernelKeys = new List<string> { "" };
-            foreach (var k in KernelStore.Installed())
+            var installed = new List<KernelInstall>();
+            try { installed = KernelStore.Installed(); } catch { }
+            /* Engine order first, then the newest build of each engine: the list reads like a
+               shelf, and the build a profile would take by default is the first one. */
+            installed.Sort(delegate(KernelInstall a, KernelInstall b)
             {
-                string name = k.Engine == "chrome" ? "Chrome"
-                    : k.Engine == "brave" ? "Brave" : "Chromium";
-                labels.Add(name + " " + k.Version);
+                int ea = EngineRank(a.Engine), eb = EngineRank(b.Engine);
+                if (ea != eb) return ea.CompareTo(eb);
+                return string.CompareOrdinal(b.Version, a.Version);
+            });
+            foreach (var k in installed)
+            {
+                labels.Add(BrowsersPage.Label(k.Engine) + " " + k.Version);
                 _kernelKeys.Add(k.Engine + "|" + k.Version);
             }
             string want = (_profile.KernelEngine ?? "") + "|" + (_profile.KernelVersion ?? "");
@@ -434,10 +442,17 @@ namespace JoeBrowser
             {
                 _kernelHint.Text = sel == 0
                     ? (_kernelKeys.Count <= 1
-                        ? "Uses whatever browser is installed. Install another kernel to give each profile its own build."
+                        ? "Uses whatever browser is installed. Install another build to give each profile its own."
                         : "Uses whatever browser is installed, and follows its updates.")
                     : "Pinned to " + labels[sel] + ". This profile keeps that build even after the installed browser updates.";
             }
+        }
+
+        private static int EngineRank(string engine)
+        {
+            for (int i = 0; i < BrowsersPage.EngineKeys.Length; i++)
+                if (string.Equals(BrowsersPage.EngineKeys[i], engine, StringComparison.OrdinalIgnoreCase)) return i;
+            return 99;
         }
 
         private void BrowseBrowser()        {
@@ -482,13 +497,29 @@ namespace JoeBrowser
             _suppress = true;
             try
             {
-                await BrowserFetcher.InstallAsync(key, dlg.UpdateProgress, dlg.Token);
+                /* The build goes into this application's own folder, not through an
+                   installer that writes all over Windows. It is then managed from the
+                   Browsers page and can be pinned to this profile, and the machine's own
+                   browser is left exactly as it was. */
+                var build = await KernelStore.InstallNewestAsync(key,
+                    delegate(int pct, string msg) { dlg.UpdateProgress(pct, msg); },
+                    dlg.Token).ConfigureAwait(true);
                 /* The dialog is modeless: it may have been closed (or the whole editor
                    disposed) while the download ran. Touching the controls after that threw
                    into the catch below, whose Fail touched them again. */
                 if (IsDisposed) return;
                 dlg.Close();
+                KernelDiversity.Invalidate();
                 BuildBrowserOptions(key);
+                /* The build is now on this machine, so the profile can be pinned to it. */
+                BuildKernelOptions();
+                if (build != null)
+                {
+                    _suppress = true;
+                    _profile.KernelEngine = build.Engine;
+                    _profile.KernelVersion = build.Version;
+                    _suppress = false;
+                }
             }
             catch (OperationCanceledException) { if (!IsDisposed) dlg.Close(); }
             catch (Exception ex)
@@ -818,7 +849,7 @@ namespace JoeBrowser
             var names = new List<string>();
             names.Add(vault.Count == 0 ? "No saved proxies yet" : "Enter manually");
             foreach (var entry in vault)
-                names.Add(string.IsNullOrWhiteSpace(entry.Name) ? entry.Connection : entry.Name + "  ·  " + entry.Connection);
+                names.Add(string.IsNullOrWhiteSpace(entry.Name) ? entry.Connection : entry.Name + "  Â·  " + entry.Connection);
             _lblSaved = Lbl(_tabProxy, "SAVED PROXIES");
             _savedProxy = Pick(_tabProxy, "proxy");
             _savedProxy.SetItems(names, 0);
@@ -982,7 +1013,7 @@ namespace JoeBrowser
             if (_toolHow == null) return;
             var lines = new List<string>();
             if (_toolHumanPaste.Checked)
-                lines.Add("Paste as human: Ctrl+V types the clipboard with human timing.");
+                lines.Add("Paste as human: types the clipboard with human timing.");
             if (_toolRightClick.Checked)
                 lines.Add("Right click & copy: restores copy and selection on sites that block them.");
             if (_toolProxyWatch.Checked)
@@ -1217,7 +1248,7 @@ namespace JoeBrowser
         {
             _err.Text = text ?? "";
             _err.Visible = text != null && text.Length > 0;
-            /* The line elides at the end, and the end of "…is too long" is the part that says
+            /* The line elides at the end, and the end of "â€¦is too long" is the part that says
                what is wrong. The tooltip carries the whole sentence. */
             ToolTips.Attach(_err, _err.Text);
             LayoutFooter();
@@ -1311,7 +1342,9 @@ namespace JoeBrowser
             bool wide = cw >= Ui.S(540);
             if (wide)
             {
-                int kindW = Ui.S(226);
+                /* The picker is measured, not guessed: "Chromium (built-in)" has to fit with
+                   the arrow beside it, and a fixed width cut the name in half. */
+                int kindW = Math.Min(cw - browseW - Ui.S(16), Math.Max(Ui.S(210), Ui.S(248)));
                 int pathW = cw - kindW - browseW - Ui.S(16);
                 _lblKind.SetBounds(0, y, kindW, lh);
                 _lblPath.SetBounds(kindW + Ui.S(8), y, pathW, lh);
@@ -1349,7 +1382,9 @@ namespace JoeBrowser
 
             if (_getBrowser != null && _getBrowser.Visible)
             {
-                int gw = Ui.S(118);
+                /* The button is as wide as its own label: a fixed width cut "Download" into
+                   "Downl...", which reads as a broken control rather than a button. */
+                int gw = Math.Min(Ui.S(200), _getBrowser.PreferredWidth(Ui.S(118)));
                 _getBrowser.SetBounds(cw - gw, y - rg + Ui.S(2), gw, Ui.S(34));
                 _browserNote.SetBounds(0, y - rg + Ui.S(6), cw - gw - Ui.S(12), Ui.S(26));
                 y += Ui.S(34) + Ui.S(6);
@@ -1845,8 +1880,8 @@ namespace JoeBrowser
         {
             if (keyData == Keys.Escape)
             {
-                /* Esc used to close the editor outright. Five tabs of edits — name, notes,
-                   fingerprint, proxy credentials, tools — were discarded silently, and Esc is
+                /* Esc used to close the editor outright. Five tabs of edits â€” name, notes,
+                   fingerprint, proxy credentials, tools â€” were discarded silently, and Esc is
                    also the natural "undo the value I am typing" key, so this was hit by
                    accident more often than on purpose. One Esc now asks; a second Esc (or the
                    Discard button) closes. */
@@ -1997,7 +2032,6 @@ namespace JoeBrowser
             int badge = Ui.S(40);
             int textX = pad + badge + Ui.S(16);
             int bodyTop = pad + badge + Ui.S(14);
-            int saveW = Ui.S(124), cancelW = Ui.S(96);
 
             Size screenMax = Ui.FitToScreen(this, Ui.S(560), Ui.S(900));
             int textW = Math.Min(Ui.S(360), screenMax.Width - textX - pad);
@@ -2005,6 +2039,12 @@ namespace JoeBrowser
 
             using (var g = CreateGraphics())
             {
+                /* The action button is as wide as its own label. A fixed width cut
+                   "Download a second build" into "Download ...", which reads as a broken
+                   button rather than as a choice. */
+                int saveW = Math.Max(Ui.S(124), _ok.PreferredWidth(Ui.S(124)));
+                int cancelW = Ui.S(96);
+
                 // Hard line breaks: a Label left to word-wrap can still trim the tail.
                 string msg = WrapText(g, _message.Text, Theme.Body, textW);
                 string det = _detail.Visible ? WrapText(g, _detail.Text, Theme.Caption, textW) : "";
