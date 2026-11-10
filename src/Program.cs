@@ -217,7 +217,10 @@ namespace JoeBrowser
                        that reintroduces it should fail here instead of in a screenshot. */
                     if (Theme.PxBody < 16) sb.Append(" [body text is below 16 px]");
                     if (Math.Min(Theme.PxMicro, Theme.PxCaption) < 14) sb.Append(" [text below 14 px is in the scale]");
-                    if (Theme.ButtonRadius != 0 || Theme.CardRadius != 0) sb.Append(" [a rounded corner is back in the theme]");
+                    /* The 1.9.2 pass deliberately re-introduced rounding: square corners were
+                       the single biggest "low-quality app" tell, and the fill/stroke paths
+                       already supported it. The promise now runs the other way. */
+                    if (Theme.ButtonRadius < 8 || Theme.CardRadius < 10) sb.Append(" [corners lost their rounding]");
 
                     /* The layout is measured, so it can be proven: every line of text drawn on a
                        card or a row has to fit the width it is given, at the new type sizes and

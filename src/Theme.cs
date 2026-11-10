@@ -122,16 +122,17 @@ namespace JoeBrowser
         public static Color ActiveBg { get { return Dark ? C(0x26, 0x26, 0x26) : C(0xD8, 0xD8, 0xD8); } }
 
         // windows-ui control metrics
-        public const int ControlHeight = 40;
+        public const int ControlHeight = 42;
         /// <summary>
-        /// The app draws square corners. Every surface used to be a rounded rectangle - 6 px on
-        /// a control, 8 px on a card - and asking for "no border radius" cannot be honoured by
-        /// editing call sites one at a time: there were sixty of them, and the next control
-        /// added would have been round again. Every rounded rectangle in the app goes through
-        /// the helpers below, so the corner lives here, in one number.
+        /// The app draws rounded corners: 10 px on a control, 12 px on a card, the standard
+        /// Win11 / web-app scale. Every rounded rectangle in the app goes through the helpers
+        /// below, so the corner lives here, in one number.
         /// </summary>
-        public const int ButtonRadius = 0;
-        public const int CardRadius = 0;
+        /* Rounded corners, the way AdsPower / GoLogin / every premium desktop shell is built.
+           The radius support has always existed in Ui.Fill / Ui.Stroke / every control's paint
+           path — it was pinned at 0, which made the whole app read as square, flat and cheap. */
+        public const int ButtonRadius = 10;
+        public const int CardRadius = 12;
         public const int NavbarWidth = 280;
 
         public static readonly int Radius = CardRadius;
@@ -800,10 +801,10 @@ namespace JoeBrowser
            at least 16 px and the smallest text anywhere is 14 px, at 100%. The self test asserts
            those two floors against these constants, so a future "it looks a bit large" edit has
            to be a deliberate change to the promise rather than a number typed into a font call. */
-        public const double PxDisplay = 30;
-        public const double PxH1 = 24;
-        public const double PxH2 = 19;
-        public const double PxH3 = 17;
+        public const double PxDisplay = 32;
+        public const double PxH1 = 25;
+        public const double PxH2 = 20;
+        public const double PxH3 = 18;
         public const double PxBody = 16;
         public const double PxSmall = 15;
         public const double PxCaption = 15;
