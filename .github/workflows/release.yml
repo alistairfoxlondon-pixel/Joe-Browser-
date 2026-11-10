@@ -180,51 +180,49 @@ jobs:
 
             ### In this build
 
-            **The type is Telenor.** The whole interface is now set in the Telenor brand face,
-            bundled inside the executable so every install shows it, and the long-standing
-            "everything is one size too small" defect is fixed at the root: a conversion error
-            in the font builder shrank every requested size to 75% of itself, so a "16 px" body
-            really drew 12 px. Every size is now the size it says it is, fields and buttons are
-            taller to match, and icons are scaled up across the interface.
+            **The Browsers page is a browser manager.** Chromium, Chrome, Brave, Firefox and
+            Edge each get a tab. Every release channel gets a filter: Stable, Beta, Dev,
+            Canary, ESR, Nightly. Every published build is listed with its version, its
+            channel and its size, and can be installed, removed and pinned to a profile
+            without leaving the application. The download is shown in the row it started
+            from, with a progress bar, and a build that is already installed is never
+            fetched twice.
 
-            **Section switching no longer flashes.** A page switch composed its first frame a
-            few messages late, so the previous header band could be seen over the new page for
-            one frame - the "broken CSS" effect. The frame is now composed on the spot, and the
-            language coverage check means non-Latin interface languages fall back to the system
-            face instead of drawing boxes.
+            **Versions and channels are real.** Chromium builds carry their own version
+            numbers - 159.0.8154.0 Canary, 159.0.8144.0 Dev, 158.0.8127.18 Beta - and
+            Chrome reaches back over the last eight majors, so 157, 156, 155 and 154 are
+            all one click away. The build manager used to open on the Chromium tab and
+            list Chrome builds; it now lists the engine whose tab is selected.
 
-            **The interface moves.** Buttons, icon buttons and switches tween between their
-            states on a shared animation clock, toasts arrive with a small slide, and the page
-            scrollbar fades to a quiet line when the page stops moving and comes back the
-            moment it scrolls.
+            **Nothing downloads itself.** Opening the application fetches no browser. A
+            build is fetched the first time something needs it: when you ask for it on the
+            Browsers page, or when you open a profile that is pinned to a build this
+            machine does not have yet. That build is downloaded, unpacked and launched,
+            with the progress on screen, instead of the profile quietly falling back to
+            whatever browser happened to be installed.
 
-            **The included Chrome Web Store pair is fixed end to end.** The background
-            download now reports to the window the moment it lands (no more "waiting for
-            download" that never changes), a half-written download retries on the next start,
-            the pair loads only for Chrome, Brave and Chromium - never Edge or Firefox - and
-            removing one from its own row keeps it removed.
+            **The theme change is a dissolve.** Switching between dark and light moves the
+            whole palette a step at a time and repaints the window as one piece, so no
+            frame ever holds two themes. Only the top level window used to be frozen
+            during a theme change, which let every child control repaint on its own - that
+            was the flash. Controls that keep a colour now learn about the new palette
+            before the paint rather than after it.
 
-            **Paste as human is visible again.** On builds where the unpacked extension cannot
-            load, the page draws its own "Paste as human" entry above the native menu when
-            you right-click a field - and every Ctrl+V was already typing like a person.
+            **The interface moves.** Pages arrive from the side instead of appearing, and
+            buttons, cards and list rows ease into their hover state instead of
+            swapping colour in one frame.
 
-            **Proxies.** Adding one accepts IPv6, keeps credentials typed in a masked field,
-            and tells you when the write failed instead of claiming "saved". Proxy rows have a
-            right-click menu that copies the full address, the host, the username, the password
-            or the last checked IP. A proxy test can no longer pass through a dead proxy to
-            your real connection and report it as Working, and a running profile without a
-            relay is no longer told its proxy changed live.
+            **Less, and better.** The keyboard shortcut wall is gone, tooltips no longer
+            carry keyboard hints, the engine picker no longer repeats "not installed"
+            next to a line that already says so, and a dialog button is now as wide as
+            its own label instead of cutting "Download a second build" into "Download ...".
 
-            **The Account page is rebuilt**: a readable member-since date, a plan card without
-            the filler line, a security card that says each protection once, a new workspace
-            card with the live profile, proxy, extension and history counts, and a centred
-            column that stops growing at a readable width.
-
-            Also in this build: browsers rows no longer overlap at 150% scaling, profile cards
-            no longer push their tags under the action bar, the free plan cannot be coaxed
-            into opening several browsers at once by fast clicking, the plan page no longer
-            freezes on its first exchange-rate fetch, and turning off two-step code asks
-            before it removes a protection.
+            **Fixed along the way.** The first profile you created never appeared on the
+            grid until you visited another page and came back. The build manager listed
+            the wrong engine. The browser picker cut "Chromium (built-in)" in half. The
+            detected browser, the browser catalogue and the extension fetch all ran on
+            the thread that draws the window, so the application opened a third of a
+            second later than it needed to.
 
             ### Notes
 
