@@ -82,12 +82,10 @@ namespace JoeBrowser
             Add("net", "wifi", "tools.net", "tools.net.desc", "btn.check");
             Add("cookies", "cookie", "tools.cookies", "tools.cookies.desc", "btn.open");
             Add("ext", "apps", "tools.ext", "tools.ext.desc", "btn.open");
-            /* The tools the user could not find: all three live inside a profile, so they were
-               nowhere in the app's own navigation - which reads as "the app does not have them".
-               They are listed here with what they do and the exact gesture that uses them. */
-            Add("human", "clipboard", "tools.human", "tools.human.desc", "btn.how");
-            Add("pastehelp", "copy", "tools.rightclick", "tools.rightclick.desc", "btn.how");
-            Add("watcher", "route", "tools.watch", "tools.watch.desc", "btn.how");
+            /* The three "where does this feature live" explainer tiles are gone on purpose: the
+               features are toggles inside each profile's Tools tab, so a tile in the app's own
+               Tools page that just opens a dialog describing them was filler. The toggles
+               themselves already label what each feature does. */
             Add("trash", "trash", "tools.trash", "tools.trash.desc", "btn.restore");
             /* The keyboard-shortcuts tile is gone on purpose: a shortcut wall inside a tools
                page read as filler, and every gesture is discoverable in the place that uses it. */

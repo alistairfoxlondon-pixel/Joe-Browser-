@@ -201,6 +201,12 @@ namespace JoeBrowser
         {
             AutoSize = false;
             AutoEllipsis = true;
+            /* JBLabel was the only painted custom control without double buffering, so every
+               repaint went through WM_ERASEBKGND + WM_PAINT and erased with BackColor first.
+               Under the 160 ms profile-pulse timer that invalidates running cards, the labels
+               inside them could flash one frame of erase. Now they composite off-screen like
+               every other painted control in the app. */
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
             Ui.Opaque(this);
             Apply();
         }
@@ -530,7 +536,9 @@ namespace JoeBrowser
                 {
                     try { Native.SendMessage(Handle, 0x000B, IntPtr.Zero, IntPtr.Zero); frozen = true; } catch { }
                 }
-                ReStyle();
+                /* One restyle walk, not three. Theme.Restyle(this) calls ReStyle() on this
+                   IReStyle and then walks every child; calling ReStyle() separately first ran
+                   the same walk twice more. */
                 Theme.Restyle(this);
             }
             finally
@@ -539,19 +547,11 @@ namespace JoeBrowser
                 {
                     try { Native.SendMessage(Handle, 0x000B, (IntPtr)1, IntPtr.Zero); } catch { }
                 }
-                /* The caption bar and the scrollbars of a themed dialog are Windows' own, so the
-                   DWM attributes have to be re-applied on a mode change or the window keeps a dark
-                   border and a light body until it is reopened. */
                 if (IsHandleCreated)
                 {
                     try { Native.WindowBorderColor(Handle, Theme.Line); } catch { }
                     try { Native.ImmersiveDarkMode(Handle, Theme.Dark); } catch { }
                 }
-                /* ComposeNow is Update() plus the children: RDW_ALLCHILDREN | RDW_UPDATENOW
-                   paints the whole tree synchronously, so the first frame after the switch is
-                   the finished one. Invalidate(true) + Update() only synchronized the form's
-                   own surface - child windows kept their old-palette invalid regions and
-                   painted them on the next message-loop turns, which was the flicker. */
                 if (IsHandleCreated) Native.ComposeNow(Handle);
             }
         }
@@ -582,6 +582,14 @@ namespace JoeBrowser
             {
                 var cp = base.CreateParams;
                 cp.ClassStyle |= 0x20000; // CS_DROPSHADOW
+                /* WS_EX_COMPOSITED: the window and every child HWND paint into a backbuffer
+                   before reaching the screen. This is the single most effective flicker
+                   killer for WinForms, because native child windows (the TextBox inside
+                   JBTextBox, the ListBox inside JBSelect) otherwise paint straight to the
+                   screen during a theme flip and show the new background one frame before
+                   the surrounding panel composites. The cost is one backbuffer per
+                   top-level window; the gain is a fully composited transition. */
+                cp.ExStyle |= 0x02000000; // WS_EX_COMPOSITED
                 return cp;
             }
         }
@@ -999,7 +1007,12 @@ namespace JoeBrowser
         public BtnKind Kind = BtnKind.Ghost;
         public string Icon;
         public string BrandIcon;
-        public bool Selected;
+        public bool Selected
+        {
+            get { return _selected; }
+            set { if (_selected != value) { _selected = value; _selectT.Toward(value, 0.30f); Invalidate(); } }
+        }
+        private bool _selected;
         /// <summary>Corners are square throughout; the field is kept so existing callers still
         /// compile and a future shape can be introduced in one place.</summary>
         public int Radius = Theme.ButtonRadius;
@@ -1022,7 +1035,7 @@ namespace JoeBrowser
         /// <summary>Hover and press are tweens, not flips: the fill eases into its new colour
         /// over about 120 ms, which is the difference between an interface that reacts and one
         /// that flicks. The booleans stay the source of truth; the values are what is painted.</summary>
-        private readonly AnimValue _hoverT, _downT;
+        private readonly AnimValue _hoverT, _downT, _selectT;
 
         public JBButton()
         {
@@ -1035,6 +1048,7 @@ namespace JoeBrowser
             Height = Ui.S(36);
             _hoverT = new AnimValue(this);
             _downT = new AnimValue(this);
+            _selectT = new AnimValue(this);
         }
 
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
@@ -1095,9 +1109,13 @@ namespace JoeBrowser
                     break;
 
                 case BtnKind.Nav:
-                    bg = Selected ? Theme.AccentOnBg : Ui.Blend(Color.Transparent, Theme.HoverOverlay, _hoverT.Value);
+                    /* The selected fill eases in/out so the accent bar and the soft background
+                       grow into place instead of snapping, which is the difference between a
+                       reactive shell and a stiff one. */
+                    bg = Ui.Blend(Color.Transparent, Theme.AccentOnBg, _selectT.Value);
+                    bg = Ui.Blend(bg, Theme.HoverOverlay, _hoverT.Value * (1f - _selectT.Value * 0.5f));
                     bg = Ui.Blend(bg, Theme.ActiveBg, _downT.Value * 0.6f);
-                    fg = Selected ? Theme.Text : _hover ? Theme.Text : Theme.TextDim;
+                    fg = Ui.Blend(Theme.TextDim, Theme.Text, Math.Max(_selectT.Value, _hoverT.Value));
                     break;
 
                 default:
@@ -1125,14 +1143,14 @@ namespace JoeBrowser
                 {
                     var box = new RectangleF(iconX, (Height - navIcon) / 2f, navIcon, navIcon);
                     if (BrandIcon != null) BrandIcons.Draw(g, BrandIcon, box);
-                    else Icons.Draw(g, Icon, box, Selected ? Theme.AccentText : fg);
+                    else Icons.Draw(g, Icon, box, Ui.Blend(fg, Theme.Accent, _selectT.Value));
                 }
-                Font navFont = Selected ? Theme.BodyBold : Theme.Body;
-                Color navFg = Selected ? Theme.Text : Theme.TextDim;
+                Font navFont = _selectT.Value > 0.5f ? Theme.BodyBold : Theme.Body;
+                Color navFg = fg;
                 float labelX = iconX + navIcon + Ui.S(12);
                 Ui.Text(g, Text, navFont, navFg, labelX,
                     (Height - navFont.GetHeight(g)) / 2f, Math.Max(Ui.S(20), Width - labelX - Ui.S(12)));
-                if (Selected)
+                if (_selectT.Value > 0.01f)
                 {
                     float barH = Height - Ui.S(16);
                     Ui.Fill(g, new RectangleF(0, Ui.S(Theme.ButtonRadius), Ui.S(3f), barH), Ui.S(1.5f), Theme.Accent);

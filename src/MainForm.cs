@@ -657,9 +657,9 @@ namespace JoeBrowser
                     case "ext": OpenExtensionFolder(); break;
                     case "trash": RecycleBin(); break;
                     case "shortcuts": break; // removed: the shortcut wall was noise, not a tool
-                    case "human": ToolExplainer("human"); break;
-                    case "pastehelp": ToolExplainer("rightclick"); break;
-                    case "watcher": ToolExplainer("watch"); break;
+                    case "human": break; // removed: explainer dialog was filler, the toggle is in the editor
+                    case "pastehelp": break;
+                    case "watcher": break;
                     case "clean": ClearCaches(); break;
                     case "audit": AccountAudit(); break;
                     case "report": Report.OpenForm(this, ""); break;
@@ -1078,46 +1078,6 @@ namespace JoeBrowser
                 rows.Add(new[] { r[0], r[1] });
             }
             return rows;
-        }
-
-        /// <summary>
-        /// Where a built-in tool lives and how it is used. Every one of them is per profile, and
-        /// that is the fact a user cannot discover by clicking around the app: the switches are
-        /// in the profile editor, and the feature itself happens inside the browser. The dialog
-        /// says where, what, and how in that order, and offers the one action that gets them
-        /// there rather than describing it.
-        /// </summary>
-        private void ToolExplainer(string which)
-        {
-            string title, where, what, how;
-            if (which == "rightclick")
-            {
-                title = "Right click & copy";
-                where = "Every new profile. Tools tab, per profile.";
-                what = "Restores the right-click menu, Ctrl+C and text selection on sites that block them.";
-                how = "Right-click the page and copy.";
-            }
-            else if (which == "watch")
-            {
-                title = "Proxy IP change & offline alerts";
-                where = "On when a proxy is set. Tools tab, per profile.";
-                what = "Alerts when the exit IP changes or the proxy goes offline.";
-                how = "Runs while a profile with a proxy is open.";
-            }
-            else
-            {
-                title = "Paste as human";
-                where = "On by default. Tools tab, per profile.";
-                what = "Ctrl+V types the clipboard with human timing, keystroke by keystroke.";
-                how = "Copy as usual, then press Ctrl+V in the page.";
-            }
-            using (var dlg = new ToolDialog(title, "Close", "", 600, 460))
-            {
-                dlg.Secondary.Visible = false;
-                dlg.AddNote(where);
-                dlg.AddReadOnlyText(what + "\r\n\r\n" + how, 200);
-                dlg.ShowDialog(this);
-            }
         }
 
         private void ClearCaches()
@@ -2107,8 +2067,9 @@ namespace JoeBrowser
             float logoSize = Ui.S(26);
             var logoBox = new RectangleF(Ui.S(20), Ui.S(20), logoSize, logoSize);
             Logo.Draw(g, logoBox);
-            Ui.Text(g, "Joe Browser", Theme.H3, Theme.Text, Ui.S(54), Ui.S(18), sb - Ui.S(66));
-            Ui.Text(g, "Anti detect workspace", Theme.Caption, Theme.TextFaint, Ui.S(54), Ui.S(38), sb - Ui.S(66));
+            Ui.Text(g, "Joe Browser", Theme.H3, Theme.Text, Ui.S(54), Ui.S(20), sb - Ui.S(66));
+            /* The tagline under the brand mark is gone: premium tools like AdsPower and GoLogin
+               show no subtitle below the logo, and "Anti detect workspace" read as filler. */
 
             using (var p = new Pen(Theme.Line, Ui.Hair))
                 g.DrawLine(p, Ui.S(18), Ui.S(HeaderH + Ui.S(34)), sb - Ui.S(18), Ui.S(HeaderH + Ui.S(34)));

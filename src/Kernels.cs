@@ -57,19 +57,19 @@ namespace JoeBrowser
 
     /// <summary>
     /// Downloads and manages pinned engine builds. Everything here is a portable layout:
-    /// Chrome for Testing, Brave and the Chromium snapshot all publish a plain Windows zip,
-    /// so a build is unpacked into its own folder and never registered with Windows.
+    /// Chrome for Testing, Brave, Firefox and the Chromium snapshot all publish a plain Windows
+    /// zip, so a build is unpacked into its own folder and never registered with Windows.
     ///
-    /// Firefox is deliberately absent. Mozilla ships only installers for Windows, and the MSI
-    /// carries its payload as an embedded 7z that Windows Installer expands only during a real
-    /// install - an administrative install copies the MSI alone. A portable Firefox would mean
-    /// either registering a second Firefox with Windows (which can replace the user's own) or
-    /// shipping a 7z decoder. Firefox profiles keep using the installed Firefox instead, which
-    /// is also what AdsPower offers.
+    /// Edge is the exception. Microsoft ships only the enterprise MSI, whose payload is an
+    /// embedded 7z that Windows Installer expands during a real install. An administrative
+    /// install (msiexec /a) copies the payload out without registering Edge with Windows, so
+    /// the build lands under the kernels folder the same way the others do - this is the
+    /// same trick the old "Firefox is deliberately absent" comment worried about, solved with
+    /// a documented Windows feature instead of a 7z decoder.
     /// </summary>
     internal static class KernelStore
     {
-        public static readonly string[] Engines = { "chrome", "brave", "chromium" };
+        public static readonly string[] Engines = { "chrome", "brave", "chromium", "firefox", "edge" };
 
         private const string ChromeCatalog =
             "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
@@ -84,6 +84,18 @@ namespace JoeBrowser
             "https://api.github.com/repos/brave/brave-browser/releases?per_page=10";
         private const string ChromiumBase =
             "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/";
+        /* Mozilla publishes a portable win64 zip for every Firefox release at a stable URL.
+           The product-details JSON lists the current Stable and Beta (Devel) versions, so a
+           pinned kernel catalog is one round-trip the way Chrome's is. */
+        private const string FirefoxVersions =
+            "https://product-details.mozilla.org/1.0/firefox_versions.json";
+        private const string FirefoxZipUrl =
+            "https://archive.mozilla.org/pub/firefox/releases/{0}/win64/en-US/Firefox%20Setup%20{0}.zip";
+        /* Edge: the enterprise MSI is the only published artifact. The Winget / Edge update
+           APIs redirect here in the end. The version string is taken from the URL the redirect
+           lands on, so a pinned kernel catalog needs the latest two or three versions. */
+        private const string EdgeVersions =
+            "https://edgeupdates.microsoft.com/api/v1/edge/business/stable?arch=x64&platform=windows&appid=Microsoft Edge";
 
         public static string Root { get { return AppPaths.Kernels; } }
 
@@ -187,6 +199,7 @@ namespace JoeBrowser
         private static string FindExe(string dir, string engine)
         {
             string[] want = engine == "firefox" ? new[] { "firefox.exe" }
+                : engine == "edge" ? new[] { "msedge.exe" }
                 : engine == "brave" ? new[] { "brave.exe" }
                 : new[] { "chrome.exe" };
             // Shallow first: the published archives put the binary one or two levels down.
@@ -260,6 +273,8 @@ namespace JoeBrowser
                 }
                 case "brave": return BraveReleases();
                 case "chromium": return ChromiumReleases();
+                case "firefox": return FirefoxReleases();
+                case "edge": return EdgeReleases();
                 default: return new List<KernelRelease>();
             }
         }
@@ -402,6 +417,77 @@ namespace JoeBrowser
             return list;
         }
 
+        /// <summary>Firefox portable zips from the Mozilla archive. Stable and Beta are the two
+        /// channels Mozilla officially ships for Windows; the URL pattern is stable across every
+        /// version, so a pinned kernel is one fetch away for any release the catalog lists.</summary>
+        private static List<KernelRelease> FirefoxReleases()
+        {
+            var list = new List<KernelRelease>();
+            try
+            {
+                var root = Json(Get(FirefoxVersions)) as Dictionary<string, object>;
+                if (root == null) return list;
+                string stable = Str(root, "LATEST_FIREFOX_VERSION");
+                string beta = Str(root, "LATEST_FIREFOX_DEVEL_VERSION");
+                if (!string.IsNullOrEmpty(stable))
+                    list.Add(new KernelRelease("firefox", stable, "Stable",
+                        string.Format(FirefoxZipUrl, stable), "zip") { SizeMb = 60 });
+                if (!string.IsNullOrEmpty(beta) && !string.Equals(beta, stable, StringComparison.OrdinalIgnoreCase))
+                    list.Add(new KernelRelease("firefox", beta, "Beta",
+                        string.Format(FirefoxZipUrl, beta), "zip") { SizeMb = 60 });
+            }
+            catch (Exception ex) { Log.Error("Firefox kernel catalog failed", ex); }
+            return list;
+        }
+
+        /// <summary>Edge enterprise MSIs from the Microsoft Edge updates API. The MSI is the
+        /// only published artifact; an administrative install (msiexec /a) extracts its payload
+        /// into the kernels folder without registering Edge with Windows, the same way the
+        /// zip-based engines land. Only the Stable channel is published for business; the API
+        /// returns one current version with its MSI URL.</summary>
+        private static List<KernelRelease> EdgeReleases()
+        {
+            var list = new List<KernelRelease>();
+            try
+            {
+                var root = Json(Get(EdgeVersions)) as Dictionary<string, object>;
+                if (root == null) return list;
+                string version = Str(root, "Version");
+                if (string.IsNullOrEmpty(version))
+                {
+                    // The API sometimes wraps the version inside the products array.
+                    var products = root.ContainsKey("Products") ? root["Products"] as object[] : null;
+                    if (products != null && products.Length > 0)
+                    {
+                        var first = products[0] as Dictionary<string, object>;
+                        if (first != null) version = Str(first, "Version");
+                    }
+                }
+                if (string.IsNullOrEmpty(version)) return list;
+
+                string url = null;
+                var artifacts = root.ContainsKey("Artifacts") ? root["Artifacts"] as object[] : null;
+                if (artifacts != null)
+                {
+                    foreach (object o in artifacts)
+                    {
+                        var a = o as Dictionary<string, object>;
+                        if (a == null) continue;
+                        string artifactName = Str(a, "ArtifactName");
+                        if (!string.Equals(artifactName, "msi", StringComparison.OrdinalIgnoreCase)) continue;
+                        var locations = a.ContainsKey("Locations") ? a["Locations"] as object[] : null;
+                        if (locations == null || locations.Length == 0) continue;
+                        var loc = locations[0] as Dictionary<string, object>;
+                        if (loc != null) { url = Str(loc, "Url"); break; }
+                    }
+                }
+                if (string.IsNullOrEmpty(url)) return list;
+                list.Add(new KernelRelease("edge", version, "Stable", url, "msi") { SizeMb = 180 });
+            }
+            catch (Exception ex) { Log.Error("Edge kernel catalog failed", ex); }
+            return list;
+        }
+
         // ------------------------------------------------------------------ install
 
         public static Task<KernelInstall> InstallAsync(KernelRelease rel, Action<int, string> progress, CancellationToken ct)
@@ -415,16 +501,12 @@ namespace JoeBrowser
             string dir = DirFor(rel.Engine, rel.Version);
             Directory.CreateDirectory(dir);
 
-            /* The zip and its unpacked copy both have to fit, and the published size is the
-               compressed one: a build that reports 170 MB unpacks to ~500 MB. The old estimate
-               reserved barely enough for the zip twice, so a mid-extract disk-full was the
-               first symptom instead of a clear message. */
             long need = ((rel.SizeMb > 0 ? rel.SizeMb : 200) * 4 + 300) * 1048576L;
             DiskSpace.Require(dir, need, "download " + rel.Engine + " " + rel.Version);
 
             string tmp = Path.Combine(dir, "dl-" + Guid.NewGuid().ToString("N").Substring(0, 8));
             Directory.CreateDirectory(tmp);
-            string file = Path.Combine(tmp, "build.zip");
+            string file = Path.Combine(tmp, rel.Kind == "msi" ? "build.msi" : "build.zip");
             try
             {
                 try
@@ -435,12 +517,11 @@ namespace JoeBrowser
                     ignored.GetAwaiter().GetResult();
 
                     progress?.Invoke(100, "Unpacking\u2026");
-                    ExtractZip(file, dir);
+                    if (rel.Kind == "msi") ExtractMsi(file, dir);
+                    else ExtractZip(file, dir);
                 }
                 catch
                 {
-                    /* A cancelled or failed install must not leave an empty version folder
-                       behind: it kept appearing in the installed list with nothing in it. */
                     try { Directory.Delete(dir, true); } catch { }
                     throw;
                 }
@@ -453,8 +534,6 @@ namespace JoeBrowser
             string exe = FindExe(dir, rel.Engine);
             if (exe == null)
             {
-                /* A half-unpacked folder would keep showing up in the installed list and in the
-                   editor's picker, so a failed install takes itself out again. */
                 try { Directory.Delete(dir, true); } catch { }
                 throw new InvalidOperationException("The " + rel.Engine + " build unpacked but no executable was found.");
             }
@@ -469,6 +548,35 @@ namespace JoeBrowser
             Log.Info("Kernel installed: " + rel.Engine + " " + rel.Version + " -> " + exe);
             KernelDiversity.Invalidate();
             return k;
+        }
+
+        private static void ExtractMsi(string msi, string dir)
+        {
+            /* msiexec /a performs an administrative install: it extracts the payload of an MSI
+               into a target folder without registering the product with Windows. Edge's
+               enterprise MSI unpacks into a Microsoft\Edge\Application\msedge.exe layout, so the
+               build lands inside the kernels folder the same way a zip-based engine does. The
+               process is waited on synchronously because the kernel is not ready until the
+               payload is on disk. */
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "msiexec.exe",
+                Arguments = "/a \"" + msi + "\" /qn TARGETDIR=\"" + dir + "\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+            };
+            using (var p = System.Diagnostics.Process.Start(psi))
+            {
+                if (p == null) throw new InvalidOperationException("msiexec could not be started.");
+                if (!p.WaitForExit(300000))
+                {
+                    try { p.Kill(); } catch { }
+                    throw new InvalidOperationException("The Edge MSI administrative install did not finish in time.");
+                }
+                if (p.ExitCode != 0)
+                    throw new InvalidOperationException("msiexec exited with code " + p.ExitCode + ".");
+            }
         }
 
         private static void ExtractZip(string zip, string dir)

@@ -15,7 +15,7 @@ namespace JoeBrowser
     /// </summary>
     internal sealed class KernelForm : JBForm
     {
-        private readonly JBSegment _engines;
+        private readonly JBSegment _engines, _channels;
         private readonly JBScrollHost _host;
         private readonly Panel _column = new Panel();
         private readonly List<KernelRow> _rows = new List<KernelRow>();
@@ -23,13 +23,19 @@ namespace JoeBrowser
         private readonly JBButton _refresh, _close;
         private readonly JBIconButton _x;
         private string _engine = "chrome";
+        private string _channel = "All";
         private bool _loading;
         private bool _built;
         private bool _fitting;
         private bool _userSized;
 
-        private static readonly string[] EngineKeys = { "chrome", "brave", "chromium" };
-        private static readonly string[] EngineLabels = { "Chrome", "Brave", "Chromium" };
+        /* Every engine the kernel store manages gets a segment tab here. Firefox and Edge were
+           added to the store in 1.9.1, so they are now first-class kernel engines with their
+           own download / unpack / pin pipeline - no longer a pointer to the user's local
+           install. */
+        private static readonly string[] EngineKeys = { "chromium", "chrome", "brave", "firefox", "edge" };
+        private static readonly string[] EngineLabels = { "Chromium", "Chrome", "Brave", "Firefox", "Edge" };
+        private static readonly string[] ChannelKeys = { "All", "Stable", "Beta", "Dev", "Canary", "Snapshot" };
 
         public KernelForm()
         {
@@ -40,17 +46,24 @@ namespace JoeBrowser
             BackColor = Theme.Bg;
             ShowInTaskbar = false;
             MinimumSize = new Size(Ui.S(520), Ui.S(360));
-            Size = Ui.FitToScreen(this, Ui.S(660), Ui.S(560));
+            Size = Ui.FitToScreen(this, Ui.S(660), Ui.S(600));
 
             _engines = new JBSegment();
             _engines.SetItems(EngineLabels, 0);
             _engines.SelectedIndexChanged += delegate
             {
                 int i = _engines.SelectedIndex;
-                _engine = i >= 0 && i < EngineKeys.Length ? EngineKeys[i] : "chrome";
+                _engine = i >= 0 && i < EngineKeys.Length ? EngineKeys[i] : "chromium";
                 LoadAsync();
             };
             Controls.Add(_engines);
+
+            /* Channel picker so a user can narrow the catalog to Stable / Beta / Dev / Canary
+               the way AdsPower does. The default All shows everything the publisher offers. */
+            _channels = new JBSegment();
+            _channels.SetItems(ChannelKeys, 0);
+            _channels.SelectedIndexChanged += delegate { LoadAsync(); };
+            Controls.Add(_channels);
 
             _column.BackColor = Theme.Bg;
             _host = new JBScrollHost(_column);
@@ -122,7 +135,12 @@ namespace JoeBrowser
             int engW = Math.Max(Ui.S(300), Math.Min(_engines.PreferredWidth(Ui.S(140)), Ui.S(520)));
             _engines.SetBounds(pad, Ui.S(52), Math.Min(engW, Math.Max(Ui.S(200), w - pad * 2)), Ui.S(36));
 
-            int top = Ui.S(100);
+            /* Channel picker sits below the engine segment. Width is measured so the labels
+               never collide at 150%. */
+            int chW = Math.Max(Ui.S(280), Math.Min(_channels.PreferredWidth(Ui.S(70)), Ui.S(560)));
+            _channels.SetBounds(pad, Ui.S(94), Math.Min(chW, Math.Max(Ui.S(200), w - pad * 2)), Ui.S(36));
+
+            int top = Ui.S(142);
             int footer = Ui.S(52);
             _host.SetBounds(pad, top, w - pad * 2, Math.Max(Ui.S(120), h - top - footer - Ui.S(8)));
 
@@ -178,6 +196,17 @@ namespace JoeBrowser
 
                 if (IsDisposed) return;
                 ClearRows();
+
+                /* Apply the channel filter: "All" keeps every row; any other value keeps only
+                   releases whose channel matches. Releases with an empty channel (e.g. an old
+                   installed build the publisher no longer lists) always survive the filter, so a
+                   pinned kernel never disappears from view just because the picker moved. */
+                if (releases != null && _channels.SelectedIndex > 0)
+                {
+                    string wantCh = ChannelKeys[_channels.SelectedIndex];
+                    releases = releases.FindAll(r => string.IsNullOrEmpty(r.Channel) ||
+                        string.Equals(r.Channel, wantCh, StringComparison.OrdinalIgnoreCase));
+                }
 
                 var installed = new Dictionary<string, KernelInstall>(StringComparer.OrdinalIgnoreCase);
                 foreach (var k in KernelStore.Installed())

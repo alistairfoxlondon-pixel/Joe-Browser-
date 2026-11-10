@@ -150,6 +150,28 @@ namespace JoeBrowser
             // before any browser that came with the PC.
             candidates.Insert(0, AppPaths.ChromiumExe);
 
+            /* Pinned kernels: every build the user downloaded through the Kernels manager is an
+               exe on disk under AppPaths.Kernels. Without this scan the Browsers page kept
+               saying "Chrome - not installed" even after a Chrome kernel was downloaded,
+               because the detector never looked inside the kernels folder. */
+            try
+            {
+                if (System.IO.Directory.Exists(AppPaths.Kernels))
+                {
+                    foreach (string engineDir in System.IO.Directory.GetDirectories(AppPaths.Kernels))
+                    {
+                        string engine = System.IO.Path.GetFileName(engineDir).ToLowerInvariant();
+                        foreach (string versionDir in System.IO.Directory.GetDirectories(engineDir))
+                        {
+                            string exe = KernelStore.ResolveExe(engine, System.IO.Path.GetFileName(versionDir));
+                            if (!string.IsNullOrEmpty(exe) && System.IO.File.Exists(exe))
+                                candidates.Add(exe);
+                        }
+                    }
+                }
+            }
+            catch { }
+
             foreach (string c in candidates)
             {
                 if (string.IsNullOrWhiteSpace(c) || !File.Exists(c)) continue;
