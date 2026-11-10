@@ -20,7 +20,14 @@ namespace JoeBrowser.Setup
     {
         internal const string AppId = "JoeBrowser.Browser.1.2";
         internal const string AppName = "Joe Browser";
-        internal const string Version = "1.9.2";
+
+        /// <summary>
+        /// The version, read from the installer's own assembly. It used to be typed into this
+        /// file as well as into the application, and the two drifted: the uninstall entry
+        /// kept reporting the version from two releases ago. One number, read from the build,
+        /// cannot drift.
+        /// </summary>
+        internal static string Version { get { return Installation.AppVersion; } }
         internal const string Publisher = "Joe Goldberg";
 
         [STAThread]

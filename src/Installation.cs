@@ -13,10 +13,48 @@ namespace JoeBrowser
     internal static class Installation
     {
         public const string AppName = "Joe Browser";
-        public const string AppVersion = "1.9.2";
         public const string Publisher = "Joe Goldberg";
         public const string AppId = "JoeBrowser.Browser.1.2";
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\JoeBrowser";
+
+        /// <summary>
+        /// The version this binary was built as, read from the assembly it lives in.
+        ///
+        /// It used to be a number typed into this file, and a second number typed into the
+        /// installer. Both had to be edited for every release, and the release that shipped
+        /// 1.10.0 with an uninstall entry that still said 1.9.2 is what that costs: Apps and
+        /// Features showed the old version, and the release check failed on it. A version that
+        /// is read cannot disagree with the build.
+        /// </summary>
+        public static string AppVersion
+        {
+            get
+            {
+                try
+                {
+                    var v = System.Reflection.Assembly.GetExecutingAssembly()
+                        .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false);
+                    if (v != null && v.Length > 0)
+                    {
+                        string s = ((System.Reflection.AssemblyInformationalVersionAttribute)v[0]).InformationalVersion;
+                        if (!string.IsNullOrEmpty(s))
+                        {
+                            /* The attribute can carry a build suffix ("1.2.3+abc"). Only the
+                               number belongs in an uninstall entry. */
+                            int plus = s.IndexOf('+');
+                            if (plus > 0) s = s.Substring(0, plus);
+                            /* Three parts: the file version carries a fourth part for the
+                               rebuild, and Apps and Features shows what is written here. */
+                            string[] parts = s.Split('.');
+                            if (parts.Length > 3) s = parts[0] + "." + parts[1] + "." + parts[2];
+                            return s;
+                        }
+                    }
+                }
+                catch { }
+                return "0.0.0";
+            }
+        }
 
         /// <summary>Per-user install target: no administrator rights, no UAC prompt.</summary>
         public static string DefaultDir()

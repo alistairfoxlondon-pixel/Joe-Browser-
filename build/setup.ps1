@@ -52,6 +52,11 @@ $lines.Add('/resource:"' + $appConfig + '",JoeBrowser.payload.exe.config')
 $info = Get-Content (Join-Path $root "src\AssemblyInfo.cs") -Raw
 $version = "1.0.0.0"
 if ($info -match 'AssemblyFileVersion\("([0-9.]+)"\)') { $version = $Matches[1] }
+# The informational version is the release number the user sees: three parts, so the
+# installer and the application it carries report exactly the same thing.
+$infoVersion = $version
+$vparts = $version -split '\.'
+if ($vparts.Count -ge 3) { $infoVersion = ($vparts[0..2] -join '.') }
 $assemblyInfo = Join-Path $PSScriptRoot "setup.assemblyinfo.cs"
 @(
     'using System.Reflection;'
@@ -62,7 +67,7 @@ $assemblyInfo = Join-Path $PSScriptRoot "setup.assemblyinfo.cs"
     '[assembly: AssemblyCopyright("Copyright (c) 2026 Joe Goldberg")]'
     "[assembly: AssemblyVersion(`"$version`")]"
     "[assembly: AssemblyFileVersion(`"$version`")]"
-    "[assembly: AssemblyInformationalVersion(`"$version`")]"
+    "[assembly: AssemblyInformationalVersion(`"$infoVersion`")]"
 ) | Set-Content -Path $assemblyInfo -Encoding UTF8
 $lines.Add('/out:"' + $Out + '"')
 foreach ($r in @("System.dll", "System.Core.dll", "System.Drawing.dll", "System.Windows.Forms.dll")) {

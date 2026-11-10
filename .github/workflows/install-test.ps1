@@ -52,6 +52,10 @@ Write-Host "Start menu shortcut created"
 # The point of installing is that the installed copy runs - including its own configuration
 # file, which lives beside it and is copied by the installer, not by the build.
 $p = Start-Process -FilePath $exe -ArgumentList '--selftest' -PassThru -RedirectStandardOutput "$env:TEMP\installed.out" -RedirectStandardError "$env:TEMP\installed.err"
+# Touching the handle caches it, and a cached handle is what makes ExitCode readable
+# afterwards. Without it the property comes back empty and a passing self-test reads as a
+# failure.
+$null = $p.Handle
 if (-not $p.WaitForExit(60000)) { try { $p.Kill() } catch { }; throw 'the installed copy did not exit within 60 seconds' }
 $said = @(Get-Content "$env:TEMP\installed.out", "$env:TEMP\installed.err" -ErrorAction SilentlyContinue | Where-Object { $_.Trim() }) -join ' / '
 Write-Host "Installed copy --selftest exit=$($p.ExitCode) said=$said"
