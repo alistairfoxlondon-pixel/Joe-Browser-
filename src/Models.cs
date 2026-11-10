@@ -323,7 +323,7 @@ namespace JoeBrowser
             Name = "";
             Notes = "";
             StartUrl = FingerprintTestUrl;
-            BrowserKind = "auto";
+            BrowserKind = "chromium";
             BrowserPath = "";
             KernelEngine = "";
             KernelVersion = "";

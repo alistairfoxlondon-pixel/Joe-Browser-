@@ -58,6 +58,13 @@ namespace JoeBrowser
                 }
             }
 
+            /* "auto" means Joe Browser's own kernel, the way AdsPower and GoLogin behave: the
+               engine this app downloaded into its own folder always wins, so a profile never
+               silently rides the Chrome or Edge that happens to sit on the PC. A local browser
+               is only used when the user picks it by name - never by default. */
+            var own = OwnKernel(list);
+            if (own != null) return own;
+
             foreach (var b in list)
                 if (b.Name == "Chrome") return b;
             foreach (var b in list)
@@ -76,13 +83,32 @@ namespace JoeBrowser
             foreach (var b in list) installed[b.EngineKey] = true;
 
             var rows = new List<string[]>();
-            rows.Add(new[] { "auto", installed.Count > 0 ? "Detect automatically" : "Detect automatically (none found)" });
+            /* The built-in kernel leads the picker: it is what a profile should run on, and the
+               local browsers follow as explicit choices for people who really want them. */
+            Add(rows, installed, "chromium", "Chromium (built-in)");
+            rows.Add(new[] { "auto", "Detect automatically" });
             Add(rows, installed, "chrome", "Google Chrome");
             Add(rows, installed, "edge", "Microsoft Edge");
             Add(rows, installed, "brave", "Brave");
-            Add(rows, installed, "chromium", "Chromium");
             Add(rows, installed, "firefox", "Firefox");
             return rows;
+        }
+
+        /// <summary>The engine Joe Browser downloaded into its own folder, or null.</summary>
+        public static BrowserInfo OwnKernel(List<BrowserInfo> list)
+        {
+            if (list == null) return null;
+            foreach (var b in list)
+            {
+                try
+                {
+                    if (b.Path != null && string.Equals(System.IO.Path.GetFullPath(b.Path),
+                        System.IO.Path.GetFullPath(AppPaths.ChromiumExe), StringComparison.OrdinalIgnoreCase))
+                        return b;
+                }
+                catch { }
+            }
+            return null;
         }
 
         private static void Add(List<string[]> rows, Dictionary<string, bool> installed, string key, string label)
@@ -120,8 +146,9 @@ namespace JoeBrowser
             candidates.Add(System.IO.Path.Combine(local, @"Programs\Firefox\firefox.exe"));
             candidates.Add(System.IO.Path.Combine(appdata, @"Firefox\firefox.exe"));
 
-            // Chromium fetched by Joe Browser (used when nothing else is installed)
-            candidates.Add(AppPaths.ChromiumExe);
+            // Joe Browser's own kernel first: "auto" and the engine picker must resolve to it
+            // before any browser that came with the PC.
+            candidates.Insert(0, AppPaths.ChromiumExe);
 
             foreach (string c in candidates)
             {

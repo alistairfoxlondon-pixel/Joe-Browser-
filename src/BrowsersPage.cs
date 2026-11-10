@@ -71,7 +71,7 @@ namespace JoeBrowser
             }
 
             _note = new JBLabel(LabelRole.Faint,
-                "Chromium installs into this app's folder. The others use their official installer.");
+                "Joe Browser's built-in Chromium installs into this app's folder. Local browsers are optional.");
             _note.Wrap = true;
             _column.Controls.Add(_note);
 
@@ -147,16 +147,19 @@ namespace JoeBrowser
         {
             return new List<EngineInfo>
             {
+                /* The built-in kernel first and described for what it is: this app's own
+                   browser, downloaded here and managed here - never a browser that came
+                   with Windows. */
+                new EngineInfo("chromium", "Joe Browser Chromium (built-in)",
+                    "This app's own kernel. Downloaded into Joe Browser, never your local browser.", true),
                 new EngineInfo("chrome", "Google Chrome",
-                    "Stable build. Best extension support.", true),
-                new EngineInfo("chromium", "Chromium",
-                    "Open-source build, installed here. No admin rights.", true),
+                    "Optional. Only used by profiles that pick it by name.", true),
                 new EngineInfo("brave", "Brave",
-                    "Chromium with ad blocking. Store extensions work.", true),
+                    "Optional Chromium with ad blocking.", true),
                 new EngineInfo("firefox", "Mozilla Firefox",
-                    "Gecko engine. No Chrome extensions.", true),
+                    "Optional Gecko engine. No Chrome extensions.", true),
                 new EngineInfo("edge", "Microsoft Edge",
-                    "Included with Windows.", false)
+                    "Optional. Ships with Windows.", false)
             };
         }
 

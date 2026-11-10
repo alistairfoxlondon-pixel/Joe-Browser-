@@ -138,11 +138,13 @@ namespace JoeBrowser
             {
                 try
                 {
+                    /* The built-in kernel is the product, not a fallback: on every machine that
+                       does not have it yet, fetch it - even when Chrome or Edge are installed.
+                       Profiles run on Joe Browser's own Chromium unless the user explicitly
+                       picks a local browser in the profile editor. */
                     if (BrowserFetcher.IsInstalled("chromium")) return;
                     if (KernelStore.Installed().Any(k => k.Ready)) return;
-                    var any = BrowserLocator.Detect("auto", "");
-                    if (any != null) return;
-                    Toast("No browser found - downloading the built-in Chromium (~180 MB, one-time)", ToastKind.Info);
+                    Toast("Downloading Joe Browser's own Chromium (~180 MB, one-time) - profiles run on it, not your local browser", ToastKind.Info);
                     var _ = DownloadBrowserAsync("chromium");
                 }
                 catch (Exception ex) { Log.Error("Auto browser download failed", ex); }
