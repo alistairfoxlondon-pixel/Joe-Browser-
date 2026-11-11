@@ -5,6 +5,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -82,6 +83,12 @@ namespace JoeBrowser
             "https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json";
         private const string BraveCatalog =
             "https://api.github.com/repos/brave/brave-browser/releases?per_page=10";
+        /// <summary>
+        /// Brave's release feed. The releases API answers unauthenticated callers with a rate
+        /// limit, and a machine that has been busy for an hour gets an empty Brave list; the
+        /// feed is served without one.
+        /// </summary>
+        private const string BraveFeed = "https://github.com/brave/brave-browser/releases.atom";
         private const string ChromiumBase =
             "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/";
         /* Mozilla publishes a portable win64 zip for every Firefox release at a stable URL.
@@ -91,11 +98,11 @@ namespace JoeBrowser
             "https://product-details.mozilla.org/1.0/firefox_versions.json";
         private const string FirefoxZipUrl =
             "https://archive.mozilla.org/pub/firefox/releases/{0}/win64/en-US/Firefox%20Setup%20{0}.zip";
-        /* Edge: the enterprise MSI is the only published artifact. The Winget / Edge update
-           APIs redirect here in the end. The version string is taken from the URL the redirect
-           lands on, so a pinned kernel catalog needs the latest two or three versions. */
-        private const string EdgeVersions =
-            "https://edgeupdates.microsoft.com/api/v1/edge/business/stable?arch=x64&platform=windows&appid=Microsoft Edge";
+        /* Edge: the update API that used to carry these answers is gone - every path under
+           edgeupdates.microsoft.com/api answers 404 - so the catalogue comes from the page
+           Microsoft publishes for the very same enterprise installers. */
+        private const string EdgeDownloadPage =
+            "https://www.microsoft.com/edge/business/download?form=MA13FJ";
 
         /* Chromium publishes a version number for every snapshot through the dashboard API,
            and the same call carries the branch position - the snapshot revision the zip is
@@ -518,63 +525,64 @@ namespace JoeBrowser
         }
 
         /// <summary>How many majors of Chrome the catalogue reaches back to.</summary>
-        private const int ChromeMajors = 8;
+        private const int ChromeMajors = 12;
 
         /// <summary>How many builds of each of those majors are offered.</summary>
-        private const int ChromePerMajor = 3;
+        private const int ChromePerMajor = 4;
 
+        /// <summary>
+        /// Brave builds, taken from Brave's own release feed.
+        ///
+        /// The GitHub releases API is the obvious source and it is the wrong one: it answers
+        /// unauthenticated requests with a rate limit, and a machine that has been busy for
+        /// an hour gets an empty Brave list. The release feed is served without a limit, and
+        /// the archive name follows the tag, so one feed read is enough for the whole
+        /// catalogue.
+        /// </summary>
         private static List<KernelRelease> BraveReleases()
         {
             var list = new List<KernelRelease>();
             try
             {
-                var arr = Json(Get(BraveCatalog)) as object[];
-                if (arr == null) return list;
-                foreach (object o in arr)
+                string feed = Get(BraveFeed);
+                if (string.IsNullOrEmpty(feed)) return list;
+
+                /* The feed names the release kind in the title: "Release v1.99.56 (Chromium
+                   157.0.8103.50)", "Beta v1.100.52 (...)", "Nightly v1.101.43 (...)". The
+                   kind is the channel the build belongs to. */
+                var titles = Regex.Matches(feed, "<title>([^<]*)</title>");
+                var links = Regex.Matches(feed, "<link[^>]*href=\"([^\"]*releases/tag/[^\"]+)\"");
+                int count = Math.Min(titles.Count, links.Count);
+                int perChannel = 0;
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < count; i++)
                 {
-                    var r = o as Dictionary<string, object>;
-                    if (r == null) continue;
-                    string tag = Str(r, "tag_name");
-                    if (string.IsNullOrEmpty(tag)) continue;
-                    string version = tag.TrimStart('v', 'V');
-                    /* Brave publishes its beta as a pre-release with the same file naming, so
-                       the channel is taken from the tag instead of the release being dropped.
-                       A user who wants the beta channel gets the beta channel. */
+                    string title = titles[i].Groups[1].Value.Trim();
+                    string href = links[i].Groups[1].Value.Trim();
+                    if (title.Length == 0) continue;
+
                     string channel = "Stable";
-                    if (version.IndexOf("-beta", StringComparison.OrdinalIgnoreCase) >= 0)
+                    if (title.StartsWith("Beta", StringComparison.OrdinalIgnoreCase)) channel = "Beta";
+                    else if (title.StartsWith("Nightly", StringComparison.OrdinalIgnoreCase)) channel = "Dev";
+                    else if (title.StartsWith("Dev", StringComparison.OrdinalIgnoreCase)) channel = "Dev";
+                    else if (!title.StartsWith("Release", StringComparison.OrdinalIgnoreCase)) continue;
+
+                    var vm = Regex.Match(title, @"v(\d+\.\d+\.\d+)");
+                    if (!vm.Success) continue;
+                    string version = vm.Groups[1].Value;
+                    if (!seen.Add(version)) continue;
+
+                    /* A handful of builds per channel: the feed is full of nightlies, and a
+                       list of two hundred nightlies is not a catalogue, it is noise. */
+                    if (channel == "Stable" || channel == "Beta")
                     {
-                        channel = "Beta";
-                        int dash = version.IndexOf('-');
-                        if (dash > 0) version = version.Substring(0, dash);
+                        if (perChannel >= 6) continue;
+                        perChannel++;
                     }
-                    else if (version.IndexOf("-nightly", StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        channel = "Dev";
-                        int dash = version.IndexOf('-');
-                        if (dash > 0) version = version.Substring(0, dash);
-                    }
-                    var assets = r.ContainsKey("assets") ? r["assets"] as object[] : null;
-                    if (assets == null) continue;
-                    foreach (object a in assets)
-                    {
-                        var asset = a as Dictionary<string, object>;
-                        if (asset == null) continue;
-                        string name = Str(asset, "name");
-                        // Skip symbols and Origin builds; the browser itself is the plain win32-x64 zip.
-                        if (!name.EndsWith("-win32-x64.zip", StringComparison.OrdinalIgnoreCase)) continue;
-                        if (name.IndexOf("symbols", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-                        if (name.IndexOf("origin", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-                        if (!name.StartsWith("brave-v", StringComparison.OrdinalIgnoreCase)) continue;
-                        long size = 0;
-                        object sz;
-                        if (asset.TryGetValue("size", out sz)) long.TryParse(Convert.ToString(sz), out size);
-                        list.Add(new KernelRelease("brave", version, channel, Str(asset, "browser_download_url"), "zip")
-                        {
-                            SizeMb = size / 1048576
-                        });
-                        break;
-                    }
-                    if (list.Count >= 16) break;
+
+                    list.Add(new KernelRelease("brave", version, channel,
+                        "https://github.com/brave/brave-browser/releases/download/v" + version +
+                        "/brave-v" + version + "-win32-x64.zip", "zip") { SizeMb = 180 });
                 }
             }
             catch (Exception ex) { Log.Error("Brave kernel catalog failed", ex); }
@@ -597,7 +605,7 @@ namespace JoeBrowser
                it is the list that carries the history of older majors, which is what a
                workspace needs when it wants profiles on several different versions. */
             string[] channels = { "Canary", "Dev", "Beta", "Stable" };
-            int[] counts = { 6, 8, 10, 30 };
+            int[] counts = { 8, 12, 16, 40 };
 
             /* The channels are asked for at the same time. Asked one after the other they
                took twenty seconds, and the page sat on "loading" for all of it - which reads
@@ -759,51 +767,59 @@ namespace JoeBrowser
             return list;
         }
 
-        /// <summary>Edge enterprise MSIs from the Microsoft Edge updates API. The MSI is the
-        /// only published artifact; an administrative install (msiexec /a) extracts its payload
-        /// into the kernels folder without registering Edge with Windows, the same way the
-        /// zip-based engines land. Only the Stable channel is published for business; the API
-        /// returns one current version with its MSI URL.</summary>
+        /// <summary>
+        /// Edge builds, taken from the Edge for Business download page.
+        ///
+        /// The Edge update API that used to carry these answers is gone - every path under
+        /// edgeupdates.microsoft.com/api answers 404 - so the catalogue comes from the page
+        /// Microsoft publishes for the same files. It lists every published build with its
+        /// version and the enterprise installer that carries it, which is exactly what a
+        /// pinned Edge build needs.
+        /// </summary>
         private static List<KernelRelease> EdgeReleases()
         {
             var list = new List<KernelRelease>();
             try
             {
-                var root = Json(Get(EdgeVersions)) as Dictionary<string, object>;
-                if (root == null) return list;
-                string version = Str(root, "Version");
-                if (string.IsNullOrEmpty(version))
-                {
-                    // The API sometimes wraps the version inside the products array.
-                    var products = root.ContainsKey("Products") ? root["Products"] as object[] : null;
-                    if (products != null && products.Length > 0)
-                    {
-                        var first = products[0] as Dictionary<string, object>;
-                        if (first != null) version = Str(first, "Version");
-                    }
-                }
-                if (string.IsNullOrEmpty(version)) return list;
+                string page = Get(EdgeDownloadPage);
+                if (string.IsNullOrEmpty(page)) return list;
 
-                string url = null;
-                var artifacts = root.ContainsKey("Artifacts") ? root["Artifacts"] as object[] : null;
-                if (artifacts != null)
+                /* The page carries a flat list: a version, then its download links. The
+                   links and the versions run in the same order, one of each per release. */
+                var versions = new List<string>();
+                var vm = Regex.Matches(page, "\"(\\d+\\.\\d+\\.\\d+\\.\\d+)\"");
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (Match m in vm)
                 {
-                    foreach (object o in artifacts)
-                    {
-                        var a = o as Dictionary<string, object>;
-                        if (a == null) continue;
-                        string artifactName = Str(a, "ArtifactName");
-                        if (!string.Equals(artifactName, "msi", StringComparison.OrdinalIgnoreCase)) continue;
-                        var locations = a.ContainsKey("Locations") ? a["Locations"] as object[] : null;
-                        if (locations == null || locations.Length == 0) continue;
-                        var loc = locations[0] as Dictionary<string, object>;
-                        if (loc != null) { url = Str(loc, "Url"); break; }
-                    }
+                    string v = m.Groups[1].Value;
+                    if (seen.Add(v)) versions.Add(v);
                 }
-                if (string.IsNullOrEmpty(url)) return list;
-                list.Add(new KernelRelease("edge", version, "Stable", url, "msi") { SizeMb = 180 });
+                var links = new List<string>();
+                var um = Regex.Matches(page, "\"(https?:\\\\u002F\\\\u002F[^\"]*MicrosoftEdgeEnterpriseX64\\.msi)\"");
+                var useen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (Match m in um)
+                {
+                    string u = m.Groups[1].Value.Replace("\\u002F", "/");
+                    if (useen.Add(u)) links.Add(u);
+                }
+
+                int n = Math.Min(versions.Count, links.Count);
+                var seenVersion = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < n; i++)
+                {
+                    if (!seenVersion.Add(versions[i])) continue;
+                    list.Add(new KernelRelease("edge", versions[i], "Stable", links[i], "msi") { SizeMb = 205 });
+                }
             }
             catch (Exception ex) { Log.Error("Edge kernel catalog failed", ex); }
+            /* Newest first: the build a user is most likely to want is the current one. */
+            list.Sort(delegate(KernelRelease a, KernelRelease b)
+            {
+                int ma = BrowserVersions.MajorOf(a.Version);
+                int mb = BrowserVersions.MajorOf(b.Version);
+                if (ma != mb) return mb.CompareTo(ma);
+                return string.CompareOrdinal(b.Version, a.Version);
+            });
             return list;
         }
 

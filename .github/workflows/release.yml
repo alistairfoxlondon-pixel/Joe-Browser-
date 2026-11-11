@@ -180,55 +180,60 @@ jobs:
 
             ### In this build
 
-            **The theme change is a dissolve, and it leaves nothing behind.** Switching
-            between dark and light moves the whole palette a step at a time and repaints
-            the window as one piece, so no frame ever holds two themes. Only the top level
-            window used to be frozen during a theme change, which let every child control
-            repaint on its own - that was the flash. A control that keeps its own surface
-            - a label, a button, a card - also held on to the background colour it was
-            built with, so a title sat on a stripe of the previous theme and the sign out
-            button became a black rectangle. Every surface now follows the theme.
+            **The About page stops shaking.** The page measured its own height while it
+            painted, and the scroll host put it straight back to the height of the window, so
+            the two fought over it for as long as the page was open. The height is measured in
+            the paint and applied from outside it, and the page now sits still.
 
-            **The first profile you create appears.** The grid was shown and hidden only
-            when the page changed, so the count in the header said one and the page stayed
-            empty until you visited another page and came back.
+            **The theme change is one step, and it is instant.** The dissolve between a light
+            theme and a dark one has to pass through the grey in the middle, where the text and
+            the background are the same colour and the interface reads as broken - and it took
+            long enough to be felt as a delay. The palette now moves in one step and the whole
+            tree is repainted as one piece: no frame ever holds two themes, and no frame is
+            unreadable. Every child window is held still while the tree is restyled, so nothing
+            repaints on its own.
 
-            **The installer's version cannot drift from the build.** The version was typed
-            into two files and only one of them had been edited, so the uninstall entry in
-            Apps and Features kept reporting the release before last. Both binaries now
-            read the version out of the assembly they were built as.
+            **The page title has a row of its own.** On a narrow window the toolbar took the
+            whole header band and the title was drawn underneath the search field, so the page
+            had no name at all. The toolbar drops to a second row instead, and the title keeps
+            the first one.
 
-            ### In this build of 1.10.0
+            **The Browsers page is shorter, and it lists more.** The rows said what they did not
+            need to say. Chrome now reaches back twelve majors with four builds of each,
+            Chromium offers eight to forty builds per channel, and Brave and Edge carry their
+            real catalogues - Brave from its release feed, Edge from the enterprise download page
+            Microsoft publishes. Both of the endpoints that used to answer for them are gone, and
+            the page does not say "not found" any more.
 
-            **The Browsers page is a browser manager.** Chromium, Chrome, Brave, Firefox and
-            Edge each get a tab. Every release channel gets a filter: Stable, Beta, Dev,
-            Canary, ESR, Nightly. Every published build is listed with its version, its
-            channel and its size, and can be installed, removed and pinned to a profile
-            without leaving the application. The download is shown in the row it started
-            from, with a progress bar, and a build that is already installed is never
-            fetched twice.
+            **Two extensions are included, and they are written by the application.**
+            "HTTP Tracker Plus" and "Absolute Enable Right Click and Copy" are part of the
+            build rather than a download, so they are there on the first run, behind a proxy that
+            blocks the store, and offline. They load in every Chromium profile, Edge included.
+            Removing one keeps it removed: the mark outlives the folder and survives a
+            re-download, and the self test restores the state it found instead of leaving the
+            first of the pair marked as removed on every machine that ran it.
 
-            **Versions and channels are real.** Chromium builds carry their own version
-            numbers - 159.0.8154.0 Canary, 159.0.8144.0 Dev, 158.0.8127.18 Beta - and
-            Chrome reaches back over the last eight majors, so 157, 156, 155 and 154 are
-            all one click away. The build manager used to open on the Chromium tab and
-            list Chrome builds; it now lists the engine whose tab is selected.
+            **The Account page fills the window.** It used to centre a 980 px column in whatever
+            space there was, which left a wide empty margin on both sides of every card.
+            "No other accounts on this PC" is gone: the absence of a list already says it.
 
-            **Nothing downloads itself.** Opening the application fetches no browser. A
-            build is fetched the first time something needs it: when you ask for it on the
-            Browsers page, or when you open a profile that is pinned to a build this
-            machine does not have yet. That build is downloaded, unpacked and launched,
-            with the progress on screen, instead of the profile quietly falling back to
-            whatever browser happened to be installed.
+            **The Extensions page does not overlap.** The button that restores the included pair
+            and the heading above the recommended cards were laid out on top of each other.
 
-            **Less, and better.** The keyboard shortcut wall is gone, tooltips no longer
-            carry keyboard hints, the engine picker no longer repeats "not installed"
-            next to a line that already says so, and a dialog button is now as wide as
-            its own label instead of cutting "Download a second build" into "Download ...".
+            **Proxy rotation is announced by the application.** The rotation notice used to live
+            only in a banner inside a page, which is not a notification when the user is looking
+            somewhere else. The window now watches the address the world sees the profile from
+            and says so in the window and in the notification area. The offline alert was
+            already there.
 
-            **Faster.** The browser search, the engine detection and the Browsers catalogue
-            all run in the background, so the window opens without waiting for a disk read
-            or a publisher.
+            **Paste as human, the proxy watch and the right-click tool are built in.** They are
+            written by the application and injected through the browser's own debugging channel,
+            so they work on every Chromium engine without the user installing anything.
+
+            **The Workspace and System headings are navigable.** They are headings and controls
+            at once: clicking one goes to that group, and the group on screen is marked in the
+            accent colour with a rule under it, so the rail says which half of the workspace you
+            are in.
 
             ### Notes
 

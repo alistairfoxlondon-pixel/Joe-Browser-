@@ -614,7 +614,8 @@ namespace JoeBrowser
                 ox += ic + Ui.S(6);
             }
             Ui.Text(g, openLabel, Theme.SmallBold, openFg, ox,
-                or.Y + (or.Height - Theme.SmallBold.GetHeight(g)) / 2f);
+                or.Y + (or.Height - Theme.SmallBold.GetHeight(g)) / 2f,
+                Math.Max(Ui.S(20), or.Right - ox - Ui.S(10)));
 
             if (_kebabHover)
             {

@@ -78,56 +78,6 @@ namespace JoeBrowser
 
         private static Pal P = DarkPal;
 
-        /// <summary>Palette the dissolve starts from and the one it ends on.</summary>
-        private static Pal _fadeFrom, _fadeTo;
-        private static readonly object _fadeKey = new object();
-
-        /// <summary>True while a theme change is dissolving from one palette into the other.</summary>
-        public static bool Fading { get; private set; }
-
-        /// <summary>
-        /// Mixes two palettes. Every colour in the app comes from the palette, so moving
-        /// the palette is what moves the interface - a label, a card and the window behind
-        /// them all change together instead of one of them arriving early.
-        /// </summary>
-        private static Pal LerpPal(Pal a, Pal b, float t)
-        {
-            if (t <= 0f) return a;
-            if (t >= 1f) return b;
-            var p = new Pal();
-            p.Bg = Lerp(a.Bg, b.Bg, t);
-            p.BgSoft = Lerp(a.BgSoft, b.BgSoft, t);
-            p.Sidebar = Lerp(a.Sidebar, b.Sidebar, t);
-            p.Card = Lerp(a.Card, b.Card, t);
-            p.Panel = Lerp(a.Panel, b.Panel, t);
-            p.PanelHover = Lerp(a.PanelHover, b.PanelHover, t);
-            p.Panel2 = Lerp(a.Panel2, b.Panel2, t);
-            p.Input = Lerp(a.Input, b.Input, t);
-            p.Line = Lerp(a.Line, b.Line, t);
-            p.LineSoft = Lerp(a.LineSoft, b.LineSoft, t);
-            p.Text = Lerp(a.Text, b.Text, t);
-            p.TextDim = Lerp(a.TextDim, b.TextDim, t);
-            p.TextFaint = Lerp(a.TextFaint, b.TextFaint, t);
-            p.OnAccent = Lerp(a.OnAccent, b.OnAccent, t);
-            p.Accent = Lerp(a.Accent, b.Accent, t);
-            p.AccentHover = Lerp(a.AccentHover, b.AccentHover, t);
-            p.AccentPressed = Lerp(a.AccentPressed, b.AccentPressed, t);
-            p.ButtonBg = Lerp(a.ButtonBg, b.ButtonBg, t);
-            p.ButtonBorder = Lerp(a.ButtonBorder, b.ButtonBorder, t);
-            p.Success = Lerp(a.Success, b.Success, t);
-            p.Danger = Lerp(a.Danger, b.Danger, t);
-            return p;
-        }
-
-        private static Color Lerp(Color a, Color b, float t)
-        {
-            return Color.FromArgb(
-                (int)Math.Round(a.A + (b.A - a.A) * t),
-                (int)Math.Round(a.R + (b.R - a.R) * t),
-                (int)Math.Round(a.G + (b.G - a.G) * t),
-                (int)Math.Round(a.B + (b.B - a.B) * t));
-        }
-
         public static Color Bg { get { return P.Bg; } }
         public static Color BgSoft { get { return P.BgSoft; } }
         public static Color Sidebar { get { return P.Sidebar; } }
@@ -940,36 +890,30 @@ namespace JoeBrowser
         /// <summary>
         /// Moves the interface from one theme to the other.
         ///
-        /// The change used to be one step: the palette was replaced and every window was
-        /// repainted, which put a light window on screen for a frame and then a dark one -
-        /// the flash. It is a dissolve now. The palette moves a step at a time, and every
-        /// window is told about every step, so a single frame never contains two themes.
-        /// A window that is not on screen yet (there is none at start-up) simply takes the
-        /// new palette in one go.
+        /// The change is one step, and the window is painted once with the new palette. It
+        /// used to dissolve from one theme into the other, a step at a time - and a dissolve
+        /// between a light theme and a dark one has to pass through the grey in the middle,
+        /// where the text and the background are the same colour and the interface reads as
+        /// broken. It also took long enough to be felt as a delay on every switch.
+        ///
+        /// So the palette moves in one step and the whole tree is repainted as one piece:
+        /// instant, and no frame ever contains two themes.
         /// </summary>
         public static void SetMode(bool dark)
         {
             if (Dark == dark) return;
             var h = ModeChanged;
-            _fadeFrom = P;
-            _fadeTo = dark ? DarkPal : LightPal;
             Dark = dark;
-            if (h == null) { P = _fadeTo; return; }
-
-            Fading = true;
-            UiAnim.Animate(_fadeKey, delegate(float t)
+            P = dark ? DarkPal : LightPal;
+            if (h == null) return;
+            Restyling = true;
+            try
             {
-                P = LerpPal(_fadeFrom, _fadeTo, t);
-                Restyling = true;
-                try
-                {
-                    var before = BeforeModeChanged;
-                    if (before != null) before(null, EventArgs.Empty);
-                    var hh = ModeChanged;
-                    if (hh != null) hh(null, EventArgs.Empty);
-                }
-                finally { Restyling = false; }
-            }, 0.17f, UiAnim.EaseInOut, delegate { Fading = false; });
+                var before = BeforeModeChanged;
+                if (before != null) before(null, EventArgs.Empty);
+                h(null, EventArgs.Empty);
+            }
+            finally { Restyling = false; }
         }
 
         public static void Restyle(Control root)
@@ -1000,16 +944,21 @@ namespace JoeBrowser
             }
 
             var panel = root as Panel;
-            if (panel != null && !(root is IReStyle))
-                panel.BackColor = panel.Parent != null ? panel.Parent.BackColor : Bg;
-            else if (!(root is IReStyle) && !(root is TextBox) && !(root is Panel))
+            if (panel != null)
             {
-                /* A control that keeps its own surface - a label, a button, a card - has to be
-                   given the surface it sits on again. It was given one when it was built, and
-                   a theme change left it with the colour of the theme it was built in: a black
-                   rectangle where the sign-out button should be, a grey stripe under a title.
-                   The parent has already been restyled by the time this runs, so its colour
-                   is the current one. */
+                /* A panel that paints its own surface - a card - keeps it. A plain panel
+                   copies the surface it sits on. */
+                if (!(root is IReStyle))
+                    panel.BackColor = panel.Parent != null ? panel.Parent.BackColor : Bg;
+            }
+            else if (!(root is TextBox))
+            {
+                /* Everything else that keeps a surface - a label, a button, an icon button -
+                   takes it from the surface it sits on. It was given one when it was built,
+                   and a theme change left it with the colour of the theme it was built in:
+                   a black rectangle where a button should be, a stripe of the old theme
+                   under a title. The parent has already been restyled by the time this
+                   runs, so the colour it hands over is the current one. */
                 root.BackColor = Ui.SurfaceColor(root);
             }
 
@@ -1080,13 +1029,10 @@ namespace JoeBrowser
         {
             c.BackColor = SurfaceColor(c);
             c.ParentChanged += delegate { if (!c.IsDisposed) c.BackColor = SurfaceColor(c); };
-            /* The colour has to be refreshed BEFORE the window that contains this control is
-               painted, so this listens to the event that runs first and not to the one that
-               repaints. Listening to the repaint event instead left every control showing the
-               previous theme's surface for one frame. */
-            EventHandler onMode = delegate { if (!c.IsDisposed) c.BackColor = SurfaceColor(c); };
-            Theme.BeforeModeChanged += onMode;
-            c.Disposed += delegate { Theme.BeforeModeChanged -= onMode; };
+            /* The surface is refreshed by the restyle walk, which reaches every control in
+               the tree and gives it the colour of the surface it sits on. Refreshing it here
+               as well would set it from the palette that is on its way out, and the control
+               would keep the old theme's colour. */
         }
 
         /// <summary>
@@ -1295,7 +1241,7 @@ namespace JoeBrowser
                get a 4000 px line that ran over everything beside it. A negative budget means
                "there is no room": drawing nothing is the honest answer, and the tooltip that
                carries the full value is the way to read it. */
-            if (width <= 0) return;
+            if (width < 0) return;
             int lineH = (int)Math.Ceiling(font.GetHeight(g));
             int h = maxLines <= 1 ? lineH : maxLines * lineH + S(2);
             TextRenderer.DrawText(g, text, font,

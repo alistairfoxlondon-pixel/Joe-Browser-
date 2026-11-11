@@ -204,9 +204,14 @@ Start-Sleep -Milliseconds 300
 # Make sure the window really is on top and really is the foreground window before
 # any click: SetForegroundWindow is refused when the foreground lock is held, and a
 # refused call leaves the click going to whatever else is on screen at that point.
+# The window is made topmost for the duration of the run - the foreground lock is
+# held by whatever the machine is running, and a click that lands on another
+# application silently does nothing to the app under test.
 [Win]::BringWindowToTop($found) | Out-Null
 [Win]::SetForegroundWindow($found) | Out-Null
 Start-Sleep -Milliseconds 200
+[Win]::SetWindowPos($found, [IntPtr](-1), 0, 0, 0, 0, 0x0001 -bor 0x0040) | Out-Null
+Start-Sleep -Milliseconds 150
 $fg = [Win]::GetForegroundWindow()
 if ($fg -ne $found) {
     [Win]::ShowWindow($found, 9) | Out-Null
@@ -302,3 +307,7 @@ if ($Wheel -ne 0 -and $WheelX -ge 0) {
 }
 
 if (-not $NoCapture) { Capture $found $Out }
+
+# The window was made topmost so the clicks would land on it. It must not stay
+# that way: the machine belongs to whoever is using it.
+[Win]::SetWindowPos($found, [IntPtr](-2), 0, 0, 0, 0, 0x0001 -bor 0x0040) | Out-Null

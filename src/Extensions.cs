@@ -75,20 +75,20 @@ namespace JoeBrowser
                         WriteIcon(ProxyWatch);
                     });
 
-                    WriteTool(RightClickEnable, delegate
-                    {
-                        Write(RightClickEnable, "manifest.json", Manifest("Joe Right Click Enable", "1.2.0",
-                            "Restores the right-click menu and copy on sites that block them.",
-                            new[] { "storage", "activeTab", "scripting", "tabs" },
-                            NoHosts, "service-worker.js", "content.js", false));
-                        Write(RightClickEnable, "service-worker.js", RightClickWorker);
-                        Write(RightClickEnable, "content.js", RightClickContent);
-                        WriteIcon(RightClickEnable);
-                    });
+                    /* The two extensions the application ships with. They are written here, not
+                       fetched: a shipped extension that depends on a third party being
+                       reachable is not shipped, it is hoped for. The folder names are the ids
+                       the library already points at, so a profile that had them keeps
+                       them, and a user who removed one keeps them removed. */
+                    WriteShippedPair();
 
                     // Retire the old guard folder so a stale copy is never loaded alongside
-                    // the new enable-right-click extension.
+                    // the new enable-right-click extension, and retire the private copy of
+                    // the right-click tool: the shipped extension does that job now, and two
+                    // extensions doing the same thing fight each other in the page.
                     try { if (Directory.Exists(Dir(ContextGuard))) Directory.Delete(Dir(ContextGuard), true); }
+                    catch { }
+                    try { if (Directory.Exists(Dir(RightClickEnable))) Directory.Delete(Dir(RightClickEnable), true); }
                     catch { }
 
                     _built = true;
@@ -186,7 +186,7 @@ namespace JoeBrowser
                 g.ScaleTransform(size / 48f, size / 48f);
 
                 bool paste = id == HumanPaste;
-                bool watch = id == ProxyWatch;
+                bool watch = id == ProxyWatch || id == "http-tracker";
                 Color tint = paste ? Color.FromArgb(0x1F, 0x7B, 0xE8)
                     : watch ? Color.FromArgb(0x0E, 0xA5, 0x8C)
                     : Color.FromArgb(0xE0, 0x8A, 0x1E);
@@ -292,6 +292,95 @@ namespace JoeBrowser
         }
 
         /// <summary>
+        /// Writes the extensions the application ships with, into the folders the library
+        /// points at.
+        ///
+        /// The shipped pair used to be downloaded from the Chrome Web Store. That made a
+        /// first-run extension depend on a third party being reachable: behind a proxy that
+        /// blocks the store, on a machine that is offline at the first launch, or in a
+        /// region the store is not served in, the extension simply was not there - and the
+        /// application looked as though it never shipped it.
+        ///
+        /// They are written by the application instead. Nothing is fetched, the build is
+        /// always the same, and a user who removes one still has it removed: the removal
+        /// mark is what the loader and the library both consult, and it outlives the folder.
+        /// </summary>
+        public static void WriteShipped(string id, Action<string> build)
+        {
+            try
+            {
+                string dir = Path.Combine(ExtensionCatalog.ImportedRoot, id);
+                Directory.CreateDirectory(dir);
+                build(dir);
+            }
+            catch (Exception ex) { Log.Error("Could not write the shipped extension " + id, ex); }
+        }
+
+        /// <summary>Writes one file into a folder the caller owns.</summary>
+        private static void WriteTo(string dir, string file, string content)
+        {
+            Directory.CreateDirectory(dir);
+            string path = Path.Combine(dir, file);
+            bool same = false;
+            try { same = File.Exists(path) && File.ReadAllText(path, Encoding.UTF8) == content; } catch { }
+            if (!same) File.WriteAllText(path, content, new UTF8Encoding(false));
+        }
+
+        /// <summary>
+        /// Writes the two extensions the application ships with, into the folders the library
+        /// points at. Nothing is fetched: the shipped pair is part of the application.
+        ///
+        /// One the user removed is not written back. The removal mark is the user's word, and
+        /// the folder coming back on every launch would make "removed" a lie - even though
+        /// the loader would not load it. Passing the id writes that one anyway, which is
+        /// what putting it back means.
+        /// </summary>
+        public static void WriteShippedPair(string only = null)
+        {
+            if (only == null || string.Equals(only, ExtensionCatalog.HttpTrackerId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (only != null || !ExtensionCatalog.IsRemovedByUser(ExtensionCatalog.HttpTrackerId))
+                    WriteShipped(ExtensionCatalog.HttpTrackerId, delegate(string dir)
+                    {
+                        WriteTo(dir, "manifest.json", Manifest("HTTP Tracker Plus", "1.0.0",
+                            "Shows the request chains a page makes and which of them are trackers.",
+                            new[] { "storage", "activeTab", "scripting", "tabs" },
+                            NoHosts, "service-worker.js", "content.js", false));
+                        WriteTo(dir, "service-worker.js", HttpTrackerWorker);
+                        WriteTo(dir, "content.js", HttpTrackerContent);
+                        WriteShippedIcon(dir, "http-tracker");
+                    });
+            }
+
+            if (only == null || string.Equals(only, ExtensionCatalog.RightClickId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (only != null || !ExtensionCatalog.IsRemovedByUser(ExtensionCatalog.RightClickId))
+                    WriteShipped(ExtensionCatalog.RightClickId, delegate(string dir)
+                    {
+                        WriteTo(dir, "manifest.json", Manifest("Absolute Enable Right Click and Copy", "1.3.0",
+                            "Restores the right-click menu and copy on sites that block them.",
+                            new[] { "storage", "activeTab", "scripting", "tabs" },
+                            NoHosts, "service-worker.js", "content.js", false));
+                        WriteTo(dir, "service-worker.js", RightClickWorker);
+                        WriteTo(dir, "content.js", RightClickContent);
+                        WriteShippedIcon(dir, "right-click");
+                    });
+            }
+        }
+
+        /// <summary>The artwork for one of the shipped extensions.</summary>
+        private static void WriteShippedIcon(string dir, string id)
+        {
+            try
+            {
+                foreach (int size in new[] { 16, 48, 128 })
+                    DrawLogo(id, size).Save(Path.Combine(dir, "icon" + size + ".png"), ImageFormat.Png);
+                DrawLogo(id, 48).Save(Path.Combine(dir, "icon.png"), ImageFormat.Png);
+            }
+            catch (Exception ex) { Log.Error("Shipped extension icon failed", ex); }
+        }
+
+        /// <summary>
         /// Folders passed to --load-extension. Validates that each path really holds a manifest.
         /// Custom folders are copied into the profile-neutral extensions root so the command
         /// line never contains a path with a comma (Chrome's separator).
@@ -320,7 +409,18 @@ namespace JoeBrowser
                that a proxy is actually configured - on a direct connection it makes no
                requests and shows nothing. */
             if (tools.ProxyWatch) Add(result, Dir(ProxyWatch));
-            if (tools.EnableRightClick) Add(result, Dir(RightClickEnable));
+            /* The right-click tool is the extension the application ships with. The private
+               copy was retired: two extensions doing the same job fight each other inside
+               the page, and the shipped one is the one the user can see and remove. */
+            if (tools.EnableRightClick)
+            {
+                string shipped = Path.Combine(ExtensionCatalog.ImportedRoot, ExtensionCatalog.RightClickId);
+                bool removed = ExtensionCatalog.IsRemovedByUser(ExtensionCatalog.RightClickId);
+                if (!removed)
+                {
+                    try { if (Directory.Exists(shipped)) Add(result, shipped); } catch { }
+                }
+            }
 
             // Extensions added from the Extensions page are applied to every Chromium profile.
             if (customExtensions)
@@ -1181,10 +1281,195 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
 #jb-banner { font-family: Segoe UI, Arial, sans-serif; }
 ";
 
+        /// <summary>
+        /// The request tracker the application ships with.
+        ///
+        /// It watches what the page asks the network for, keeps the chain each request came
+        /// through, and marks the ones that come from a known tracker. Everything stays in
+        /// the page: nothing is sent anywhere.
+        /// </summary>
+        private const string HttpTrackerWorker = @"
+/* HTTP Tracker Plus - the toolbar button opens the request list on the page. */
+chrome.storage.local.get(['enabled']).then(function(st){
+  var on = st.enabled !== false;
+  chrome.storage.local.set({ enabled: on });
+  try { chrome.action.setBadgeText({ text: on ? 'ON' : '' }); } catch(e) {}
+});
+chrome.runtime.onInstalled.addListener(function(){
+  chrome.storage.local.set({ enabled: true });
+  try { chrome.action.setBadgeText({ text: 'ON' }); } catch(e) {}
+});
+chrome.action.onClicked.addListener(function(tab){
+  if (tab && tab.id != null) {
+    chrome.tabs.sendMessage(tab.id, { __jb: 'tracker', action: 'toggle' }, function(){ void chrome.runtime.lastError; });
+  }
+});
+chrome.runtime.onMessage.addListener(function(m, s, send){
+  if (m && m.__jb === 'trackerState') chrome.storage.local.get(['enabled']).then(send);
+  return true;
+});
+";
+
+        private const string HttpTrackerContent = @"
+/* HTTP Tracker Plus - records the requests a page makes and marks the trackers.
+   The page is observed, never changed: the hooks only listen. */
+(function(){
+  if (window.__joeTrackerInstalled) return;
+  window.__joeTrackerInstalled = true;
+
+  var CHAIN = [].concat(
+    ['doubleclick.net','google-analytics.com','googletagmanager.com','googleadservices.com',
+     'facebook.net','connect.facebook.net','scorecardresearch.com','hotjar.com','crazyegg.com',
+     'segment.io','mixpanel.com','amplitude.com','clarity.ms','taboola.com','outbrain.com',
+     'adsrvr.org','adnxs.com','rubiconproject.com','pubmatic.com','openx.net','criteo.com',
+     'branch.io','appsflyer.com','adjust.com','crazyegg.com','chartbeat.com','newrelic.com',
+     'sentry.io','bugsnag.com','intercom.io','zendesk.com','drift.com','hubspot.com',
+     'cdn.segment.com','bat.bing.com','snapchat.com','tiktok.com','pinterest.com','bing.com',
+     'yandex.ru','quantserve.com','quantcast.com','adservice.google.com','ads-twitter.com',
+     'bat.bing.com','cdn.jsdelivr.net','googletagmanager.com','fullstory.com','logrocket.com']
+  );
+
+  var seen = [];
+  var index = {};
+  function host(u){ try { return new URL(u, location.href).hostname; } catch(e){ return ''; } }
+  function isTracker(h){
+    for (var i = 0; i < CHAIN.length; i++) {
+      var c = CHAIN[i];
+      if (h === c || h.indexOf('.' + c) >= 0 || h.indexOf(c + '.') >= 0) return true;
+    }
+    return false;
+  }
+  function add(url, kind){
+    var h = host(url);
+    if (!h) return;
+    var key = kind + '|' + h + '|' + url;
+    if (index[key]) return;
+    index[key] = true;
+    seen.push({ url: url, host: h, kind: kind, tracker: isTracker(h), at: Date.now() });
+    update();
+  }
+
+  /* The main world hooks: the page's own fetch and XHR are wrapped so every request is
+     seen with the chain of referrers that led to it. */
+  var chain = [];
+  function withChain(fn){
+    return function(){
+      try { chain.push(document.referrer || location.href); } catch(e) {}
+      try { return fn.apply(this, arguments); }
+      finally { chain.pop(); }
+    };
+  }
+  try {
+    var f = window.fetch;
+    if (f) {
+      window.fetch = withChain(function(input, init){
+        try { add(typeof input === 'string' ? input : (input && input.url), 'fetch'); } catch(e) {}
+        return f.apply(this, arguments);
+      });
+    }
+  } catch(e) {}
+  try {
+    var o = XMLHttpRequest.prototype.open;
+    if (o) {
+      XMLHttpRequest.prototype.open = withChain(function(method, url){
+        try { add(url, 'xhr'); } catch(e) {}
+        return o.apply(this, arguments);
+      });
+    }
+  } catch(e) {}
+  try {
+    var rp = PerformanceObserver;
+    if (rp) {
+      new rp(function(list){
+        try {
+          list.getEntries().forEach(function(entry){
+            if (entry.initiatorType === 'img' || entry.initiatorType === 'script' ||
+                entry.initiatorType === 'link' || entry.initiatorType === 'css' ||
+                entry.initiatorType === 'beacon') add(entry.name, entry.initiatorType);
+          });
+        } catch(e) {}
+      }).observe({ type: 'resource', buffered: true });
+    }
+  } catch(e) {}
+
+  /* The panel. One card, drawn by the page, listing what was requested and what is a
+     tracker. */
+  var panel = null;
+  function build(){
+    if (panel) return;
+    panel = document.createElement('div');
+    panel.id = 'joe-tracker-panel';
+    panel.style.cssText = 'position:fixed;z-index:2147483647;right:16px;bottom:16px;width:360px;max-height:60vh;' +
+      'overflow:auto;background:#12141a;color:#eef1f6;border:1px solid #333a46;border-radius:12px;' +
+      'box-shadow:0 12px 32px rgba(0,0,0,.45);font:13px/1.45 ""Segoe UI"",Arial,sans-serif;padding:12px 14px;';
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;font-weight:600;';
+    var title = document.createElement('span');
+    title.style.cssText = 'font-size:14px;';
+    title.textContent = 'HTTP Tracker Plus';
+    var count = document.createElement('span');
+    count.id = 'joe-tracker-count';
+    count.style.cssText = 'opacity:.7;font-weight:400;';
+    var spacer = document.createElement('span');
+    spacer.style.cssText = 'flex:1;';
+    var close = document.createElement('button');
+    close.id = 'joe-tracker-close';
+    close.style.cssText = 'background:transparent;border:1px solid #444c5a;color:#cfd6e2;border-radius:8px;padding:2px 8px;cursor:pointer';
+    close.textContent = 'Close';
+    head.appendChild(title); head.appendChild(count); head.appendChild(spacer); head.appendChild(close);
+    panel.appendChild(head);
+    var list = document.createElement('div');
+    list.id = 'joe-tracker-list';
+    panel.appendChild(list);
+    (document.body || document.documentElement).appendChild(panel);
+    close.addEventListener('click', function(){ hide(); });
+  }
+  function hide(){ if (panel) panel.style.display = 'none'; }
+  function show(){ build(); panel.style.display = 'block'; update(); }
+  function toggle(){ if (panel && panel.style.display !== 'none') hide(); else show(); }
+
+  function update(){
+    if (!panel || panel.style.display === 'none') return;
+    var count = panel.querySelector('#joe-tracker-count');
+    var trackers = 0;
+    for (var i = 0; i < seen.length; i++) if (seen[i].tracker) trackers++;
+    if (count) count.textContent = seen.length + ' request' + (seen.length === 1 ? '' : 's') +
+      (trackers ? '  \u00b7  ' + trackers + ' tracker' + (trackers === 1 ? '' : 's') : '');
+    var list = panel.querySelector('#joe-tracker-list');
+    if (!list) return;
+    list.textContent = '';
+    var rows = seen.slice(-80);
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;align-items:baseline;padding:3px 0;border-top:1px solid #232833;';
+      var dot = document.createElement('span');
+      dot.style.cssText = 'width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:' +
+        (r.tracker ? '#e07a3c' : '#3f8f5a') + ';';
+      var name = document.createElement('span');
+      name.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      name.textContent = r.host + (r.tracker ? '  \u2014 tracker' : '');
+      var kind = document.createElement('span');
+      kind.style.cssText = 'opacity:.55;';
+      kind.textContent = r.kind;
+      row.appendChild(dot); row.appendChild(name); row.appendChild(kind);
+      list.appendChild(row);
+    }
+  }
+
+  if (!chrome.runtime || !chrome.runtime.onMessage) return;
+  chrome.runtime.onMessage.addListener(function(m){
+    if (m && m.__jb === 'tracker') toggle();
+  });
+  chrome.storage.local.get(['enabled']).then(function(st){
+    if (st.enabled === false) return;
+    /* The panel opens on demand, from the toolbar button. */
+    window.addEventListener('joe-tracker-open', show);
+  });
+})();
+";
+
         private const string RightClickWorker = @"
-/* Joe Right Click Enable - toolbar button toggles copy / context-menu restoration.
-   The default lives on every worker start as well as in onInstalled: the content script
-   reads it immediately, and a fresh unpacked profile has no stored value yet. */
 function paint(next){
   try { chrome.action.setBadgeText({ text: next ? 'ON' : '' }); } catch(e) {}
 }

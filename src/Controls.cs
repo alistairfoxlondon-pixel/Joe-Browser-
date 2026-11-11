@@ -173,6 +173,96 @@ namespace JoeBrowser
         }
     }
 
+    /// <summary>
+    /// The heading over a group of destinations in the navigation rail.
+    ///
+    /// It is a heading, and it is also a control: clicking it takes the page to the first
+    /// destination of the group, and it carries the active state of the group, so the rail
+    /// says which half of the workspace you are in. A heading that is only a heading
+    /// leaves the reader guessing where the line between the two halves is.
+    /// </summary>
+    internal sealed class NavGroup : Control, IReStyle
+    {
+        private readonly string _text;
+        private bool _hover;
+        private bool _active;
+        private readonly AnimValue _hoverT;
+
+        public event EventHandler Activated;
+
+        public NavGroup(string text)
+        {
+            _text = text ?? "";
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+            Ui.Opaque(this);
+            Cursor = Cursors.Hand;
+            Font = Theme.Micro;
+            Height = Theme.Row;
+            _hoverT = new AnimValue(this);
+        }
+
+        /// <summary>True when the page on screen belongs to this group.</summary>
+        public bool Active
+        {
+            get { return _active; }
+            set
+            {
+                if (_active == value) return;
+                _active = value;
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { _hover = true; _hoverT.Toward(true, 0.24f); Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { _hover = false; _hoverT.Toward(false, 0.2f); Invalidate(); base.OnMouseLeave(e); }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left) return;
+            var h = Activated;
+            if (h != null) h(this, EventArgs.Empty);
+        }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            return keyData == Keys.Space || keyData == Keys.Enter || base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter)
+            {
+                var h = Activated;
+                if (h != null) h(this, EventArgs.Empty);
+                e.Handled = true;
+                return;
+            }
+            base.OnKeyDown(e);
+        }
+
+        public void ReStyle() { Font = Theme.Micro; Invalidate(); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            Ui.Quality(g);
+            g.Clear(Ui.SurfaceColor(this));
+            /* The active group is drawn in the accent, the hovered one a little brighter than
+               the rest. The three states are the only colours on the rail, and they all come
+               from the palette, so the rail reads as one thing. */
+            Color ink = _active ? Theme.AccentText
+                : Ui.Blend(Theme.TextFaint, Theme.Text, Math.Max(_hoverT.Value, _active ? 0.45f : 0f));
+            Ui.Text(g, _text, Font, ink, 0, 0, Width, "left");
+            if (_active)
+            {
+                /* A short accent rule under the heading: the group is marked, not just tinted. */
+                using (var b = new SolidBrush(Theme.Accent))
+                    g.FillRectangle(b, 0, Height - Ui.S(2), Ui.S(14), Ui.S(2));
+            }
+        }
+    }
+
     /// <summary>A 0-1 animated value a control can blend its colours against.</summary>
     internal sealed class AnimValue
     {
