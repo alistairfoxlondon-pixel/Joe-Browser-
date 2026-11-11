@@ -1,4 +1,8 @@
 # Walks the sidebar of the running app and captures one screenshot per page.
+#
+# The capture is taken from the screen, not with PrintWindow: a window that has
+# not repainted every region keeps the pixels it had, and PrintWindow hands
+# those back as if they were current. The screen shows what a person sees.
 param(
     [string]$Exe = "C:\dev\joe-browser\dist\JoeBrowser.exe",
     [string]$Dir = "C:\dev\joe-browser\dist\pages",
@@ -7,6 +11,9 @@ param(
 )
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path $Dir)) { New-Item -ItemType Directory -Force $Dir | Out-Null }
+
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
 
 $pages = @(
     @{ Name = "profiles"; Y = 174 },
@@ -23,6 +30,14 @@ $pages = @(
 foreach ($p in $pages) {
     $out = Join-Path $Dir ($p.Name + ".png")
     & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "ui.ps1") `
-        -Exe $Exe -Out $out -ClickX 95 -ClickY $p.Y -ResizeW $ResizeW -ResizeH $ResizeH | Out-Null
+        -Exe $Exe -Out $out -ClickX 95 -ClickY $p.Y -ResizeW $ResizeW -ResizeH $ResizeH `
+        -Screen -NoCapture | Out-Null
+    # The window is at the top left of the work area, so the screen grab is cropped to it.
+    $bmp = New-Object System.Drawing.Bitmap($ResizeW, $ResizeH)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen(0, 0, 0, 0, (New-Object System.Drawing.Size($ResizeW, $ResizeH)))
+    $g.Dispose()
+    $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Dispose()
     Write-Host ("captured " + $p.Name)
 }

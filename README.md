@@ -33,6 +33,27 @@ this application.
 | **Built to be read** | 16 px body text, one measured layout at every window width, and no control that cuts its own label. |
 | **Private by default** | Profile data stays in `%APPDATA%\JoeBrowser`. Proxy passwords and the account store are encrypted with Windows DPAPI. No telemetry, no server, no cloud. |
 
+## What changed in 1.10.1
+
+**The theme change no longer leaves the old theme behind.** A control that keeps its own
+surface - a label, a button, a card - held on to the background colour it was built with,
+so after a theme change a title sat on a grey stripe of the previous theme and the sign out
+button became a black rectangle. Every surface now follows the theme it is painted in.
+
+**The theme change is a dissolve.** Switching between dark and light moves the whole
+palette a step at a time and repaints the window as one piece, so no frame ever contains
+two themes. Only the top level window used to be frozen during a theme change, which let
+every child control repaint on its own - that was the flash.
+
+**The first profile you create appears.** The grid was shown and hidden only when the page
+changed, so the count in the header said one and the page stayed empty until you visited
+another page and came back.
+
+**The installer's version can no longer drift from the build.** The version was typed into
+two files and only one of them had been edited for the release, so the uninstall entry in
+Apps and Features still said 1.9.2. Both binaries now read the version out of the
+assembly they were built as.
+
 ## What changed in 1.10.0
 
 **The Browsers page is a browser manager.** Chromium, Chrome, Brave, Firefox and Edge

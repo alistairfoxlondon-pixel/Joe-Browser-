@@ -2644,63 +2644,10 @@ namespace JoeBrowser
 
         private void SetPage(int page)
         {
+            /* One window, one repaint: the pages are swapped with the redraw frozen, so the
+               new page is drawn in one piece and the old one is never seen underneath it. */
             FreezeRedraw(delegate { SetPageCore(page); });
-            /* The new page arrives from the side instead of appearing. The page container is
-               moved, not covered, so nothing can swallow a click while it moves and the
-               layout is not recalculated: a moved control keeps its children where they are. */
-            SlidePageIn();
         }
-
-        /// <summary>How far the arriving page starts from the right.</summary>
-        private const int PageSlide = 16;
-
-        /// <summary>The page container that is currently on screen.</summary>
-        private Control _pageControl;
-
-        /// <summary>How far the arriving page is still from its place.</summary>
-        private int _pageOffset;
-
-        private void SlidePageIn()
-        {
-            Control page = VisiblePage();
-            if (page == null) return;
-            _pageControl = page;
-            _pageOffset = Ui.S(PageSlide);
-            UiAnim.Animate(_slideKey, delegate(float t)
-            {
-                _pageOffset = (int)Math.Round(Ui.S(PageSlide) * (1f - t));
-                if (_pageControl == null || _pageControl.IsDisposed) return;
-                try
-                {
-                    _pageControl.Left = ContentLeft() + _pageOffset;
-                }
-                catch { }
-            }, 0.18f, UiAnim.EaseOut, delegate
-            {
-                _pageOffset = 0;
-                if (_pageControl == null || _pageControl.IsDisposed) return;
-                try { _pageControl.Left = ContentLeft(); } catch { }
-            });
-        }
-
-        private readonly object _slideKey = new object();
-
-        /// <summary>The page container that is on screen, or null.</summary>
-        private Control VisiblePage()
-        {
-            foreach (var p in PageContainers())
-                if (p.Visible) return p;
-            return null;
-        }
-
-        /// <summary>Every page container, in the order they are stacked.</summary>
-        private Control[] PageContainers()
-        {
-            return new Control[] { _host, _emptyPanel, _proxyPage, _extensionPage, _browsersPage, _settingsPage, _toolsPage, _aboutPage, _historyPage, _accountPage };
-        }
-
-        /// <summary>Where the page area starts on the left.</summary>
-        private int ContentLeft() { return Ui.S(SidebarW); }
 
         private void SetPageCore(int page)
         {

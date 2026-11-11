@@ -162,6 +162,11 @@ namespace JoeBrowser
         {
             BackColor = Theme.Bg;
             _column.BackColor = Theme.Bg;
+            /* The cards paint their own surface, and the controls inside them take their
+               background from the card. A theme change has to move both. */
+            _identity.BackColor = Theme.Card;
+            _security.BackColor = Theme.Card;
+            _workspace.BackColor = Theme.Card;
             _identity.Invalidate();
             _security.Invalidate();
             _workspace.Invalidate();
@@ -284,7 +289,10 @@ namespace JoeBrowser
             {
                 SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                          ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-                BackColor = Theme.Bg;
+                /* The card's own surface. A control inside it - the sign out button - takes
+                   its background from here, so this has to be the colour the card paints
+                   and not the colour of the page behind it. */
+                BackColor = Theme.Card;
                 Controls.Add(SignOut);
                 Controls.Add(Switch);
             }
@@ -413,7 +421,7 @@ namespace JoeBrowser
             {
                 SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
                          ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-                BackColor = Theme.Bg;
+                BackColor = Theme.Card;
                 _eyebrow = eyebrow;
                 _glyph = glyph;
                 Primary = MakeButton("", "settings", BtnKind.Primary);

@@ -1002,6 +1002,16 @@ namespace JoeBrowser
             var panel = root as Panel;
             if (panel != null && !(root is IReStyle))
                 panel.BackColor = panel.Parent != null ? panel.Parent.BackColor : Bg;
+            else if (!(root is IReStyle) && !(root is TextBox) && !(root is Panel))
+            {
+                /* A control that keeps its own surface - a label, a button, a card - has to be
+                   given the surface it sits on again. It was given one when it was built, and
+                   a theme change left it with the colour of the theme it was built in: a black
+                   rectangle where the sign-out button should be, a grey stripe under a title.
+                   The parent has already been restyled by the time this runs, so its colour
+                   is the current one. */
+                root.BackColor = Ui.SurfaceColor(root);
+            }
 
             foreach (Control child in root.Controls) Restyle(child);
         }

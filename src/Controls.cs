@@ -299,7 +299,17 @@ namespace JoeBrowser
             Invalidate();
         }
 
-        public void ReStyle() { Apply(); }
+        public void ReStyle()
+        {
+            Apply();
+            /* The label's own surface follows the theme. A label that keeps the colour it
+               was built with leaves a band of the old theme under its text after the theme
+               changes - a grey stripe under a title, which is what the history page showed.
+               The parent has already been restyled by the time this runs, so its colour is
+               the one this label has to match. */
+            var p = Parent;
+            if (p != null && p.BackColor.A == 255) BackColor = p.BackColor;
+        }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {

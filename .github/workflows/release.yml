@@ -180,6 +180,26 @@ jobs:
 
             ### In this build
 
+            **The theme change is a dissolve, and it leaves nothing behind.** Switching
+            between dark and light moves the whole palette a step at a time and repaints
+            the window as one piece, so no frame ever holds two themes. Only the top level
+            window used to be frozen during a theme change, which let every child control
+            repaint on its own - that was the flash. A control that keeps its own surface
+            - a label, a button, a card - also held on to the background colour it was
+            built with, so a title sat on a stripe of the previous theme and the sign out
+            button became a black rectangle. Every surface now follows the theme.
+
+            **The first profile you create appears.** The grid was shown and hidden only
+            when the page changed, so the count in the header said one and the page stayed
+            empty until you visited another page and came back.
+
+            **The installer's version cannot drift from the build.** The version was typed
+            into two files and only one of them had been edited, so the uninstall entry in
+            Apps and Features kept reporting the release before last. Both binaries now
+            read the version out of the assembly they were built as.
+
+            ### In this build of 1.10.0
+
             **The Browsers page is a browser manager.** Chromium, Chrome, Brave, Firefox and
             Edge each get a tab. Every release channel gets a filter: Stable, Beta, Dev,
             Canary, ESR, Nightly. Every published build is listed with its version, its
@@ -201,28 +221,14 @@ jobs:
             with the progress on screen, instead of the profile quietly falling back to
             whatever browser happened to be installed.
 
-            **The theme change is a dissolve.** Switching between dark and light moves the
-            whole palette a step at a time and repaints the window as one piece, so no
-            frame ever holds two themes. Only the top level window used to be frozen
-            during a theme change, which let every child control repaint on its own - that
-            was the flash. Controls that keep a colour now learn about the new palette
-            before the paint rather than after it.
-
-            **The interface moves.** Pages arrive from the side instead of appearing, and
-            buttons, cards and list rows ease into their hover state instead of
-            swapping colour in one frame.
-
             **Less, and better.** The keyboard shortcut wall is gone, tooltips no longer
             carry keyboard hints, the engine picker no longer repeats "not installed"
             next to a line that already says so, and a dialog button is now as wide as
             its own label instead of cutting "Download a second build" into "Download ...".
 
-            **Fixed along the way.** The first profile you created never appeared on the
-            grid until you visited another page and came back. The build manager listed
-            the wrong engine. The browser picker cut "Chromium (built-in)" in half. The
-            detected browser, the browser catalogue and the extension fetch all ran on
-            the thread that draws the window, so the application opened a third of a
-            second later than it needed to.
+            **Faster.** The browser search, the engine detection and the Browsers catalogue
+            all run in the background, so the window opens without waiting for a disk read
+            or a publisher.
 
             ### Notes
 
