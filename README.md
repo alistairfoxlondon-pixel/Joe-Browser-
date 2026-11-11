@@ -13,6 +13,9 @@ written outside your profile. A browser of your own is optional: the Browsers pa
 fetch Chromium, Chrome, Brave, Firefox and Edge builds for you and keep them inside
 this application.
 
+The portable build is the EXE and `JoeBrowser.exe.config` beside it. The installer puts
+both in place for you.
+
 ---
 
 ## What it does
@@ -32,6 +35,19 @@ this application.
 | **Extensions** | Three first party tools written by this app, two extensions included with every Chromium profile, and anything you add from a Chrome Web Store link, a `.crx` or a folder. The included pair show their state, and removing one keeps it removed. |
 | **Built to be read** | 16 px body text, one measured layout at every window width, and no control that cuts its own label. |
 | **Private by default** | Profile data stays in `%APPDATA%\JoeBrowser`. Proxy passwords and the account store are encrypted with Windows DPAPI. No telemetry, no server, no cloud. |
+
+## What changed in 1.11.1
+
+**The portable build travels with its configuration.** `JoeBrowser.exe.config` was never
+attached to a release, so a portable copy that was downloaded on its own failed the
+application's own check and lost the per monitor scaling that file carries. The
+configuration is now an asset of every release and is listed in `SHA256.txt`. The
+installer has always placed it correctly.
+
+**A missing configuration is not a broken build.** The self test reads a value out of the
+configuration to force the runtime to parse it - a file that cannot be parsed must fail.
+A file that is simply not there is a portable EXE on its own, and that is what the check
+now says.
 
 ## What changed in 1.11.0
 
@@ -195,7 +211,8 @@ developer. Two practical notes:
   malware also uses, and Defender's reputation engine reacts to that shape for any new
   publisher. Download from the Releases page of this repository only, compare the file against
   the attached `SHA256.txt`, and if you prefer, use the portable `JoeBrowser.exe` instead,
-  which does not unpack anything.
+  which does not unpack anything. The portable build is that EXE and
+  `JoeBrowser.exe.config` beside it.
 - Both files carry the same signature as every previous release. Nothing in the app writes to
   Windows startup, registers a service, or asks for administrator rights.
 

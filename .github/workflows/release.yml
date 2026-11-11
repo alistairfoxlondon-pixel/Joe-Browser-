@@ -140,9 +140,14 @@ jobs:
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item 'dist\JoeBrowser.exe'      'out\JoeBrowser.exe'      -Force
           Copy-Item 'dist\JoeBrowserSetup.exe' 'out\JoeBrowserSetup.exe' -Force
+          # The configuration travels with the portable EXE. It is what carries the DPI
+          # settings, and it is the file the self test parses - a portable copy that was
+          # downloaded on its own used to fail that check and to lose its per-monitor
+          # scaling. The installer puts the same file next to the EXE it installs.
+          Copy-Item 'dist\JoeBrowser.exe.config' 'out\JoeBrowser.exe.config' -Force
           # Both files are listed: someone who downloads the portable JoeBrowser.exe has the
           # same reason to verify it as someone who runs the installer.
-          $lines = foreach ($n in @('JoeBrowser.exe', 'JoeBrowserSetup.exe')) {
+          $lines = foreach ($n in @('JoeBrowser.exe', 'JoeBrowserSetup.exe', 'JoeBrowser.exe.config')) {
             $h = Get-FileHash (Join-Path 'out' $n) -Algorithm SHA256
             "$($h.Hash.ToLower())  $n"
           }
@@ -169,6 +174,7 @@ jobs:
           files: |
             out/JoeBrowser.exe
             out/JoeBrowserSetup.exe
+            out/JoeBrowser.exe.config
             out/SHA256.txt
           body: |
             ## Joe Browser ${{ steps.ver.outputs.version }}
@@ -179,6 +185,17 @@ jobs:
             `--portable` if you would rather not install.
 
             ### In this build
+
+            **The portable build travels with its configuration.** `JoeBrowser.exe.config`
+            was never attached to a release, so a portable copy that was downloaded on its
+            own failed the application's own check and lost the per monitor scaling that
+            file carries. The configuration is now an asset of every release and is listed
+            in `SHA256.txt`. The installer has always placed it correctly.
+
+            **A missing configuration is not a broken build.** The self test reads a value
+            out of the configuration to force the runtime to parse it - a file that cannot
+            be parsed must fail. A file that is simply not there is a portable EXE on its
+            own, and that is what the check now says.
 
             **The About page stops shaking.** The page measured its own height while it
             painted, and the scroll host put it straight back to the height of the window, so

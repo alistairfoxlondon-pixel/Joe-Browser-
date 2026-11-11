@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -53,10 +54,20 @@ namespace JoeBrowser
                 {
                     /* Reading an appSettings value forces .NET to parse JoeBrowser.exe.config,
                        section by section - which is exactly where an undeclared custom section
-                       throws. A missing file is fine; a file that cannot be parsed is not. */
+                       throws. A missing file is fine; a file that cannot be parsed is not.
+                       The file beside the EXE is the one that is read, so its presence is
+                       what decides between the two cases: a portable EXE that was copied on
+                       its own has no config beside it, and that is not a broken build. */
+                    string beside = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                        "JoeBrowser.exe.config");
+                    bool present = File.Exists(beside);
                     System.Configuration.ConfigurationManager.RefreshSection("appSettings");
                     string probe = System.Configuration.ConfigurationManager.AppSettings["JoeBrowser.SelfTest"];
-                    if (probe == null) { Console.Error.WriteLine("selftest: configuration has no appSettings value"); return 3; }
+                    if (probe == null && present)
+                    {
+                        Console.Error.WriteLine("selftest: configuration has no appSettings value");
+                        return 3;
+                    }
                 }
                 catch (Exception ex)
                 {
