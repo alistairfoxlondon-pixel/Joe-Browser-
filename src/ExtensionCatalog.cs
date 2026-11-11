@@ -85,16 +85,25 @@ namespace JoeBrowser
         public static string ImportedRoot { get { return Path.Combine(AppPaths.Extensions, "imported"); } }
 
         /// <summary>
-        /// Extensions the user asked to ship with every Chromium profile. They are fetched from
-        /// the official Chrome Web Store update endpoint once, unpacked into the app's own
-        /// extensions folder, and then loaded exactly like the built-in tools. The library entry
-        /// keeps them visible and removable on the Extensions page.
+        /// Extensions the user asked to ship with every Chromium profile.
+        ///
+        /// They used to be fetched from the Chrome Web Store. They are written by the
+        /// application instead - see ExtensionManager.WriteShipped - so they are there on
+        /// the first run, on a machine behind a proxy that blocks the store, and offline.
+        /// The ids are the ones the library already knows, so a profile that had them
+        /// keeps them and a user who removed one keeps it removed.
         /// </summary>
         public static readonly string[][] DefaultStoreExtensions = new[]
         {
-            new[] { "fklakbbaaknbgcedidhblbnhclijnhbi", "HTTP Tracker" },
-            new[] { "okaeekdeohehbdanbbohcfhhlblcmjkm", "Absolute Enable Right Click & Copy" }
+            new[] { HttpTrackerId, "HTTP Tracker Plus" },
+            new[] { RightClickId, "Absolute Enable Right Click and Copy" }
         };
+
+        /// <summary>The request tracker the application ships with.</summary>
+        public const string HttpTrackerId = "fklakbbaaknbgcedidhblbnhclijnhbi";
+
+        /// <summary>The right-click and copy tool the application ships with.</summary>
+        public const string RightClickId = "okaeekdeohehbdanbbohcfhhlblcmjkm";
 
         public static string StoreUrlFor(string id)
         {
@@ -398,6 +407,12 @@ namespace JoeBrowser
                     bool present = false;
                     try { present = UsableManifest(Path.Combine(target, "manifest.json")); } catch { }
                     if (present) continue;
+                    /* The shipped pair is written by the application, so the first thing a
+                       repair does is write it again. The store is only a fallback for a
+                       machine where the writing failed. */
+                    try { ExtensionManager.WriteShippedPair(); } catch { }
+                    try { present = UsableManifest(Path.Combine(target, "manifest.json")); } catch { }
+                    if (present) { added++; continue; }
                     string skip = Path.Combine(AppPaths.Extensions, ".store-" + id + ".skip");
                     if (!force)
                     {

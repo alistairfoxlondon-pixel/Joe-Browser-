@@ -131,7 +131,7 @@ namespace JoeBrowser
                 ClearBlocks();
                 AddInstalled(engine);
                 AddHead("AVAILABLE BUILDS");
-                AddMessage("The publisher is not answering. The connection may be slow or blocked.");
+                AddMessage("Publisher not answering.");
                 var again = new BuildRow("Try again", engine, "", "", false);
                 again.ActionRequested += delegate { Load(); };
                 AddBlock(again);
@@ -249,18 +249,15 @@ namespace JoeBrowser
                     if (have) continue;
                     var row = new BuildRow(rel.Version, engine, rel.Version,
                         (string.IsNullOrEmpty(rel.Channel) ? "" : rel.Channel + "  \u00b7  ") +
-                        (rel.SizeMb > 0 ? rel.SizeMb + " MB" : "Portable build"), false);
+                        (rel.SizeMb > 0 ? rel.SizeMb + " MB" : "Portable"), false);
                     row.ActionRequested += delegate { Install(rel, row); };
                     AddBlock(row);
-                    if (++shown >= 40) break;
+                    if (++shown >= 60) break;
                 }
             }
             if (shown == 0)
             {
-                AddMessage(catalog == null
-                    ? "The publisher could not be reached. Check the connection and press Refresh."
-                    : "No " + (channel == "All" ? "" : channel.ToLowerInvariant() + " ") + Label(engine) +
-                      " build is published for this channel right now.");
+                AddMessage(catalog == null ? "Publisher not reachable." : "None published.");
             }
 
             /* --- browsers that are already on this PC --- */
@@ -270,12 +267,12 @@ namespace JoeBrowser
             foreach (var b in local)
             {
                 if (b == null || !b.Found) continue;
-                var row = new BuildRow(b.Name, KeyOf(b), "", "v" + (b.Version ?? "") + "  \u00b7  installed", false);
+                var row = new BuildRow(b.Name, KeyOf(b), "", "v" + (b.Version ?? ""), false);
                 row.ActionRequested += delegate { Reveal(b); };
                 AddBlock(row);
                 found++;
             }
-            if (found == 0) AddMessage("No browser is installed outside Joe Browser.");
+            if (found == 0) AddMessage("None found on this PC.");
 
             LayoutCore();
         }
@@ -286,7 +283,7 @@ namespace JoeBrowser
             var mine = InstalledFor(engine);
             if (mine.Count == 0)
             {
-                AddMessage("No " + Label(engine) + " build is installed yet. Pick a version below.");
+                AddMessage("None installed yet.");
                 return;
             }
             foreach (var k in mine)

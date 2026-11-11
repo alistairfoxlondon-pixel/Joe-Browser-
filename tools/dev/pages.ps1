@@ -7,7 +7,8 @@ param(
     [string]$Exe = "C:\dev\joe-browser\dist\JoeBrowser.exe",
     [string]$Dir = "C:\dev\joe-browser\dist\pages",
     [int]$ResizeW = 1440,
-    [int]$ResizeH = 900
+    [int]$ResizeH = 900,
+    [int]$Settle = 1200
 )
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path $Dir)) { New-Item -ItemType Directory -Force $Dir | Out-Null }
@@ -33,6 +34,9 @@ foreach ($p in $pages) {
         -Exe $Exe -Out $out -ClickX 95 -ClickY $p.Y -ResizeW $ResizeW -ResizeH $ResizeH `
         -Screen -NoCapture | Out-Null
     # The window is at the top left of the work area, so the screen grab is cropped to it.
+    # The pause matters: a grab taken while the window is still repainting shows the
+    # pixels of the page it was on a moment ago.
+    Start-Sleep -Milliseconds $Settle
     $bmp = New-Object System.Drawing.Bitmap($ResizeW, $ResizeH)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.CopyFromScreen(0, 0, 0, 0, (New-Object System.Drawing.Size($ResizeW, $ResizeH)))

@@ -85,6 +85,10 @@ namespace JoeBrowser
             _emptyNote.Wrap = true;
             _emptyNote.TextAlign = ContentAlignment.TopLeft;
             _column.Controls.Add(_emptyNote);
+            /* The page says nothing when there is only one account. "No other accounts on
+               this PC" is a sentence about an absence, and the absence is already visible:
+               there is no list. */
+            _emptyNote.Visible = false;
 
             _ready = true;
             LayoutCore();
@@ -154,7 +158,7 @@ namespace JoeBrowser
             bool any = _rows.Count > 0;
             _accountsHeading.Visible = any;
             _accountsBox.Visible = any;
-            _emptyNote.Visible = !any;
+            _emptyNote.Visible = false;
             LayoutCore();
         }
 
@@ -186,13 +190,13 @@ namespace JoeBrowser
             {
                 _host.SetBounds(0, 0, Math.Max(1, Width), Math.Max(1, Height));
                 int w = Math.Max(Ui.S(320), _host.Width - Ui.S(10));
-                /* A text column does not get better past a certain width: every extra hundred
-                   px is dead right margin or a card row that reads like a shelf. The column now
-                   centres at up to 980 logical px. */
-                int maxInner = Ui.S(980);
-                int pad = Ui.S(30);
-                int inner = Math.Max(Ui.S(240), Math.Min(maxInner, w - pad * 2));
-                int left = Math.Max(pad, (w - inner) / 2);
+                /* The account page fills the window. It used to centre a 980 px column in
+                   whatever space there was, which left a wide empty margin on both sides of
+                   every card on a normal screen - the page looked narrow inside a wide
+                   window, and the cards looked like they had been shrunk. */
+                int pad = Ui.S(28);
+                int inner = Math.Max(Ui.S(320), w - pad * 2);
+                int left = pad;
                 int gap = Ui.S(14);
                 int y = pad;
 

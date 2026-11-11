@@ -119,9 +119,9 @@ namespace JoeBrowser
             _empty.Paint += PaintEmpty;
             _column.Controls.Add(_empty);
 
-            /* The resume/retry button for the shipped pair. It sits with the shipped rows, not in
+            /* The retry button for the shipped pair. It sits with the shipped rows, not in
                the action bar, so the action is next to the thing that failed. */
-            _fetch = MakeButton("Download missing", "download", BtnKind.Soft, "fetch");
+            _fetch = MakeButton("Restore", "download", BtnKind.Soft, "fetch");
             _column.Controls.Add(_fetch);
 
             _shippedHead = new JBLabel(LabelRole.Accent, "INCLUDED WITH JOE BROWSER");
@@ -135,6 +135,11 @@ namespace JoeBrowser
                 {
                     var h = RemoveShippedRequested;
                     if (h != null) h(this, new ExtensionActionEventArgs("shippedRemove", idx));
+                };
+                card.RestoreRequested += delegate
+                {
+                    var h = RemoveShippedRequested;
+                    if (h != null) h(this, new ExtensionActionEventArgs("shippedRestore", idx));
                 };
                 _column.Controls.Add(card);
                 _shipped.Add(card);
@@ -151,6 +156,11 @@ namespace JoeBrowser
                 _column.Controls.Add(card);
                 _cards.Add(card);
             }
+            /* The two headings are lifted above the rows that follow them. A heading painted
+               under an opaque card is a heading nobody can see, and the layout can be a
+               pixel out on a scaled screen - the card wins, and the section looks unlabelled. */
+            _column.Controls.SetChildIndex(_shippedHead, 0);
+            _column.Controls.SetChildIndex(_section, 0);
             _ready = true;
             LayoutCore();
         }
@@ -292,8 +302,9 @@ namespace JoeBrowser
                 }
                 if (Items.Count > 0) y += Ui.S(12);
 
-                _shippedHead.SetBounds(pad, y, inner, Theme.LineHeight(Theme.Small));
-                y += Theme.LineHeight(Theme.Small) + Ui.S(8);
+                int headH = Theme.LineHeight(Theme.Small);
+                _shippedHead.SetBounds(pad, y, inner, headH);
+                y += headH + Ui.S(10);
                 for (int i = 0; i < _shipped.Count; i++)
                 {
                     _shipped[i].SetBounds(pad, y, inner, ShippedRow.RowH);
@@ -301,13 +312,17 @@ namespace JoeBrowser
                 }
                 if (_fetch.Visible)
                 {
+                    /* The retry button sits under the rows it belongs to, with a clear gap on
+                       both sides. It used to be laid out with the heading that follows it, and
+                       the two ended up on top of each other - a button that covered the
+                       heading, and a heading hidden under the cards below it. */
                     _fetch.SetBounds(pad, y, Math.Min(inner, _fetch.PreferredWidth(Ui.S(190))), Ui.S(Theme.ControlHeight));
-                    y += Ui.S(Theme.ControlHeight) + Ui.S(8);
+                    y += Ui.S(Theme.ControlHeight) + Ui.S(18);
                 }
-                y += Ui.S(10);
+                y += Ui.S(6);
 
-                _section.SetBounds(pad, y, inner, Theme.LineHeight(Theme.Small));
-                y += Theme.LineHeight(Theme.Small) + Ui.S(10);
+                _section.SetBounds(pad, y, inner, headH);
+                y += headH + Ui.S(12);
 
                 int gap = Ui.S(12);
                 int cols = inner >= Ui.S(1080) ? 3 : inner >= Ui.S(660) ? 2 : 1;
@@ -492,9 +507,15 @@ namespace JoeBrowser
         private readonly string _id;
         private string _state = "", _detail = "";
         private bool _present;
-        private int _hover = -1; // 0 = remove
+        private int _hover = -1; // 0 = remove, 1 = restore
 
         public event EventHandler RemoveRequested;
+
+        /// <summary>
+        /// Raised when the user asks for a shipped extension they removed to be put back.
+        /// A removal that could not be undone would be a removal, not a choice.
+        /// </summary>
+        public event EventHandler RestoreRequested;
 
         public string Id { get { return _id; } }
 
@@ -534,9 +555,31 @@ namespace JoeBrowser
             get { return new RectangleF(Width - Ui.S(16) - Ui.S(30), (Height - Ui.S(30)) / 2f, Ui.S(30), Ui.S(30)); }
         }
 
+        /// <summary>
+        /// The button that puts a removed extension back. It is a word, not a glyph: an
+        /// arrow nobody recognises is not an invitation, and the row already says
+        /// "Removed" beside it.
+        /// </summary>
+        private RectangleF RestoreRect
+        {
+            get
+            {
+                float w = Ui.S(86);
+                return new RectangleF(Width - Ui.S(16) - w, (Height - Ui.S(28)) / 2f, w, Ui.S(28));
+            }
+        }
+
+        /// <summary>True when the user has removed this extension and can ask for it back.</summary>
+        private bool Removed
+        {
+            get { return string.Equals(_state, "Removed", StringComparison.OrdinalIgnoreCase); }
+        }
+
         protected override void OnMouseMove(MouseEventArgs e)
         {
-            int hit = _present && RemoveRect.Contains(e.Location) ? 0 : -1;
+            int hit = -1;
+            if (_present && RemoveRect.Contains(e.Location)) hit = 0;
+            else if (Removed && RestoreRect.Contains(e.Location)) hit = 1;
             if (hit != _hover) { _hover = hit; Invalidate(); }
             Cursor = hit >= 0 ? Cursors.Hand : Cursors.Default;
             base.OnMouseMove(e);
@@ -550,9 +593,17 @@ namespace JoeBrowser
             /* The one action the shipped rows lacked: removing one. It existed only on the
                library row further down - two rows for one extension, and the remove on the
                one nobody could tell apart from the status card. */
-            if (e.Button == MouseButtons.Left && _present && RemoveRect.Contains(e.Location))
+            if (e.Button != MouseButtons.Left) return;
+            if (_present && RemoveRect.Contains(e.Location))
             {
                 var h = RemoveRequested;
+                if (h != null) h(this, EventArgs.Empty);
+            }
+            else if (Removed && RestoreRect.Contains(e.Location))
+            {
+                /* And the other way: a removal the user cannot undo is a removal, not a
+                   choice. The row offers the way back. */
+                var h = RestoreRequested;
                 if (h != null) h(this, EventArgs.Empty);
             }
         }
@@ -572,7 +623,8 @@ namespace JoeBrowser
                 g.FillEllipse(b, Ui.S(16), (Height - dot) / 2f, dot, dot);
 
             /* The remove affordance sits where the state text used to end, and the state text
-               moves left of it - both are measured, so neither runs into the other. */
+               moves left of it - both are measured, so neither runs into the other. A removed
+               extension offers the way back instead of a bin. */
             float rightEdge = Width - Ui.S(16);
             if (_present)
             {
@@ -581,6 +633,14 @@ namespace JoeBrowser
                 Icons.Draw(g, "trash", new RectangleF(RemoveRect.X + (RemoveRect.Width - s) / 2f,
                     RemoveRect.Y + (RemoveRect.Height - s) / 2f, s, s), _hover == 0 ? Theme.Danger : Theme.TextDim);
                 rightEdge = RemoveRect.Left - Ui.S(10);
+            }
+            else if (Removed)
+            {
+                var rr = RestoreRect;
+                if (_hover == 1) Ui.Fill(g, rr, Ui.S(Theme.ButtonRadius), Theme.HoverOverlay);
+                Ui.Text(g, "Add back", Theme.Caption, _hover == 1 ? Theme.Accent : Theme.TextDim,
+                    rr.X, rr.Y + (rr.Height - Theme.LineHeight(Theme.Caption)) / 2f, rr.Width, "center");
+                rightEdge = rr.Left - Ui.S(12);
             }
 
             /* The state is measured, so the name is given exactly what is left and cannot run

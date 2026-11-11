@@ -32,7 +32,7 @@ namespace JoeBrowser
 
         // Sidebar
         private JBButton _navProfiles, _navHistory, _navAccount, _navProxies, _navExtensions, _navBrowsers, _navSettings, _navTools, _navAbout;
-        private JBLabel _navGroupWorkspace, _navGroupSystem;
+        private NavGroup _navGroupWorkspace, _navGroupSystem;
         private JBThemeSwitch _themeSwitch;
 
         // Caption buttons
@@ -333,16 +333,15 @@ namespace JoeBrowser
         }
 
         /// <summary>
-        /// Small caption above a cluster of navigation items. Letter spaced the way a real
-        /// section label is, because uppercase Segoe at 12 px without tracking reads as cramped.
+        /// The heading over a group of destinations. It is clickable and it carries the
+        /// active state of the group, so the rail shows which half of the workspace is on
+        /// screen instead of leaving two quiet lines of text to guess from.
         /// </summary>
-        private JBLabel NavGroup(string text)
+        private NavGroup NavGroup(string text, EventHandler click)
         {
-            var l = new JBLabel(LabelRole.Faint, text.ToUpperInvariant());
-            l.AutoEllipsis = false;
-            l.Font = Theme.Micro;
-            l.ForeColor = Theme.TextFaint;
-            return l;
+            var g = new NavGroup(text.ToUpperInvariant());
+            g.Activated += click;
+            return g;
         }
 
         private void Build()
@@ -359,8 +358,8 @@ namespace JoeBrowser
             _navTools = Nav(L10n.T("header.tools"), "command", delegate { SetPage(5); });
             _navAbout = Nav(L10n.T("nav.about"), "info", delegate { SetPage(6); });
 
-            _navGroupWorkspace = NavGroup(L10n.T("nav.workspace"));
-            _navGroupSystem = NavGroup(L10n.T("nav.system"));
+            _navGroupWorkspace = NavGroup(L10n.T("nav.workspace"), delegate { SetPage(0); });
+            _navGroupSystem = NavGroup(L10n.T("nav.system"), delegate { SetPage(4); });
 
             _themeSwitch = new JBThemeSwitch { Checked = Theme.Dark };
             _themeSwitch.NightText = L10n.T("theme.night");
@@ -450,7 +449,11 @@ namespace JoeBrowser
 
             _extensionPage = new ExtensionPage { Visible = false };
             _extensionPage.ActionRequested += delegate(object sender, ExtensionActionEventArgs e) { ExtensionAction(e.Key, e.Index); };
-            _extensionPage.RemoveShippedRequested += delegate(object sender, ExtensionActionEventArgs e) { RemoveShipped(e.Index); };
+            _extensionPage.RemoveShippedRequested += delegate(object sender, ExtensionActionEventArgs e)
+            {
+                if (e.Key == "shippedRestore") RestoreShipped(e.Index);
+                else RemoveShipped(e.Index);
+            };
             _extensionPage.SetItems(VisibleExtensions(_extensions));
 
             _browsersPage = new BrowsersPage { Visible = false };
@@ -1718,6 +1721,26 @@ namespace JoeBrowser
         }
 
         /// <summary>
+        /// Puts back one of the shipped pair that the user removed.
+        ///
+        /// The removal is recorded with a mark, so it survives a restart and a re-download.
+        /// Taking the mark off and writing the extension again is what puts it back - and
+        /// nothing else: the pair is written by the application, so there is no download to
+        /// retry and no store to be blocked by.
+        /// </summary>
+        private void RestoreShipped(int statusIndex)
+        {
+            var statuses = ExtensionCatalog.DefaultStatuses();
+            if (statusIndex < 0 || statusIndex >= statuses.Count) return;
+            string id = statuses[statusIndex][0];
+            string name = statuses[statusIndex][1];
+            ExtensionCatalog.MarkRemoved(id, false);
+            ExtensionManager.WriteShippedPair(id);
+            _extensionPage.RefreshShipped();
+            Toast("\"" + name + "\" is back. It is included with every new profile.", ToastKind.Success);
+        }
+
+        /// <summary>
         /// Retries the download of an extension this build ships, which is the action a user
         /// needs exactly when the first attempt failed behind a proxy they have since fixed.
         /// It runs off the UI thread, reports what came back, and refreshes the state rows.
@@ -2069,7 +2092,7 @@ namespace JoeBrowser
             Ui.Quality(g);
             int w = ClientSize.Width, h = ClientSize.Height;
             int sb = Ui.S(SidebarW);
-            int headerH = Ui.S(HeaderH);
+            int headerH = _headerH;
 
             g.Clear(Theme.Bg);
 
@@ -2142,6 +2165,12 @@ namespace JoeBrowser
         /// it), kept up to date by the layout so the paint pass and the layout agree.
         /// </summary>
         private int _toolbarReserve = 320;
+
+        /// <summary>
+        /// Height of the header band. It grows by a row when the toolbar has to move under
+        /// the page title, so the title always has room of its own.
+        /// </summary>
+        private int _headerH = 76;
 
         private int ShownCount()
         {
@@ -2228,7 +2257,8 @@ namespace JoeBrowser
                hidden, and only then are the bounds set. That is what stops a button being drawn
                under another at a narrow width, which is the single most reported fault. */
             int toolbarRight = w - cw * 3 - Ui.S(16);
-            int toolbarY = (headerH - Ui.S(34)) / 2 - Ui.S(4);
+            int headerBase = Ui.S(HeaderH);
+            int toolbarY = (headerBase - Ui.S(34)) / 2 - Ui.S(4);
             int newW = Math.Min(Ui.S(148), Math.Max(Ui.S(96), _newBtn.PreferredWidth(Ui.S(124))));
             bool profilesPage = _page == 0;
             _newBtn.Visible = profilesPage;
@@ -2236,11 +2266,12 @@ namespace JoeBrowser
             _search.Visible = profilesPage;
             _saveSettings.Visible = _page == 4;
 
+            int textX = sb + Ui.S(ContentPad);
             int cursor = toolbarRight;
             if (profilesPage) cursor -= newW + Ui.S(10);
             int sortW = _sortBtn.PreferredWidth(Ui.S(108));
             int searchMin = Ui.S(150);
-            int leftEdge = sb + Ui.S(ContentPad);
+            int leftEdge = textX;
             bool showSort = profilesPage && cursor - Ui.S(8) - sortW >= leftEdge + searchMin + Ui.S(10);
             if (showSort) cursor -= sortW + Ui.S(8);
             bool showSearch = profilesPage && cursor - Ui.S(8) >= leftEdge + searchMin;
@@ -2249,28 +2280,40 @@ namespace JoeBrowser
 
             _sortBtn.Visible = showSort;
             _search.Visible = showSearch;
-            if (profilesPage) _newBtn.SetBounds(toolbarRight - newW, toolbarY, newW, Ui.S(34));
-            if (showSort)
-                _sortBtn.SetBounds(_newBtn.Left - Ui.S(8) - sortW, toolbarY, sortW, Ui.S(34));
-            if (showSearch)
-                _search.SetBounds(cursor, toolbarY, searchW, Ui.S(34));
+
+            /* Where the left-most visible control of the toolbar starts. The page title has to
+               fit to the left of it, and when it does not, the toolbar moves to a second row. */
+            int newLeft = toolbarRight - newW;
+            int sortLeft = newLeft - Ui.S(8) - sortW;
+            int searchLeft = cursor;
+            int toolbarLeft = profilesPage
+                ? (showSearch ? searchLeft : showSort ? sortLeft : newLeft)
+                : toolbarRight;
+
+            /* The page title needs a row of its own. On a narrow window the toolbar takes the
+               whole band - the search field alone is wider than the title - and the title was
+               then drawn underneath it, so the page had no name at all. The toolbar drops to a
+               second row instead, and the title keeps the first one. */
+            bool twoRows = toolbarLeft - textX < Ui.S(200);
+            headerH = twoRows ? headerBase + Ui.S(48) : headerBase;
+            if (twoRows) toolbarY = headerBase + Ui.S(7);
+            _headerH = headerH;
+
+            if (profilesPage) _newBtn.SetBounds(newLeft, toolbarY, newW, Ui.S(34));
+            if (showSort) _sortBtn.SetBounds(sortLeft, toolbarY, sortW, Ui.S(34));
+            if (showSearch) _search.SetBounds(searchLeft, toolbarY, searchW, Ui.S(34));
 
             /* What the toolbar occupies on the right, so the page title above it is drawn into
-               the space that is left instead of under the buttons. */
-            /* The title sits on the row above the buttons, so what it has to clear is the
-               narrowest thing on the toolbar - not the whole row. Using the full width of the
-               row reserved half a window for a title that had room, which is the wasted space
-               the old header showed. */
-            int searchLeft = profilesPage
-                ? (showSearch ? _search.Left : showSort ? _sortBtn.Left : _newBtn.Left)
-                : toolbarRight;
-            _toolbarReserve = Math.Max(Ui.S(180), toolbarRight - searchLeft + Ui.S(24));
+               the space that is left instead of under the buttons. On a second row the toolbar
+               has no title beside it and the title has the whole width. */
+            _toolbarReserve = twoRows ? 0 : Math.Max(Ui.S(180), toolbarRight - toolbarLeft + Ui.S(24));
 
             if (_page == 4)
             {
                 int saveW = Math.Min(Ui.S(170), _saveSettings.PreferredWidth(Ui.S(140)));
                 _saveSettings.SetBounds(toolbarRight - saveW, toolbarY, saveW, Ui.S(34));
-                _toolbarReserve = Math.Max(Ui.S(200), saveW + Ui.S(40));
+                if (!twoRows) _toolbarReserve = Math.Max(Ui.S(200), saveW + Ui.S(40));
+                else _toolbarReserve = 0;
             }
 
             int contentX = sb;
@@ -2514,6 +2557,11 @@ namespace JoeBrowser
             int colW = Math.Max(Ui.S(300), _aboutColumn.Width);
             int tw = Math.Min(Math.Max(Ui.S(96), colW - Ui.S(60)), _aboutTelegram.PreferredWidth(Ui.S(190)));
             _aboutTelegram.SetBounds(Math.Max(Ui.S(8), colW - tw - Ui.S(20)), Ui.S(47), tw, Theme.Field);
+            /* The column is as tall as the area it sits in, or as tall as its content when
+               the content is taller - never shorter, because the scroll host would put it
+               back and the page would shake. */
+            int want = Math.Max(_aboutNeed, _aboutHost.Height);
+            if (_aboutColumn.Height != want) _aboutColumn.Height = want;
             _aboutColumn.Invalidate();
         }
 
@@ -2665,6 +2713,11 @@ namespace JoeBrowser
             }
 
             bool profiles = page == 0;
+            /* The rail shows which half of the workspace is on screen. The groups are the
+               first six destinations and the last four. */
+            bool inWorkspace = page <= 3 || page == 8 || page == 9;
+            if (_navGroupWorkspace != null) _navGroupWorkspace.Active = inWorkspace;
+            if (_navGroupSystem != null) _navGroupSystem.Active = !inWorkspace;
             _host.Visible = profiles && _cards.Count > 0;
             if (!profiles) _picks.Clear();
             _bulk.Visible = profiles && _picks.Count > 1;
@@ -2688,6 +2741,11 @@ namespace JoeBrowser
             _newBtn.Visible = profiles;
             _saveSettings.Visible = page == 4;
             _themeSwitch.Visible = true;
+            /* Hiding a child control does not ask the parent to paint over it, so the search
+               field's pixels stayed on the window after the Profiles page was left. The band
+               the toolbar lived in is invalidated here, so the header is drawn again. */
+            Invalidate(new Rectangle(Ui.S(SidebarW), 0,
+                Math.Max(1, ClientSize.Width - Ui.S(SidebarW)), Ui.S(HeaderH)));
 
             /* The newly visible page has to come forward over the other page containers...
                and then the fixed chrome has to be put back on top of everything. Every page
@@ -3669,6 +3727,21 @@ namespace JoeBrowser
                     }
                     catch { }
                 };
+                /* A rotation is announced by the window itself. A banner inside a page the
+                   user is not looking at is not a notification. */
+                session.ProxyRotated += delegate(string from, string to)
+                {
+                    if (IsDisposed) return;
+                    try
+                    {
+                        BeginInvoke(new Action(delegate
+                        {
+                            TrayAlert("The proxy for \u201c" + p.Name + "\u201d changed address: " +
+                                  from + " \u2192 " + to + ".", ToastKind.Warn);
+                        }));
+                    }
+                    catch { }
+                };
                 _store.Touch(p);
                 if (_cards.ContainsKey(id))
                 {
@@ -4142,11 +4215,34 @@ namespace JoeBrowser
             }
 
             int need = (int)Math.Ceiling(ws.Bottom) + Ui.S(20);
-            if (_aboutColumn.Height != need)
+            /* The column is never shorter than the area it sits in, and never shorter than
+               what it needs. It used to be resized from inside this paint, and the scroll
+               host put it straight back to the height of the window - so the page shook
+               itself between two heights, over and over, for as long as it was open. The
+               height is measured here and applied from outside the paint. */
+            if (need != _aboutNeed)
             {
-                _aboutColumn.Height = need;
-                _aboutHost.SyncExtent();
+                _aboutNeed = need;
+                if (!_aboutRelayout)
+                {
+                    _aboutRelayout = true;
+                    try
+                    {
+                        BeginInvoke(new Action(delegate
+                        {
+                            _aboutRelayout = false;
+                            LayoutAbout();
+                        }));
+                    }
+                    catch { _aboutRelayout = false; }
+                }
             }
         }
+
+        /// <summary>Height the about column needs, measured while it paints.</summary>
+        private int _aboutNeed;
+
+        /// <summary>True while a deferred relayout is already queued.</summary>
+        private bool _aboutRelayout;
     }
 }

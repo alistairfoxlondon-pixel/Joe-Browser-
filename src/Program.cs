@@ -330,7 +330,11 @@ namespace JoeBrowser
                         foreach (string f in folders)
                             if (f.EndsWith(shipped, StringComparison.OrdinalIgnoreCase))
                                 sb.Append(" [a removed shipped extension is still loaded]");
-                        if (wasRemoved) ExtensionCatalog.MarkRemoved(shipped, false);
+                        /* The mark is put back exactly as it was. It used to be cleared
+                           unconditionally when it was not there before, which left the shipped
+                           extension removed on every machine that ever ran the self test -
+                           and the release build runs the self test. */
+                        ExtensionCatalog.MarkRemoved(shipped, wasRemoved);
                     }
                     catch (Exception ex)
                     {

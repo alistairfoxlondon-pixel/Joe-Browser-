@@ -63,6 +63,59 @@ namespace JoeBrowser
         /// offline. The window turns this into its own alert rather than the proxy warning.</summary>
         public event Action<string> ProxyOffline;
 
+        /// <summary>
+        /// Raised when the address the world sees this profile from changed: the proxy
+        /// rotated its exit.
+        /// </summary>
+        public event Action<string, string> ProxyRotated;
+
+        private System.Threading.Timer _proxyWatch;
+        private string _lastExitIp;
+        private int _watchBusy;
+
+        /// <summary>
+        /// Watches the address the world sees this profile from.
+        ///
+        /// A proxy that rotates its exit is the normal way a session is kept alive, and it
+        /// is also the moment the account on the other side can be matched with another
+        /// session. The application asks the proxy who it is every minute and says so when
+        /// the answer changes - in the window and in the notification area, not only in a
+        /// banner inside a page nobody is looking at.
+        /// </summary>
+        private void StartProxyWatch()
+        {
+            try
+            {
+                _proxyWatch = new System.Threading.Timer(delegate { WatchOnce(); }, null, 12000, 60000);
+            }
+            catch (Exception ex) { Log.Error("Could not start the proxy watch", ex); }
+        }
+
+        private async void WatchOnce()
+        {
+            try
+            {
+                if (_proxyWatch == null || _closedRaised != 0) return;
+                if (Interlocked.Exchange(ref _watchBusy, 1) == 1) return;
+                try
+                {
+                    var proxy = Profile != null ? Profile.Proxy : null;
+                    if (proxy == null || !proxy.Enabled) return;
+                    var result = await ProxyTester.TestAsync(proxy).ConfigureAwait(false);
+                    if (result == null || !result.Ok || string.IsNullOrEmpty(result.Ip)) return;
+                    if (string.IsNullOrEmpty(_lastExitIp)) { _lastExitIp = result.Ip; return; }
+                    if (string.Equals(_lastExitIp, result.Ip, StringComparison.Ordinal)) return;
+                    string from = _lastExitIp;
+                    _lastExitIp = result.Ip;
+                    Log.Info("Proxy exit address changed: " + from + " -> " + result.Ip);
+                    var h = ProxyRotated;
+                    if (h != null) { try { h(from, result.Ip); } catch { } }
+                }
+                finally { Interlocked.Exchange(ref _watchBusy, 0); }
+            }
+            catch (Exception ex) { Log.Error("Proxy watch failed", ex); }
+        }
+
         public bool ProxyFellBack { get; private set; }
 
         /// <summary>True when this window's traffic goes through a relay that can be re-pointed
@@ -215,6 +268,10 @@ namespace JoeBrowser
                     var h = s.ProxyOffline;
                     if (h != null) { try { h(endpoint); } catch { } }
                 };
+                /* The application watches the exit address of the proxy itself, so a
+                   rotation is announced by the window and not only by a banner inside the
+                   page. A banner on a page the user is not looking at is not a notification. */
+                s.StartProxyWatch();
             }
 
             Log.Info("Launching " + browser.Name + " " + browser.Version + " for profile " + profile.Name);
@@ -381,7 +438,14 @@ namespace JoeBrowser
                capability the engine will not honour. */
             bool engineTakesExtensions = string.Equals(browser.EngineKey, "chrome", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(browser.EngineKey, "brave", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(browser.EngineKey, "chromium", StringComparison.OrdinalIgnoreCase);
+                string.Equals(browser.EngineKey, "chromium", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(browser.EngineKey, "edge", StringComparison.OrdinalIgnoreCase);
+            /* The first-party tools - paste as human, the proxy watch and the right-click
+               guard - are injected through the browser's own debugging channel, so they are a
+               feature of the application and not something the user has to install. Every
+               Chromium engine offers that channel, Edge included; only Firefox does not,
+               and there the application says so rather than claiming a capability the
+               engine will not honour. */
             s._toolsAllowed = engineTakesExtensions;
             s._masterExtensions = settings == null || settings.EnableExtensions;
             bool masterExtensions = s._masterExtensions && engineTakesExtensions;
@@ -389,10 +453,13 @@ namespace JoeBrowser
             var folders = !engineTakesExtensions || DiagnosticNoExtensions
                 ? new List<string>()
                 : ExtensionManager.EnabledFolders(profile.Tools, masterExtensions, customExtensions, proxyOn,
-                    /* The shipped store pair is a Chrome/Brave feature by the owner's explicit
-                       requirement - not Chromium, not Edge, never Firefox. The first-party
-                       tools keep loading on every Chromium engine through CDP. */
-                    browser.EngineKey == "chrome" || browser.EngineKey == "brave");
+                    /* The two extensions the application ships with load on every Chromium
+                       engine - Chrome, Brave, Chromium and Edge alike. They are written by the
+                       application, not fetched, so there is nothing to be blocked from and no
+                       reason to keep them off one engine and not another. Firefox cannot take
+                       unpacked extensions at all; the tools it does support are injected
+                       through the browser instead. */
+                    true);
             if (folders.Count > 0)
             {
                 /* Every folder is on the command line twice, once for each switch. Duplicates
@@ -1791,6 +1858,7 @@ namespace JoeBrowser
         private void Cleanup()
         {
             if (Interlocked.Exchange(ref _closedRaised, 1) == 1) return;
+            try { if (_proxyWatch != null) { _proxyWatch.Dispose(); _proxyWatch = null; } } catch { }
             try { if (_cdp != null) _cdp.Dispose(); } catch { }
             try { if (_relay != null) _relay.Dispose(); } catch { }
             /* Dispose alone leaves the browser process alive: the endpoint-timeout path used to

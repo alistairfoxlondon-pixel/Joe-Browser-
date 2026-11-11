@@ -29,9 +29,57 @@ this application.
 | **Proxies** | HTTP, HTTPS and SOCKS5 with authentication. Credentials are applied by a local relay, so a password never appears in a browser command line. Swap the proxy of a running profile without closing its tabs. |
 | **Fingerprint check** | A fifteen point probe inside the profile's own session, plus one click buttons that open the well known checkers in that same session. |
 | **History per profile** | Every page a profile visits, including the redirect hops, isolated per account and clearable. |
-| **Extensions** | Three first party tools written by this app, two store extensions included on Chrome and Brave, and anything you add from a Chrome Web Store link, a `.crx` or a folder. The included pair show their state, so a download that failed says why instead of vanishing. |
+| **Extensions** | Three first party tools written by this app, two extensions included with every Chromium profile, and anything you add from a Chrome Web Store link, a `.crx` or a folder. The included pair show their state, and removing one keeps it removed. |
 | **Built to be read** | 16 px body text, one measured layout at every window width, and no control that cuts its own label. |
 | **Private by default** | Profile data stays in `%APPDATA%\JoeBrowser`. Proxy passwords and the account store are encrypted with Windows DPAPI. No telemetry, no server, no cloud. |
+
+## What changed in 1.11.0
+
+**The About page stops shaking.** The page measured its own height while it painted, and
+the scroll host put it straight back to the height of the window, so the two fought over
+it for as long as the page was open. The height is measured in the paint and applied from
+outside it, and the page now sits still.
+
+**The theme change is one step, and it is instant.** The dissolve between a light theme
+and a dark one has to pass through the grey in the middle, where the text and the
+background are the same colour and the interface reads as broken - and it took long enough
+to be felt as a delay. The palette now moves in one step and the whole tree is repainted
+as one piece: no frame ever holds two themes, and no frame is unreadable.
+
+**The page title has a row of its own.** On a narrow window the toolbar took the whole
+header band and the title was drawn underneath the search field, so the page had no name
+at all. The toolbar drops to a second row instead, and the title keeps the first one.
+
+**The Browsers page is shorter, and it lists more.** The rows said what they did not need
+to say. "HTTP Tracker Plus" and "Absolute Enable Right Click and Copy" are written by the
+application itself rather than fetched from the Chrome Web Store, so they are there on the
+first run, behind a proxy that blocks the store, and offline. Chrome now reaches back
+twelve majors with four builds of each, Chromium offers eight to forty builds per channel,
+and Brave and Edge carry their real catalogues - Brave from its release feed, Edge from
+the enterprise download page Microsoft publishes.
+
+**The Account page fills the window.** It used to centre a 980 px column in whatever space
+there was, which left a wide empty margin on both sides of every card. "No other accounts
+on this PC" is gone: the absence of a list already says it.
+
+**The Extensions page does not overlap.** The button that restores the included pair and
+the heading above the recommended cards were laid out on top of each other. Both headings
+are lifted above the rows that follow them, and the button has room of its own.
+
+**The included pair can be removed and stays removed.** Removing one writes a mark beside
+the library that outlives the folder, survives a re-download, and is what the loader and
+the library both consult. The self test used to leave the first of the pair marked as
+removed on every machine that ran it - and the release build runs it.
+
+**Proxy rotation is announced by the application.** The rotation notice used to live only
+in a banner inside a page, which is not a notification when the user is looking somewhere
+else. The window now watches the address the world sees the profile from and says so in
+the window and in the notification area. The offline alert was already there.
+
+**Paste as human, the proxy watch and the right-click tool are built in.** They are
+written by the application and injected through the browser's own debugging channel, so
+they work on every Chromium engine - Edge included - without the user installing
+anything.
 
 ## What changed in 1.10.1
 
