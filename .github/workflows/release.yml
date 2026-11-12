@@ -186,6 +186,15 @@ jobs:
 
             ### In this build
 
+            **The window comes back whole.** A window that was covered - or that was on
+            another monitor and came back - is repainted by Windows region by region, and a
+            user who looks at it in that moment sees a half drawn window: a button whose shape
+            is there and whose text is stretched, a card that is a stripe, a caption bar in
+            the old colour. The whole tree is now frozen, marked dirty and thawed, and the
+            paint is done in one pass.
+
+            ### What was in 1.13.0
+
             **The fingerprint no longer reads as masked.** BrowserScan scored the app at 90%
             with a "WebGL exception" and a "Canvas Tampering"; it now scores **100%**, and
             iphey reports the identity as trustworthy with everything fine. Four things were
