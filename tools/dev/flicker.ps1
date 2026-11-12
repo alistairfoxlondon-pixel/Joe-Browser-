@@ -28,6 +28,7 @@ public static class F {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint d, uint e, uint o, IntPtr l);
   [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int ht, bool repaint);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int ht, uint flags);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
   public delegate bool EnumProc(IntPtr h, IntPtr l);
   public static System.Collections.Generic.List<IntPtr> ForProcess(uint target) {
@@ -60,6 +61,10 @@ foreach ($p in $proc) {
 }
 if ($found -eq [IntPtr]::Zero) { Write-Host "window not found"; exit 1 }
 [F]::SetForegroundWindow($found) | Out-Null
+# The foreground lock belongs to whatever else is running, and a click that lands on
+# another application does nothing at all. The window is made topmost for the run and
+# put back afterwards.
+[F]::SetWindowPos($found, [IntPtr](-1), 0, 0, 0, 0, 0x0001 -bor 0x0040) | Out-Null
 $r = New-Object F+RECT; [F]::GetWindowRect($found, [ref]$r) | Out-Null
 [F]::MoveWindow($found, $r.Left, $r.Top, $Width, $Height, $true) | Out-Null
 Start-Sleep -Milliseconds 700
@@ -87,4 +92,5 @@ for ($i = 0; $i -lt $Frames; $i++) {
     Grab (Join-Path $Dir ("f{0:d2}.png" -f $i))
 }
 $g.Dispose(); $bmp.Dispose()
+[F]::SetWindowPos($found, [IntPtr](-2), 0, 0, 0, 0, 0x0001 -bor 0x0040) | Out-Null
 Write-Host "grabbed $Frames frames into $Dir"

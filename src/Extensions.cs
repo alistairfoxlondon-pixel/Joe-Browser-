@@ -54,12 +54,13 @@ namespace JoeBrowser
                        re-logging the same failure. A failure now costs only its own tool. */
                     WriteTool(HumanPaste, delegate
                     {
-                        Write(HumanPaste, "manifest.json", Manifest("Joe Human Paste", "1.1.0",
+                        Write(HumanPaste, "manifest.json", Manifest("Joe Human Paste", "1.2.0",
                             "Types clipboard text one character at a time with human-like timing.",
                             new[] { "activeTab", "clipboardRead", "storage", "scripting", "contextMenus", "tabs" },
-                            NoHosts, "service-worker.js", "content.js", false));
+                            NoHosts, "service-worker.js", "content.js", false, "main.js"));
                         Write(HumanPaste, "service-worker.js", HumanPasteWorker);
                         Write(HumanPaste, "content.js", HumanPasteContent);
+                        Write(HumanPaste, "main.js", HumanPasteMain);
                         WriteIcon(HumanPaste);
                     });
 
@@ -107,7 +108,7 @@ namespace JoeBrowser
         }
 
         private static string Manifest(string name, string version, string desc, string[] perms,
-            string[] hosts, string worker, string content, bool banner)
+            string[] hosts, string worker, string content, bool banner, string mainContent = null)
         {
             /* Build the member list and join it, so adding or omitting an optional member
                can never leave a dangling comma in the emitted JSON. */
@@ -127,13 +128,26 @@ namespace JoeBrowser
             lines.Add("  \"icons\": { \"16\": \"icon16.png\", \"48\": \"icon48.png\", \"128\": \"icon128.png\" }");
             if (content != null)
             {
-                /* One list entry, so the join below adds a comma only after the whole member. */
-                lines.Add("  \"content_scripts\": [{\n" +
-                          "    \"matches\": [\"<all_urls>\"],\n" +
-                          "    \"js\": [\"" + content + "\"],\n" +
-                          "    \"run_at\": \"document_start\",\n" +
-                          "    \"all_frames\": false\n" +
-                          "  }]");
+                /* One list entry, so the join below adds a comma only after the whole member.
+                   A second entry may run in the page's own world: a content script there can
+                   dispatch the key events a real keystroke produces, and one in the isolated
+                   world cannot reach the page's listeners the same way. */
+                var entries = new List<string>();
+                entries.Add("{\n" +
+                    "    \"matches\": [\"<all_urls>\"],\n" +
+                    "    \"js\": [\"" + content + "\"],\n" +
+                    "    \"run_at\": \"document_start\",\n" +
+                    "    \"all_frames\": false\n" +
+                    "  }");
+                if (mainContent != null)
+                    entries.Add("{\n" +
+                        "    \"matches\": [\"<all_urls>\"],\n" +
+                        "    \"js\": [\"" + mainContent + "\"],\n" +
+                        "    \"run_at\": \"document_start\",\n" +
+                        "    \"all_frames\": false,\n" +
+                        "    \"world\": \"MAIN\"\n" +
+                        "  }");
+                lines.Add("  \"content_scripts\": [" + string.Join(",\n", entries.ToArray()) + "]");
             }
             if (banner)
                 lines.Add("  \"web_accessible_resources\": [{ \"resources\": [\"banner.css\"], \"matches\": [\"<all_urls>\"] }]");
@@ -794,7 +808,18 @@ async function humanType(text){
     }
   } finally { typing = false; armed = false; }
 }
-if (cfg.human) {
+/* One handler per document. The extension carries the same feature for the pages of a
+   browser the application does not launch, and two handlers would type the text twice.
+   The marker is on the document, which both worlds share, so whichever arrives first
+   owns the paste and the other stands down. */
+var extOwnsPaste = false;
+try {
+  var pr = document.documentElement;
+  extOwnsPaste = !!(pr.getAttribute('data-jb-paste'));
+  if (!extOwnsPaste) pr.setAttribute('data-jb-paste', 'runtime');
+} catch (e) {}
+
+if (cfg.human && !extOwnsPaste) {
   document.addEventListener('keydown', function(e){
     if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); armPaste(); }
   }, true);
@@ -811,6 +836,7 @@ if (cfg.human) {
     armed = false;
     humanType(text);
   }, true);
+  }
   /* The extension's own right-click entry (Paste as human) is the visible way in when the
      unpacked extension loads. When it does not - Chrome 137+ branded builds refuse
      --load-extension - there is no menu entry anywhere, and the feature looked missing even
@@ -821,6 +847,16 @@ if (cfg.human) {
     try { return !!(document.documentElement && document.documentElement.getAttribute('data-jb-human-paste')); }
     catch(e) { return false; }
   };
+  /* Reads the clipboard and types it. The page may not be allowed to read the clipboard,
+     so when the read is refused the plain paste is left alone rather than eaten. */
+  function pasteClipboard(){
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.readText) { armPaste(); return; }
+      navigator.clipboard.readText().then(function(text){
+        if (text) humanType(text); else armPaste();
+      }, function(){ armPaste(); });
+    } catch(e){ armPaste(); }
+  }
   document.addEventListener('contextmenu', function(e){
     try {
       if (armed || typing) return;
@@ -843,7 +879,11 @@ if (cfg.human) {
     item.setAttribute('style', 'padding:8px 14px;cursor:pointer;white-space:nowrap;');
     item.onmouseenter = function(){ item.style.background = '#f0f4ff'; };
     item.onmouseleave = function(){ item.style.background = 'transparent'; };
-    item.onclick = function(){ close(); armPaste(); };
+    item.onclick = function(){
+      close();
+      /* The entry pastes right away rather than arming the next Ctrl+V. */
+      pasteClipboard();
+    };
     m.appendChild(item);
     var close = function(){ try { if (m && m.parentNode) m.parentNode.removeChild(m); } catch(x){}
       document.removeEventListener('mousedown', onDoc, true); document.removeEventListener('keydown', onKey, true); };
@@ -875,6 +915,7 @@ window.addEventListener('message', function(e){
   var m = e.data;
   if (!m || !m.__jb || e.source !== window) return;
   if (m.__jb === 'armPaste' && cfg.human) armPaste();
+  else if (m.__jb === 'pasteText' && cfg.human && m.text) humanType(m.text);
   else if (m.__jb === 'rightClick' && cfg.rightClick !== undefined) cfg.rightClick = !!m.enabled;
   else if (m.__jb === 'checkProxy' && JB.checkProxy) JB.checkProxy();
   else if (m.__jb === 'proxyState') {
@@ -1098,7 +1139,7 @@ if (cfg.watch) {
    therefore missing on most launches - which is exactly why the entry was reported as
    absent from the right-click menu while the feature itself was in the build. */
 function ensureMenu(){
-  var props = { id: 'jb-human-paste', title: 'Paste as human (next Ctrl+V)', contexts: ['editable'] };
+  var props = { id: 'jb-human-paste', title: 'Paste as human', contexts: ['editable'] };
   try {
     chrome.contextMenus.create(props, function(){
       void chrome.runtime.lastError; /* already exists: that is the good case */
@@ -1110,7 +1151,9 @@ chrome.runtime.onInstalled.addListener(ensureMenu);
 chrome.runtime.onStartup.addListener(ensureMenu);
 chrome.contextMenus.onClicked.addListener(function(info, tab){
   if (info.menuItemId !== 'jb-human-paste' || !tab || tab.id == null) return;
-  chrome.tabs.sendMessage(tab.id, { __jb: 'armPaste' }, function(){ void chrome.runtime.lastError; });
+  /* The entry pastes straight away. It used to only arm the feature for the NEXT Ctrl+V,
+     which made the menu item a preparation step rather than the action it is named after. */
+  chrome.tabs.sendMessage(tab.id, { __jb: 'pasteNow' }, function(){ void chrome.runtime.lastError; });
 });
 chrome.action.onClicked.addListener(function(tab){
   if (tab && tab.id != null) chrome.tabs.sendMessage(tab.id, { __jb: 'armPaste' }, function(){ void chrome.runtime.lastError; });
@@ -1120,17 +1163,210 @@ chrome.runtime.onMessage.addListener(function(msg, sender, send){
 });
 ";
 
+        /// <summary>
+        /// The typing engine, in the page's own world.
+        ///
+        /// The extension used to be a bridge: it forwarded the menu button to the script
+        /// the application injects into the browsers it launches, and did nothing at all
+        /// anywhere else. The feature belongs to the extension, so the extension carries it -
+        /// and a paste is typed the way a person types it, whichever browser the page is in.
+        /// </summary>
+        private const string HumanPasteMain = @"
+/* Joe Human Paste - types the clipboard with human timing.
+   Each character goes through the same order a physical key produces: keydown, keypress,
+   beforeinput, the DOM change, input, keyup - with the real key, code, keyCode, charCode
+   and shiftKey for that character. A paste that only changes the value leaves no key events
+   behind, and a page that counts keystrokes sees characters appear from nowhere. */
+(function(){
+  if (window.__joePasteTyping) return;
+  window.__joePasteTyping = true;
+
+  /* One handler per document. The application injects the same feature into the pages of
+     the browsers it launches, and two handlers would type the text twice. The marker is on
+     the document, which both worlds share, so whichever arrives first owns the paste and the
+     other stands down. */
+  try {
+    var root = document.documentElement;
+    if (root.getAttribute('data-jb-paste')) return;
+    root.setAttribute('data-jb-paste', 'extension');
+  } catch (e) { return; }
+
+  var nativePrevent = Event.prototype.preventDefault;
+  var typing = false;
+  var MIN = 38, MAX = 135;
+
+  var SHIFTED = {'!':'1','@':'2','#':'3','$':'4','%':'5','^':'6','&':'7','*':'8','(':'9',')':'0',
+    '_':'-','+':'=','{':'[','}':']','|':'\\',':':';','<':',','>':'.','?':'/','~':'`'};
+  var PUNCT = {'`':'Backquote','-':'Minus','=':'Equal','[':'BracketLeft',']':'BracketRight',
+    '\\':'Backslash',';':'Semicolon',',':'Comma','.':'Period','/':'Slash'};
+  var VK = {'Backquote':192,'Minus':189,'Equal':187,'BracketLeft':219,'BracketRight':221,
+    'Backslash':220,'Semicolon':186,'Quote':222,'Comma':188,'Period':190,'Slash':191};
+  /* The two quote characters are built from char codes so this file needs no literal quotes. */
+  SHIFTED[String.fromCharCode(34)] = String.fromCharCode(39);
+  PUNCT[String.fromCharCode(39)] = 'Quote';
+
+  function keyInfo(ch){
+    if (ch === ' ') return { key: ' ', code: 'Space', keyCode: 32, shift: false, printable: true };
+    if (ch === '\n') return { key: 'Enter', code: 'Enter', keyCode: 13, shift: false, printable: false };
+    if (ch === '\t') return { key: 'Tab', code: 'Tab', keyCode: 9, shift: false, printable: false };
+    var cc = ch.charCodeAt(0);
+    if (cc > 126 || cc < 32) return { key: ch, code: '', keyCode: 229, shift: false, printable: true };
+    var lower = ch.toLowerCase(), upper = ch.toUpperCase();
+    if (lower >= 'a' && lower <= 'z')
+      return { key: ch, code: 'Key' + upper, keyCode: upper.charCodeAt(0), shift: ch !== lower, printable: true };
+    if (ch >= '0' && ch <= '9')
+      return { key: ch, code: 'Digit' + ch, keyCode: cc, shift: false, printable: true };
+    if (SHIFTED[ch]) {
+      var base = SHIFTED[ch];
+      var code = PUNCT[base] || ((base >= '0' && base <= '9') ? 'Digit' + base : 'Key' + base.toUpperCase());
+      return { key: ch, code: code, keyCode: VK[code] || base.charCodeAt(0), shift: true, printable: true };
+    }
+    var pc = PUNCT[ch] || '';
+    return { key: ch, code: pc, keyCode: VK[pc] || cc, shift: false, printable: true };
+  }
+
+  function makeKeyEvent(type, info, charCode){
+    var ev;
+    try {
+      ev = new KeyboardEvent(type, {
+        key: info.key, code: info.code, location: 0,
+        ctrlKey: false, shiftKey: !!info.shift, altKey: false, metaKey: false,
+        repeat: false, isComposing: false, bubbles: true, cancelable: true, composed: true
+      });
+    } catch(e) {
+      try { ev = document.createEvent('KeyboardEvent'); ev.initKeyboardEvent(type, true, true, window, info.key, 0, '', false, ''); }
+      catch(_) { ev = document.createEvent('Event'); ev.initEvent(type, true, true); }
+    }
+    var kc = info.keyCode, isPress = type === 'keypress';
+    try { Object.defineProperty(ev, 'keyCode', { get: function(){ return kc; } }); } catch(e) {}
+    try { Object.defineProperty(ev, 'charCode', { get: function(){ return isPress ? (charCode || 0) : 0; } }); } catch(e) {}
+    try { Object.defineProperty(ev, 'which', { get: function(){ return isPress ? (charCode || 0) : kc; } }); } catch(e) {}
+    return ev;
+  }
+
+  /* React and Vue install their own value tracker on the element. Assigning .value
+     directly updates the tracker first and the framework then sees no change, so the
+     paste looks fine but the state stays empty. The prototype setter is the path a real
+     keystroke follows. */
+  function setNativeValue(a, value, ch){
+    try {
+      var proto = (a.tagName === 'TEXTAREA') ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      var d = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (d && d.set) d.set.call(a, value); else a.value = value;
+    } catch(e) { try { a.value = value; } catch(_) {} }
+    try {
+      a.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: false, inputType: 'insertText', data: ch }));
+    } catch(e) {
+      try { a.dispatchEvent(new Event('input', { bubbles: true })); } catch(e2) {}
+    }
+  }
+
+  function typeTarget(){
+    var a = document.activeElement;
+    if (a && a !== document.body && a !== document.documentElement) return a;
+    try {
+      var sel = window.getSelection();
+      if (sel && sel.anchorNode) {
+        var n = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+        if (n) return n;
+      }
+    } catch(e) {}
+    return a || document.body;
+  }
+
+  function insertAt(target, ch){
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+      var s = target.selectionStart == null ? target.value.length : target.selectionStart;
+      var e = target.selectionEnd == null ? s : target.selectionEnd;
+      setNativeValue(target, target.value.substring(0, s) + ch + target.value.substring(e), ch);
+      try { target.setSelectionRange(s + 1, s + 1); } catch(_) {}
+      return;
+    }
+    try { if (document.execCommand) document.execCommand('insertText', false, ch); } catch(e) {}
+  }
+
+  function typeChar(target, ch){
+    var info = keyInfo(ch);
+    var allowed = target.dispatchEvent(makeKeyEvent('keydown', info, 0));
+    if (allowed && info.printable) target.dispatchEvent(makeKeyEvent('keypress', info, ch.charCodeAt(0)));
+    if (allowed) {
+      try { target.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: ch })); }
+      catch(e) {}
+      insertAt(target, ch);
+    }
+    target.dispatchEvent(makeKeyEvent('keyup', info, 0));
+  }
+
+  function wait(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+
+  async function humanType(text){
+    if (typing) return;
+    typing = true;
+    try {
+      if (!text) return;
+      if (text.length > 20000) text = text.substring(0, 20000);
+      var lastWasSpace = false;
+      for (var i = 0; i < text.length; i++) {
+        var ch = text.charAt(i);
+        typeChar(typeTarget(), ch);
+        var pause = 0;
+        if (ch === ' ' || ch === '\n' || ch === '.' || ch === ',' || ch === '!' || ch === '?') {
+          if (!lastWasSpace && Math.random() < 0.28) pause = 130 + Math.random() * 320;
+          lastWasSpace = true;
+        } else { lastWasSpace = false; }
+        if (Math.random() < 0.012) pause += 180 + Math.random() * 380;
+        var ms = MIN + Math.random() * (MAX - MIN) + pause;
+        if (ms > 2) await wait(ms);
+      }
+    } finally { typing = false; }
+  }
+
+  /* Every paste into a page is typed in with human timing. The plain paste is replaced,
+     not added to: the browser's own paste is cancelled first, so the text arrives once. */
+  document.addEventListener('paste', function(e){
+    if (typing) return;
+    var clip = (e.clipboardData || window.clipboardData);
+    var text = clip ? clip.getData('text/plain') : '';
+    if (!text) return;
+    try { nativePrevent.call(e); } catch(x) {}
+    try { e.stopPropagation(); } catch(x) {}
+    humanType(text);
+  }, true);
+
+  /* The extension asks for a paste of its own - the menu entry - and hands the text over. */
+  window.addEventListener('message', function(e){
+    if (!e || !e.data) return;
+    if (e.data.__jb === 'pasteText' && e.data.text) humanType(e.data.text);
+  });
+})();
+";
+
         private const string HumanPasteContent = @"
-/* Pure message bridge. Content scripts live in an isolated world, so this file never
+/* Message bridge. Content scripts live in an isolated world, so this file never
    installs a paste handler of its own: the first-party CDP runtime in the main world
    owns the typing and there is exactly one handler per document. The mark tells the main
    world the extension's own context-menu entry is present, so the fallback menu that
-   appears when the extension is NOT loaded stays out of the way when it is. */
+   appears when the extension is NOT loaded stays out of the way when it is.
+
+   It does one thing of its own: it reads the clipboard when the menu entry asks for a
+   paste right now, because only an extension can read the clipboard without the page
+   having to be trusted first. The text is handed to the runtime, which types it. */
 (function(){
   try { document.documentElement.setAttribute('data-jb-human-paste', '1'); } catch(e) {}
   if (!chrome.runtime || !chrome.runtime.onMessage) return;
+  function pasteNow(){
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.readText) return;
+      navigator.clipboard.readText().then(function(text){
+        if (!text) return;
+        window.postMessage({ __jb: 'pasteText', text: text }, '*');
+      }, function(){ /* the clipboard was not readable: the plain paste still works */ });
+    } catch(e){}
+  }
   chrome.runtime.onMessage.addListener(function(m){
-    if (m && m.__jb === 'armPaste') window.postMessage({ __jb: 'armPaste' }, '*');
+    if (!m) return;
+    if (m.__jb === 'armPaste') window.postMessage({ __jb: 'armPaste' }, '*');
+    else if (m.__jb === 'pasteNow') pasteNow();
   });
 })();
 ";
@@ -1393,8 +1629,14 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
   } catch(e) {}
 
   /* The panel. One card, drawn by the page, listing what was requested and what is a
-     tracker. */
+     tracker.
+
+     There is also a small badge, always on the page, that counts what has been requested
+     and opens the panel when it is clicked. The panel used to open only from the toolbar
+     button, and a toolbar button nobody can find is the same as an extension that is not
+     there - which is how the tracker was reported as missing. */
   var panel = null;
+  var badge = null;
   function build(){
     if (panel) return;
     panel = document.createElement('div');
@@ -1423,16 +1665,33 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
     panel.appendChild(list);
     (document.body || document.documentElement).appendChild(panel);
     close.addEventListener('click', function(){ hide(); });
+
+    badge = document.createElement('div');
+    badge.id = 'joe-tracker-badge';
+    badge.style.cssText = 'position:fixed;z-index:2147483646;left:16px;bottom:16px;display:flex;' +
+      'align-items:center;gap:6px;padding:5px 10px;border-radius:999px;cursor:pointer;' +
+      'background:#12141a;color:#eef1f6;border:1px solid #333a46;' +
+      'box-shadow:0 6px 18px rgba(0,0,0,.35);font:12px/1.2 ""Segoe UI"",Arial,sans-serif;' +
+      'opacity:.82;transition:opacity .15s ease;';
+    badge.addEventListener('mouseenter', function(){ badge.style.opacity = '1'; });
+    badge.addEventListener('mouseleave', function(){ badge.style.opacity = '.82'; });
+    badge.addEventListener('click', function(){ show(); });
+    (document.body || document.documentElement).appendChild(badge);
   }
   function hide(){ if (panel) panel.style.display = 'none'; }
   function show(){ build(); panel.style.display = 'block'; update(); }
   function toggle(){ if (panel && panel.style.display !== 'none') hide(); else show(); }
 
   function update(){
-    if (!panel || panel.style.display === 'none') return;
-    var count = panel.querySelector('#joe-tracker-count');
     var trackers = 0;
     for (var i = 0; i < seen.length; i++) if (seen[i].tracker) trackers++;
+    if (badge) {
+      badge.textContent = seen.length + ' request' + (seen.length === 1 ? '' : 's') +
+        (trackers ? '  \u00b7  ' + trackers + ' tracker' + (trackers === 1 ? '' : 's') : '');
+      badge.style.color = trackers ? '#ffb37a' : '#eef1f6';
+    }
+    if (!panel || panel.style.display === 'none') return;
+    var count = panel.querySelector('#joe-tracker-count');
     if (count) count.textContent = seen.length + ' request' + (seen.length === 1 ? '' : 's') +
       (trackers ? '  \u00b7  ' + trackers + ' tracker' + (trackers === 1 ? '' : 's') : '');
     var list = panel.querySelector('#joe-tracker-list');
@@ -1463,9 +1722,13 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
   });
   chrome.storage.local.get(['enabled']).then(function(st){
     if (st.enabled === false) return;
-    /* The panel opens on demand, from the toolbar button. */
+    /* The badge is on the page from the first moment, and the panel opens from it. */
+    try { build(); update(); } catch(e){}
     window.addEventListener('joe-tracker-open', show);
   });
+  try {
+    window.addEventListener('load', function(){ try { build(); update(); } catch(e){} });
+  } catch(e){}
 })();
 ";
 
@@ -1496,13 +1759,79 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
 ";
 
         private const string RightClickContent = @"
-/* Bridge: forwards toolbar toggles to the main-world runtime, which owns the single
-   contextmenu listener for the document. */
+/* Absolute Enable Right Click and Copy.
+   Many sites install handlers that cancel contextmenu, copy and selectstart, which makes
+   copying impossible. This puts the native menu and the clipboard back: the trusted
+   events never reach the page's own handlers, the inline blockers are stripped, and the
+   selection lock is lifted.
+
+   It is self contained. The earlier version was only a bridge that forwarded the toolbar
+   button to the script the application injects, so the extension did nothing at all
+   unless that script was running - which is why the shipped extension looked like it had
+   never been added. */
 (function(){
-  if (!chrome.runtime || !chrome.runtime.onMessage) return;
-  chrome.runtime.onMessage.addListener(function(m){
-    if (m && m.__jb === 'rightClick') window.postMessage(m, '*');
-  });
+  if (window.__joeAbsoluteRightClick) return;
+  window.__joeAbsoluteRightClick = true;
+
+  var ATTRS = ['oncontextmenu','onselectstart','ondragstart','oncopy','oncut','onmousedown','onmouseup'];
+
+  /* The selection lock is CSS, and CSS is cheaper to defeat than events. It is added once:
+     a second copy would be a second <style> on every page, and a page that watches its
+     own DOM would see the app changing the page it was told not to change. */
+  function unlockSelection(){
+    try {
+      if (document.querySelector('style[data-joe-selection]')) return;
+      var st = document.createElement('style');
+      st.setAttribute('data-joe-selection', '1');
+      st.textContent = 'html,body,body *{-webkit-user-select:text!important;-moz-user-select:text!important' +
+                       ';-ms-user-select:text!important;user-select:text!important}';
+      (document.head || document.documentElement).appendChild(st);
+    } catch(e){}
+  }
+
+  /* A page that cancels a trusted event is stopped before its handler runs. The window is
+     the first stop in the capture phase, so a handler registered on the window - the ones
+     that actually defeat a document level guard - never sees the event. */
+  try {
+    window.addEventListener('contextmenu', function(e){ if (e.isTrusted) e.stopImmediatePropagation(); }, true);
+    window.addEventListener('copy', function(e){ if (e.isTrusted) e.stopImmediatePropagation(); }, true);
+    window.addEventListener('cut', function(e){ if (e.isTrusted) e.stopImmediatePropagation(); }, true);
+    window.addEventListener('selectstart', function(e){ if (e.isTrusted) e.stopImmediatePropagation(); }, true);
+    window.addEventListener('dragstart', function(e){ if (e.isTrusted) e.stopImmediatePropagation(); }, true);
+  } catch(e){}
+
+  /* The inline blockers are removed from the document as it arrives. A site that puts
+     them back is watched for a moment: the observer is throttled and only the attribute
+     handlers are taken out, so the page keeps its own layout. */
+  function strip(root){
+    try {
+      if (!root) return;
+      if (root.removeAttribute) for (var i = 0; i < ATTRS.length; i++) root.removeAttribute(ATTRS[i]);
+      root.oncontextmenu = null; root.onselectstart = null; root.ondragstart = null;
+      root.oncopy = null; root.oncut = null;
+      if (root.querySelectorAll) {
+        var els = root.querySelectorAll('[oncontextmenu],[onselectstart],[ondragstart],[oncopy],[oncut]');
+        for (var j = 0; j < els.length; j++)
+          for (var k = 0; k < ATTRS.length; k++) els[j].removeAttribute(ATTRS[k]);
+      }
+    } catch(e){}
+  }
+  function stripAll(){
+    strip(document.documentElement);
+    strip(document.body);
+    unlockSelection();
+  }
+  stripAll();
+  document.addEventListener('DOMContentLoaded', stripAll, { once: true });
+  try {
+    var pending = 0;
+    var mo = new MutationObserver(function(){
+      if (pending) return;
+      pending = setTimeout(function(){ pending = 0; stripAll(); }, 400);
+    });
+    if (document.documentElement)
+      mo.observe(document.documentElement, { childList: true, subtree: true });
+  } catch(e){}
 })();
 ";
     }

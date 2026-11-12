@@ -186,16 +186,39 @@ jobs:
 
             ### In this build
 
-            **The portable build travels with its configuration.** `JoeBrowser.exe.config`
-            was never attached to a release, so a portable copy that was downloaded on its
-            own failed the application's own check and lost the per monitor scaling that
-            file carries. The configuration is now an asset of every release and is listed
-            in `SHA256.txt`. The installer has always placed it correctly.
+            **Opening a profile's menu no longer takes the window down.** The menu was given
+            a rounded window region, and a region is built in logical pixels and converted
+            with the control's own graphics - on a screen that is not at 100% the two do not
+            agree, and the conversion throws "Parameter is not valid". The first profile menu
+            opened on a scaled display closed the application.
 
-            **A missing configuration is not a broken build.** The self test reads a value
-            out of the configuration to force the runtime to parse it - a file that cannot
-            be parsed must fail. A file that is simply not there is a portable EXE on its
-            own, and that is what the check now says.
+            **Paste as human is the extension's job, and it works on its own.** It used to be
+            a bridge: the extension forwarded its menu entry to the script the application
+            injects, so in any browser the application did not launch it did nothing at all.
+            The extension now carries the typing engine, and it replaces the plain paste -
+            Ctrl+V types the text with human timing instead of dropping it in at once. Where
+            the application also injects the feature, the two share a marker on the document
+            so the text is typed once, not twice.
+
+            **"Absolute Enable Right Click and Copy" does the work itself.** It restores the
+            context menu, the copy and the selection by itself, and "HTTP Tracker Plus" has a
+            badge on the page that counts the requests and the trackers.
+
+            **The proxy alerts follow the proxy.** A profile created without a proxy had the
+            watch switched off, and adding a proxy later left it off - so the rotation and
+            offline alerts never fired on exactly the profiles they matter for. Choosing a
+            proxy turns the watch on, and the application announces a rotation, a proxy that
+            stopped answering and a proxy that came back.
+
+            **The window is not scaled twice.** The application scales every measurement
+            itself, and WinForms was scaling the controls as well. On a screen that is not at
+            100% every size was doubled, and the interface looked broken rather than scaled.
+
+            **Less, and quicker.** A new profile asks for four things - name, browser, browser
+            build and group - and the rest is one click away. The profile menu went from nine
+            entries to six, and the Tools page keeps two switches. The toast is as wide as its
+            message, the switch is a switch, and the theme change takes a quarter of the time
+            it did.
 
             **The About page stops shaking.** The page measured its own height while it
             painted, and the scroll host put it straight back to the height of the window, so

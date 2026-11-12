@@ -292,6 +292,18 @@ namespace JoeBrowser
             LayoutAll();
         }
 
+        /// <summary>
+        /// The window moved to a screen with a different scale. The fonts have been rebuilt at
+        /// the new size; everything that is measured has to be measured again.
+        /// </summary>
+        protected override void OnDpiChanged()
+        {
+            base.OnDpiChanged();
+            MinimumSize = new Size(Ui.S(Theme.NavbarWidth + ProfileCard.CardMinW + 64), Ui.S(680));
+            LayoutAll();
+            Invalidate(true);
+        }
+
         public override Color SurfaceAt(Point clientLocation)
         {
             return clientLocation.X < Ui.S(SidebarW) ? Theme.Sidebar : BackColor;
@@ -376,7 +388,10 @@ namespace JoeBrowser
             _newBtn = new JBButton { Kind = BtnKind.Primary, Icon = "plus", Text = L10n.T("btn.new"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _newBtn.Click += delegate { NewProfile(); };
 
-            _sortBtn = new JBButton { Text = "Sort: recent", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = "Change the order of the list" };
+            /* A bordered button with an icon, not a line of text. It sits next to the primary
+               action and it does something, so it has to look like a control: as plain text it
+               read as a label that happened to be clickable. */
+            _sortBtn = new JBButton { Kind = BtnKind.Soft, Icon = "sort", Text = "Sort: recent", Radius = Theme.ButtonRadius, Height = Theme.Field, Tip = "Change the order of the list" };
             _sortBtn.Click += delegate { CycleSort(); };
 
             _bulk = new JBPanel { Visible = false };
@@ -2261,6 +2276,16 @@ namespace JoeBrowser
             int toolbarY = (headerBase - Ui.S(34)) / 2 - Ui.S(4);
             int newW = Math.Min(Ui.S(148), Math.Max(Ui.S(96), _newBtn.PreferredWidth(Ui.S(124))));
             bool profilesPage = _page == 0;
+
+            /* Where the header's controls are before and after this layout. A control that
+               moves or is hidden does not ask the window to paint over the place it was, so
+               its pixels stay on the screen until something else covers them - which is how a
+               button from the page before last ends up sitting in the header of the page
+               after it. The region is invalidated once the new bounds are known. */
+            var dirty = Rectangle.Empty;
+            foreach (Control c in new Control[] { _search, _sortBtn, _newBtn, _saveSettings })
+                if (c != null && c.Visible) dirty = Rectangle.Union(dirty, c.Bounds);
+
             _newBtn.Visible = profilesPage;
             _sortBtn.Visible = profilesPage;
             _search.Visible = profilesPage;
@@ -2315,6 +2340,11 @@ namespace JoeBrowser
                 if (!twoRows) _toolbarReserve = Math.Max(Ui.S(200), saveW + Ui.S(40));
                 else _toolbarReserve = 0;
             }
+
+            /* The header is painted again over everything it used to hold. */
+            foreach (Control c in new Control[] { _search, _sortBtn, _newBtn, _saveSettings })
+                if (c != null && c.Visible) dirty = Rectangle.Union(dirty, c.Bounds);
+            if (!dirty.IsEmpty) Invalidate(dirty);
 
             int contentX = sb;
             int contentW = Math.Max(Ui.S(200), w - sb);
@@ -2379,9 +2409,10 @@ namespace JoeBrowser
             LayoutAbout();
 
             /* A wide toast wraps into fewer lines, which is why the cap moved from 560 to 760
-               now that a message is allowed to be five lines tall. */
-            int tw = Math.Min(Ui.S(760), Math.Max(Ui.S(240), contentW - Ui.S(64)));
-            _toast.Place(contentX + (contentW - tw) / 2, h - Ui.S(16), tw);
+               now that a message is allowed to be five lines tall. The bar is as wide as its
+               message, so all this sets is how wide it may become. */
+            int tw = Math.Min(Ui.S(560), Math.Max(Ui.S(240), contentW - Ui.S(64)));
+            _toast.Place(contentX + contentW / 2, h - Ui.S(16), tw);
 
             ResumeLayout(false);
             Invalidate();
@@ -3742,6 +3773,34 @@ namespace JoeBrowser
                     }
                     catch { }
                 };
+                /* The proxy stopped answering. Two checks in a row failed, so this is not a
+                   hiccup - and the message says what to do about it. */
+                session.ProxyLost += delegate(string endpoint)
+                {
+                    if (IsDisposed) return;
+                    try
+                    {
+                        BeginInvoke(new Action(delegate
+                        {
+                            TrayAlert("The proxy for \u201c" + p.Name + "\u201d is not answering. " +
+                                  "Check it before you sign in.", ToastKind.Error);
+                        }));
+                    }
+                    catch { }
+                };
+                /* And it answered again. */
+                session.ProxyBack += delegate(string ip)
+                {
+                    if (IsDisposed) return;
+                    try
+                    {
+                        BeginInvoke(new Action(delegate
+                        {
+                            TrayAlert("The proxy for \u201c" + p.Name + "\u201d is answering again.", ToastKind.Success);
+                        }));
+                    }
+                    catch { }
+                };
                 _store.Touch(p);
                 if (_cards.ContainsKey(id))
                 {
@@ -3975,9 +4034,22 @@ namespace JoeBrowser
             try
             {
                 _toast.Show(message, kind);
+                /* The bar is as wide as its message, so it is centred again after it has
+                   measured itself - otherwise a short message sits off to the left. */
+                CentreToast();
                 Restack();
             }
             catch { }
+        }
+
+        /// <summary>Puts the toast in the middle of the content area, under the header.</summary>
+        private void CentreToast()
+        {
+            if (_toast == null) return;
+            int sb = Ui.S(SidebarW);
+            int contentW = Math.Max(Ui.S(200), ClientSize.Width - sb);
+            int maxW = Math.Min(Ui.S(560), Math.Max(Ui.S(220), contentW - Ui.S(64)));
+            _toast.Place(sb + contentW / 2, ClientSize.Height - Ui.S(16), maxW);
         }
 
         /// <summary>

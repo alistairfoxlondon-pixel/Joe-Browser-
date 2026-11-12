@@ -47,9 +47,7 @@ namespace JoeBrowser
         private JBLangPicker _lang;
         private JBToggle _canvas, _audio, _fonts, _dnt, _battery, _autoMatch, _autoUa;
         private JBButton _regen, _browse, _testBtn, _save, _cancel, _getBrowser, _openExtFolder, _random;
-        private JBToggle _toolHumanPaste, _toolProxyWatch, _toolRightClick, _toolAllowShift;
-        /// <summary>Wipe cookies and site data when this profile's browser closes.</summary>
-        private JBToggle _freshSession;
+        private JBToggle _toolHumanPaste, _toolProxyWatch;
         /* One line under the switches that says how to use the two tools a user cannot find by
            clicking around: the paste that waits in the clipboard, and the menu that a page had
            taken away. It is a label rather than a paragraph, and it changes with the switches. */
@@ -71,6 +69,13 @@ namespace JoeBrowser
         private JBLabel _lblUa, _lblWebrtc, _lblGeo, _lblLat, _lblLng;
         private JBLabel _lblType, _lblHost, _lblPort, _lblUser, _lblPass, _lblSaved;
         private JBLabel _lblExt, _lblSpeed, _lblInterval, _lblCustomExt, _lblExtHint;
+
+        /// <summary>The disclosure that holds the fields a profile is created without.</summary>
+        private JBLink _moreBtn;
+        private bool _moreOptions;
+
+        /// <summary>True once the user has moved the proxy watch switch by hand.</summary>
+        private bool _watchTouched;
 
         public EditorForm(Profile profile, bool isNew, AppSettings settings, int initialTab = 0)
             : this(profile, isNew, settings, initialTab, null) { }
@@ -268,7 +273,7 @@ namespace JoeBrowser
 
         private void BuildGeneral()
         {
-            _lblName = Lbl(_tabGeneral, "PROFILE NAME");
+            _lblName = Lbl(_tabGeneral, "NAME");
             _name = Txt(_tabGeneral, _profile.Name, "Name this profile", "user", false, 40);
 
             _lblStart = Lbl(_tabGeneral, "START PAGE");
@@ -281,21 +286,40 @@ namespace JoeBrowser
             BuildBrowserOptions();
             _browserKind.SetBounds(0, 0, Ui.S(210), Ui.S(Theme.ControlHeight));
 
-            _lblPath = Lbl(_tabGeneral, "CUSTOM PATH (OPTIONAL)");
+            _lblPath = Lbl(_tabGeneral, "CUSTOM PATH");
             _browserPath = Txt(_tabGeneral, _profile.BrowserKind == "custom" ? _profile.BrowserPath : "",
                 "Leave empty for automatic", "folder", false, 40);
             _browse = new JBButton { Kind = BtnKind.Soft, Text = "Browse" };
             _browse.Click += delegate { BrowseBrowser(); };
             _tabGeneral.Controls.Add(_browse);
 
-            _lblGroup = Lbl(_tabGeneral, "GROUP / FOLDER");            _group = Txt(_tabGeneral, _profile.Group, "e.g. Clients / EU store", "folder", false, 40);
-            _lblTags = Lbl(_tabGeneral, "TAGS (COMMA SEPARATED)");
+            _lblGroup = Lbl(_tabGeneral, "GROUP");            _group = Txt(_tabGeneral, _profile.Group, "e.g. Clients / EU store", "folder", false, 40);
+            _lblTags = Lbl(_tabGeneral, "TAGS");
             _tags = Txt(_tabGeneral, _profile.Tags, "work, ads, verified", "flag", false, 40);
             _lblStatus = Lbl(_tabGeneral, "STATUS");
             _status = Txt(_tabGeneral, _profile.Status, "Account status or owner", "info", false, 40);
 
             _lblNotes = Lbl(_tabGeneral, "NOTES");
             _notes = Txt(_tabGeneral, _profile.Notes, "Notes", null, true, 64);
+
+            /* The fields below are the ones a profile is created without and added later, if
+               ever: a custom browser path, tags, a status line and a note. They were on the
+               form from the start, in the same weight as the name, and a new profile is a
+               name and a browser - not eight fields to read before anything can be typed.
+               They are one click away and hidden until they are asked for. */
+            _moreOptions = _profile.BrowserKind == "custom" ||
+                !string.IsNullOrEmpty(_profile.Tags) || !string.IsNullOrEmpty(_profile.Status) ||
+                !string.IsNullOrEmpty(_profile.Notes) || !string.IsNullOrEmpty(_profile.BrowserPath);
+            _moreBtn = new JBLink { Text = _moreOptions ? "Fewer options" : "More options" };
+            _moreBtn.Click += delegate
+            {
+                _moreOptions = !_moreOptions;
+                _moreBtn.Text = _moreOptions ? "Fewer options" : "More options";
+                ApplyMoreOptions();
+                LayoutAll();
+            };
+            _tabGeneral.Controls.Add(_moreBtn);
+            ApplyMoreOptions();
 
             _browserNote = new JBLabel(LabelRole.Faint, "");
             _browserNote.TextAlign = ContentAlignment.MiddleLeft;
@@ -322,7 +346,7 @@ namespace JoeBrowser
 
             /* Pinned build. Empty means "whatever is installed"; a pinned build keeps the
                profile on one exact version even after the everyday browser updates. */
-            _lblKernel = Lbl(_tabGeneral, "ENGINE BUILD");
+            _lblKernel = Lbl(_tabGeneral, "BROWSER BUILD");
             _kernel = Pick(_tabGeneral, "layers");
             BuildKernelOptions();
             _kernel.SelectedIndexChanged += delegate
@@ -376,6 +400,29 @@ namespace JoeBrowser
             _group.EnterPressed += OnEnterKey;
             _tags.EnterPressed += OnEnterKey;
             _status.EnterPressed += OnEnterKey;
+        }
+
+        /// <summary>
+        /// Shows or hides the fields a profile is created without.
+        ///
+        /// The visibility is set here and not read from the controls: a tab that is not the
+        /// current one reports every child as invisible, so the layout has to decide from
+        /// this flag rather than from what the controls say.
+        /// </summary>
+        private void ApplyMoreOptions()
+        {
+            bool on = _moreOptions;
+            if (_lblPath != null) _lblPath.Visible = on;
+            if (_browserPath != null) _browserPath.Visible = on;
+            if (_browse != null) _browse.Visible = on;
+            if (_lblStart != null) _lblStart.Visible = on;
+            if (_startUrl != null) _startUrl.Visible = on;
+            if (_lblTags != null) _lblTags.Visible = on;
+            if (_tags != null) _tags.Visible = on;
+            if (_lblStatus != null) _lblStatus.Visible = on;
+            if (_status != null) _status.Visible = on;
+            if (_lblNotes != null) _lblNotes.Visible = on;
+            if (_notes != null) _notes.Visible = on;
         }
 
         private void OnEnterKey(object sender, KeyEventArgs e)
@@ -912,6 +959,21 @@ namespace JoeBrowser
             else if (_proxy.Type == "https") type = 2;
             else if (_proxy.Type == "socks5") type = 3;
             _proxySeg.SelectedIndex = type;
+            /* Choosing a proxy turns the watch on, and says so on the switch itself: a
+               switch that is off while the feature it controls is impossible to reach is
+               the switch the user learns to ignore. */
+            _proxySeg.SelectedIndexChanged += delegate
+            {
+                if (_suppress) return;
+                if (ProxyTypeFromUi() != "none" && !_watchTouched && _toolProxyWatch != null)
+                {
+                    _suppress = true;
+                    _toolProxyWatch.Checked = true;
+                    _suppress = false;
+                }
+                UpdateToolHow();
+                LayoutAll();
+            };
 
             _host.EnterPressed += OnEnterKey;
             _port.EnterPressed += OnEnterKey;
@@ -934,19 +996,23 @@ namespace JoeBrowser
         };
 
         /// <summary>
-        /// The three original Joe Browser tools plus a place to add unpacked extensions the
-        /// user built. Every switch is per profile, so one identity can be strict and another lax.
+        /// The tools that are part of the application, and a place to add unpacked extensions
+        /// the user built. Every switch is per profile, so one identity can be strict and
+        /// another lax.
+        ///
+        /// The list is deliberately short. "Enable right click & copy" and "unlock text
+        /// selection" were here as switches, but both are what the shipped extension does on
+        /// every profile already - a switch for a thing that is always on is a switch that
+        /// only teaches the user that the app has more switches than it needs. The same goes
+        /// for the fresh-session option, which is not a tool but a per profile decision that
+        /// belongs with the profile itself.
         /// </summary>
         private void BuildTools()
         {
-            _lblExt = Lbl(_tabTools, "BUILT-IN APP TOOLS");
+            _lblExt = Lbl(_tabTools, "BUILT-IN TOOLS");
 
             _toolHumanPaste = new JBToggle { Text = "Paste as human", Checked = _tools.HumanPaste };
             _toolProxyWatch = new JBToggle { Text = "Proxy IP change & offline alerts", Checked = _tools.ProxyWatch };
-            _toolRightClick = new JBToggle { Text = "Enable right click & copy", Checked = _tools.EnableRightClick };
-            _toolAllowShift = new JBToggle { Text = "Also unlock text selection", Checked = _tools.UnlockSelection };
-            _freshSession = new JBToggle { Text = "Clear cookies and site data when the browser closes", Checked = _profile.FreshSession };
-            _tabTools.Controls.Add(_freshSession);
 
             _toolHow = new JBLabel(LabelRole.Faint, "");
             _toolHow.Wrap = true;
@@ -954,8 +1020,6 @@ namespace JoeBrowser
             _tabTools.Controls.Add(_toolHow);
             _tabTools.Controls.Add(_toolHumanPaste);
             _tabTools.Controls.Add(_toolProxyWatch);
-            _tabTools.Controls.Add(_toolRightClick);
-            _tabTools.Controls.Add(_toolAllowShift);
 
             _lblSpeed = Lbl(_tabTools, "TYPING SPEED");
             _toolSpeed = Pick(_tabTools, "speed");
@@ -989,16 +1053,8 @@ namespace JoeBrowser
             };
             _tabTools.Controls.Add(_openExtFolder);
 
-            _toolAllowShift.Visible = _tools.EnableRightClick;
-            _toolRightClick.CheckedChanged += delegate
-            {
-                _toolAllowShift.Visible = _toolRightClick.Checked;
-                UpdateToolHow();
-                LayoutAll();
-            };
             _toolHumanPaste.CheckedChanged += delegate { UpdateToolHow(); LayoutAll(); };
-            _freshSession.CheckedChanged += delegate { UpdateToolHow(); LayoutAll(); };
-            _toolProxyWatch.CheckedChanged += delegate { UpdateToolHow(); LayoutAll(); };
+            _toolProxyWatch.CheckedChanged += delegate { _watchTouched = true; UpdateToolHow(); LayoutAll(); };
             UpdateToolHow();
         }
 
@@ -1013,13 +1069,9 @@ namespace JoeBrowser
             if (_toolHow == null) return;
             var lines = new List<string>();
             if (_toolHumanPaste.Checked)
-                lines.Add("Paste as human: types the clipboard with human timing.");
-            if (_toolRightClick.Checked)
-                lines.Add("Right click & copy: restores copy and selection on sites that block them.");
+                lines.Add("Paste as human: every paste is typed with human timing.");
             if (_toolProxyWatch.Checked)
                 lines.Add("IP change & offline alerts: alerts when the exit IP changes or the proxy dies.");
-            if (_freshSession != null && _freshSession.Checked)
-                lines.Add("Fresh session: cookies and cache are deleted when the browser closes.");
             _toolHow.Text = string.Join("\r\n", lines.ToArray());
             _toolHow.Visible = lines.Count > 0;
         }
@@ -1336,11 +1388,8 @@ namespace JoeBrowser
             _lblName.SetBounds(0, y, cw, lh); y += lh + lg;
             _name.SetBounds(0, y, cw, fh); y += fh + rg;
 
-            _lblStart.SetBounds(0, y, cw, lh); y += lh + lg;
-            _startUrl.SetBounds(0, y, cw, fh); y += fh + rg;
-
             bool wide = cw >= Ui.S(540);
-            if (wide)
+            if (wide && _moreOptions)
             {
                 /* The picker is measured, not guessed: "Chromium (built-in)" has to fit with
                    the arrow beside it, and a fixed width cut the name in half. */
@@ -1354,15 +1403,27 @@ namespace JoeBrowser
                 _browse.SetBounds(cw - browseW, y, browseW, fh);
                 y += fh;
             }
+            else if (wide)
+            {
+                /* The custom path is hidden, so the browser picker gets the whole row and the
+                   Browse button - which exists only to find that path - goes with it. */
+                _lblKind.SetBounds(0, y, cw, lh);
+                y += lh + lg;
+                _browserKind.SetBounds(0, y, cw, fh);
+                y += fh;
+            }
             else
             {
                 _lblKind.SetBounds(0, y, cw, lh); y += lh + lg;
                 _browserKind.SetBounds(0, y, cw, fh); y += fh + Ui.S(12);
-                _lblPath.SetBounds(0, y, cw, lh); y += lh + lg;
-                int pathW = cw - browseW - Ui.S(8);
-                _browserPath.SetBounds(0, y, pathW, fh);
-                _browse.SetBounds(cw - browseW, y, browseW, fh);
-                y += fh;
+                if (_moreOptions)
+                {
+                    _lblPath.SetBounds(0, y, cw, lh); y += lh + lg;
+                    int pathW = cw - browseW - Ui.S(8);
+                    _browserPath.SetBounds(0, y, pathW, fh);
+                    _browse.SetBounds(cw - browseW, y, browseW, fh);
+                    y += fh;
+                }
             }
             y += rg;
 
@@ -1390,14 +1451,41 @@ namespace JoeBrowser
                 y += Ui.S(34) + Ui.S(6);
             }
 
-            y = Row(_lblGroup, _group, _lblTags, _tags, y, cw, wide, lh, lg, rg, Ui.S(12), fh, fh);
-            _lblStatus.SetBounds(0, y, cw, lh); y += lh + lg;
-            _status.SetBounds(0, y, cw, fh); y += fh + rg;
+            if (_moreOptions)
+                y = Row(_lblGroup, _group, _lblTags, _tags, y, cw, wide, lh, lg, rg, Ui.S(12), fh, fh);
+            else
+            {
+                /* The tags field is hidden, so the group gets the whole row instead of half
+                   of it: a field that ends at the middle of the form looks broken. */
+                _lblGroup.SetBounds(0, y, cw, lh); y += lh + lg;
+                _group.SetBounds(0, y, cw, fh); y += fh + rg;
+            }
+            if (_moreOptions)
+            {
+                /* The start page sits with the other fields a profile is created without. It
+                   has a good default - the fingerprint test page - and a user who wants a
+                   different one asks for it. */
+                _lblStart.SetBounds(0, y, cw, lh); y += lh + lg;
+                _startUrl.SetBounds(0, y, cw, fh); y += fh + rg;
 
-            _lblNotes.SetBounds(0, y, cw, lh); y += lh + lg;
-            _notes.SetBounds(0, y, cw, Ui.S(72));
+                _lblStatus.SetBounds(0, y, cw, lh); y += lh + lg;
+                _status.SetBounds(0, y, cw, fh); y += fh + rg;
 
-            FinishPage(page, host, cw, y + Ui.S(72));
+                _lblNotes.SetBounds(0, y, cw, lh); y += lh + lg;
+                _notes.SetBounds(0, y, cw, Ui.S(72));
+                y += Ui.S(72);
+            }
+
+            /* The disclosure is the last thing on the page: everything above it is what a
+               profile needs, and everything below it is what a profile might need. */
+            if (_moreBtn != null)
+            {
+                y += Ui.S(6);
+                _moreBtn.SetBounds(0, y, cw, Ui.S(24));
+                y += Ui.S(24);
+            }
+
+            FinishPage(page, host, cw, y);
         }
 
         /// <summary>A labelled row that pairs two fields side by side, or stacks them when narrow.</summary>
@@ -1550,27 +1638,18 @@ namespace JoeBrowser
             int cols = two ? 2 : 1;
             int gap = Ui.S(10), th = Ui.S(28);
             int colW = two ? (cw - gap) / 2 : cw;
-            Control[] toggles = { _toolHumanPaste, _toolProxyWatch, _toolRightClick, _toolAllowShift };
+            Control[] toggles = { _toolHumanPaste, _toolProxyWatch };
             int placed = 0;
             foreach (Control t in toggles)
             {
                 /* Do not test Control.Visible here. OnLoad lays out the editor after
                    SwitchTab has hidden every tab except General, and WinForms reports a
-                   child as invisible whenever its parent is hidden. That made all four
-                   toggles keep their default (0,0) bounds and paint over the section
-                   label. Only the Shift override is intentionally hidden. */
-                if (t == _toolAllowShift && !_toolRightClick.Checked) continue;
+                   child as invisible whenever its parent is hidden. That made the toggles
+                   keep their default (0,0) bounds and paint over the section label. */
                 t.SetBounds((placed % cols) * (colW + gap), y + (placed / cols) * (th + Ui.S(6)), colW, th);
                 placed++;
             }
             y += ((placed + cols - 1) / cols) * (th + Ui.S(6)) + Ui.S(2);
-
-            if (_freshSession != null)
-            {
-                _freshSession.SetBounds(0, y, cw, th);
-                _freshSession.Visible = true;
-                y += th + Ui.S(8);
-            }
 
             if (_toolHow != null && _toolHow.Visible)
             {
@@ -1834,14 +1913,20 @@ namespace JoeBrowser
             _tools.HumanPaste = _toolHumanPaste.Checked;
             int si = _toolSpeed.SelectedIndex;
             _tools.HumanPasteSpeed = SpeedKeys[si < 0 || si >= SpeedKeys.Length ? 1 : si];
-            _tools.ProxyWatch = _toolProxyWatch.Checked;
+            /* The proxy watch follows the proxy. A profile that was created without a proxy
+               had the watch switched off, and adding a proxy later left it off - so the
+               alerts the user asked for never fired on exactly the profiles they matter for.
+               A proxy turns the watch on, unless the user has turned it off by hand in
+               this same visit. */
+            _tools.ProxyWatch = _proxy.Enabled && !_watchTouched ? true : _toolProxyWatch.Checked;
             int ii = _toolInterval.SelectedIndex;
             _tools.ProxyWatchInterval = IntervalValues[ii < 0 || ii >= IntervalValues.Length ? 1 : ii];
-            _tools.EnableRightClick = _toolRightClick.Checked;
-            _tools.UnlockSelection = _toolAllowShift.Checked;
+            /* The right-click and the selection unlock are what the shipped extension does on
+               every profile, so they are not per profile switches any more. The stored values
+               are kept as they are: a profile that had them off keeps them off in the model,
+               and the shipped extension covers the difference. */
             _tools.CustomExtensions = _customExt.Value.Trim();
             _profile.Tools = _tools;
-            _profile.FreshSession = _freshSession.Checked;
 
             Result = _profile;
             DialogResult = DialogResult.OK;

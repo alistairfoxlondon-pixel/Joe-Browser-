@@ -64,14 +64,25 @@ namespace JoeBrowser
         public event Action<string> ProxyOffline;
 
         /// <summary>
-        /// Raised when the address the world sees this profile from changed: the proxy
-        /// rotated its exit.
+        /// Raised when the proxy's exit address changed while the session was open.
         /// </summary>
         public event Action<string, string> ProxyRotated;
+
+        /// <summary>
+        /// Raised when the proxy stopped answering: two checks in a row failed.
+        /// </summary>
+        public event Action<string> ProxyLost;
+
+        /// <summary>
+        /// Raised when the proxy answered again after having failed.
+        /// </summary>
+        public event Action<string> ProxyBack;
 
         private System.Threading.Timer _proxyWatch;
         private string _lastExitIp;
         private int _watchBusy;
+        private int _watchFails;
+        private int _watchDown;
 
         /// <summary>
         /// Watches the address the world sees this profile from.
@@ -81,6 +92,10 @@ namespace JoeBrowser
         /// session. The application asks the proxy who it is every minute and says so when
         /// the answer changes - in the window and in the notification area, not only in a
         /// banner inside a page nobody is looking at.
+        ///
+        /// The same check answers the other half of the question. A proxy that stops
+        /// answering is reported as well, but only after two checks in a row: one failed
+        /// request is a hiccup, and an alert that cries wolf is an alert nobody reads.
         /// </summary>
         private void StartProxyWatch()
         {
@@ -102,9 +117,32 @@ namespace JoeBrowser
                     var proxy = Profile != null ? Profile.Proxy : null;
                     if (proxy == null || !proxy.Enabled) return;
                     var result = await ProxyTester.TestAsync(proxy).ConfigureAwait(false);
-                    if (result == null || !result.Ok || string.IsNullOrEmpty(result.Ip)) return;
+                    if (result == null || !result.Ok || string.IsNullOrEmpty(result.Ip))
+                    {
+                        /* A failed check is only reported after two in a row. */
+                        if (Interlocked.Increment(ref _watchFails) >= 2)
+                        {
+                            Interlocked.Exchange(ref _watchFails, 0);
+                            Interlocked.Exchange(ref _watchDown, 1);
+                            Log.Info("The proxy did not answer twice in a row.");
+                            var lost = ProxyLost;
+                            if (lost != null) { try { lost(string.Empty); } catch { } }
+                        }
+                        return;
+                    }
+                    Interlocked.Exchange(ref _watchFails, 0);
                     if (string.IsNullOrEmpty(_lastExitIp)) { _lastExitIp = result.Ip; return; }
-                    if (string.Equals(_lastExitIp, result.Ip, StringComparison.Ordinal)) return;
+                    if (string.Equals(_lastExitIp, result.Ip, StringComparison.Ordinal))
+                    {
+                        /* Only when the proxy had actually been down, so a healthy proxy
+                           does not produce a message every minute. */
+                        if (Interlocked.Exchange(ref _watchDown, 0) == 1)
+                        {
+                            var back = ProxyBack;
+                            if (back != null) { try { back(result.Ip); } catch { } }
+                        }
+                        return;
+                    }
                     string from = _lastExitIp;
                     _lastExitIp = result.Ip;
                     Log.Info("Proxy exit address changed: " + from + " -> " + result.Ip);

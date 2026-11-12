@@ -228,24 +228,14 @@ namespace JoeBrowser
             if (Running)
                 JBMenu.Add(menu, "Close browser", "power", delegate { var h = CloseRequested; if (h != null) h(this, EventArgs.Empty); });
             JBMenu.Add(menu, "Edit profile", "pencil", delegate { var h = EditRequested; if (h != null) h(this, EventArgs.Empty); });
-            JBMenu.Add(menu, "Rename", "file", delegate { var h = RenameRequested; if (h != null) h(this, EventArgs.Empty); });
-            JBMenu.Add(menu, "Change proxy (live, keep tab open)", "route",
+            JBMenu.Add(menu, "Change proxy", "route",
                 delegate { var h = ProxyRequested; if (h != null) h(this, EventArgs.Empty); });
-            JBMenu.Add(menu, Running ? "Check fingerprint" : "Clear cache and cookies", "shield",
+            JBMenu.Add(menu, Running ? "Check fingerprint" : "Clear cookies and cache", "shield",
                 delegate
                 {
                     var h = Running ? LeakTestRequested : ClearCacheRequested;
                     if (h != null) h(this, EventArgs.Empty);
                 });
-            if (Running)
-                JBMenu.Add(menu, "Clear cache (keeps tab open)", "refresh",
-                    delegate { var h = ClearCacheRequested; if (h != null) h(this, EventArgs.Empty); });
-            /* History belongs to one profile, and the History page otherwise shows whichever
-               profile was opened last - which is not a way to find a page in a particular one. */
-            JBMenu.Add(menu, "Browsing history", "clock",
-                delegate { var h = HistoryRequested; if (h != null) h(this, EventArgs.Empty); });
-            JBMenu.Add(menu, Picked ? "Remove from selection" : "Add to selection", "check",
-                delegate { var h = PickToggled; if (h != null) h(this, EventArgs.Empty); });
             JBMenu.Add(menu, "Duplicate", "copy", delegate { var h = DuplicateRequested; if (h != null) h(this, EventArgs.Empty); });
             menu.Items.Add(new ToolStripSeparator());
             JBMenu.Add(menu, "Delete profile", "trash", delegate { var h = DeleteRequested; if (h != null) h(this, EventArgs.Empty); });
