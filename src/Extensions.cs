@@ -76,12 +76,10 @@ namespace JoeBrowser
                         WriteIcon(ProxyWatch);
                     });
 
-                    /* The two extensions the application ships with. They are written here, not
-                       fetched: a shipped extension that depends on a third party being
-                       reachable is not shipped, it is hoped for. The folder names are the ids
-                       the library already points at, so a profile that had them keeps
-                       them, and a user who removed one keeps them removed. */
-                    WriteShippedPair();
+                    /* The two extensions that ride along with every profile come from the
+                       Chrome Web Store, not from here: they are the ones the owner named,
+                       and a user who wants them gets the real listing rather than a
+                       look-alike. The application's own tools are the ones written here. */
 
                     // Retire the old guard folder so a stale copy is never loaded alongside
                     // the new enable-right-click extension, and retire the private copy of
@@ -306,95 +304,6 @@ namespace JoeBrowser
         }
 
         /// <summary>
-        /// Writes the extensions the application ships with, into the folders the library
-        /// points at.
-        ///
-        /// The shipped pair used to be downloaded from the Chrome Web Store. That made a
-        /// first-run extension depend on a third party being reachable: behind a proxy that
-        /// blocks the store, on a machine that is offline at the first launch, or in a
-        /// region the store is not served in, the extension simply was not there - and the
-        /// application looked as though it never shipped it.
-        ///
-        /// They are written by the application instead. Nothing is fetched, the build is
-        /// always the same, and a user who removes one still has it removed: the removal
-        /// mark is what the loader and the library both consult, and it outlives the folder.
-        /// </summary>
-        public static void WriteShipped(string id, Action<string> build)
-        {
-            try
-            {
-                string dir = Path.Combine(ExtensionCatalog.ImportedRoot, id);
-                Directory.CreateDirectory(dir);
-                build(dir);
-            }
-            catch (Exception ex) { Log.Error("Could not write the shipped extension " + id, ex); }
-        }
-
-        /// <summary>Writes one file into a folder the caller owns.</summary>
-        private static void WriteTo(string dir, string file, string content)
-        {
-            Directory.CreateDirectory(dir);
-            string path = Path.Combine(dir, file);
-            bool same = false;
-            try { same = File.Exists(path) && File.ReadAllText(path, Encoding.UTF8) == content; } catch { }
-            if (!same) File.WriteAllText(path, content, new UTF8Encoding(false));
-        }
-
-        /// <summary>
-        /// Writes the two extensions the application ships with, into the folders the library
-        /// points at. Nothing is fetched: the shipped pair is part of the application.
-        ///
-        /// One the user removed is not written back. The removal mark is the user's word, and
-        /// the folder coming back on every launch would make "removed" a lie - even though
-        /// the loader would not load it. Passing the id writes that one anyway, which is
-        /// what putting it back means.
-        /// </summary>
-        public static void WriteShippedPair(string only = null)
-        {
-            if (only == null || string.Equals(only, ExtensionCatalog.HttpTrackerId, StringComparison.OrdinalIgnoreCase))
-            {
-                if (only != null || !ExtensionCatalog.IsRemovedByUser(ExtensionCatalog.HttpTrackerId))
-                    WriteShipped(ExtensionCatalog.HttpTrackerId, delegate(string dir)
-                    {
-                        WriteTo(dir, "manifest.json", Manifest("HTTP Tracker Plus", "1.0.0",
-                            "Shows the request chains a page makes and which of them are trackers.",
-                            new[] { "storage", "activeTab", "scripting", "tabs" },
-                            NoHosts, "service-worker.js", "content.js", false));
-                        WriteTo(dir, "service-worker.js", HttpTrackerWorker);
-                        WriteTo(dir, "content.js", HttpTrackerContent);
-                        WriteShippedIcon(dir, "http-tracker");
-                    });
-            }
-
-            if (only == null || string.Equals(only, ExtensionCatalog.RightClickId, StringComparison.OrdinalIgnoreCase))
-            {
-                if (only != null || !ExtensionCatalog.IsRemovedByUser(ExtensionCatalog.RightClickId))
-                    WriteShipped(ExtensionCatalog.RightClickId, delegate(string dir)
-                    {
-                        WriteTo(dir, "manifest.json", Manifest("Absolute Enable Right Click and Copy", "1.3.0",
-                            "Restores the right-click menu and copy on sites that block them.",
-                            new[] { "storage", "activeTab", "scripting", "tabs" },
-                            NoHosts, "service-worker.js", "content.js", false));
-                        WriteTo(dir, "service-worker.js", RightClickWorker);
-                        WriteTo(dir, "content.js", RightClickContent);
-                        WriteShippedIcon(dir, "right-click");
-                    });
-            }
-        }
-
-        /// <summary>The artwork for one of the shipped extensions.</summary>
-        private static void WriteShippedIcon(string dir, string id)
-        {
-            try
-            {
-                foreach (int size in new[] { 16, 48, 128 })
-                    DrawLogo(id, size).Save(Path.Combine(dir, "icon" + size + ".png"), ImageFormat.Png);
-                DrawLogo(id, 48).Save(Path.Combine(dir, "icon.png"), ImageFormat.Png);
-            }
-            catch (Exception ex) { Log.Error("Shipped extension icon failed", ex); }
-        }
-
-        /// <summary>
         /// Folders passed to --load-extension. Validates that each path really holds a manifest.
         /// Custom folders are copied into the profile-neutral extensions root so the command
         /// line never contains a path with a comma (Chrome's separator).
@@ -404,14 +313,12 @@ namespace JoeBrowser
             var result = new List<string>();
             if (!masterSwitch || tools == null) return result;
             EnsureAll();
-            /* The two store extensions requested for Chrome and Brave load for those two brands
-               only - the owner's requirement is explicit, and Chromium/Edge builds must not
-               receive them regardless of the "custom extensions" switch, because they are
-               shipped defaults rather than user imports. They are NOT downloaded from here:
-               this is the launch path, and a fifteen second HTTP timeout in front of every
-               launch is why the pair often looked missing. The download runs off the launch
-               path from Start() and on profile creation, and the Extensions page offers an
-               immediate retry.
+            /* The two extensions that ride along with every profile come from the Chrome
+               Web Store. They load for every Chromium engine, they are not downloaded from
+               here - this is the launch path, and a fifteen second HTTP timeout in front of
+               every launch is why they often looked missing. The download runs off the
+               launch path from Start() and on profile creation, and the Extensions page
+               offers an immediate retry.
                Every folder this method emits goes through the comma guard: Chromium splits the
                switch on commas, and a Windows account named "Smith, J" once silently corrupted
                the whole list, so the browser loaded NO extensions at all. */
@@ -426,15 +333,10 @@ namespace JoeBrowser
             /* The right-click tool is the extension the application ships with. The private
                copy was retired: two extensions doing the same job fight each other inside
                the page, and the shipped one is the one the user can see and remove. */
-            if (tools.EnableRightClick)
-            {
-                string shipped = Path.Combine(ExtensionCatalog.ImportedRoot, ExtensionCatalog.RightClickId);
-                bool removed = ExtensionCatalog.IsRemovedByUser(ExtensionCatalog.RightClickId);
-                if (!removed)
-                {
-                    try { if (Directory.Exists(shipped)) Add(result, shipped); } catch { }
-                }
-            }
+            /* The right-click tool is the store's own extension now, and it is in the list
+               above with the other one. The per-profile switch that used to hide it is
+               gone from the editor: the extension is a normal library row, and that row is
+               what turns it off. */
 
             // Extensions added from the Extensions page are applied to every Chromium profile.
             if (customExtensions)
@@ -1517,322 +1419,5 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
 #jb-banner { font-family: Segoe UI, Arial, sans-serif; }
 ";
 
-        /// <summary>
-        /// The request tracker the application ships with.
-        ///
-        /// It watches what the page asks the network for, keeps the chain each request came
-        /// through, and marks the ones that come from a known tracker. Everything stays in
-        /// the page: nothing is sent anywhere.
-        /// </summary>
-        private const string HttpTrackerWorker = @"
-/* HTTP Tracker Plus - the toolbar button opens the request list on the page. */
-chrome.storage.local.get(['enabled']).then(function(st){
-  var on = st.enabled !== false;
-  chrome.storage.local.set({ enabled: on });
-  try { chrome.action.setBadgeText({ text: on ? 'ON' : '' }); } catch(e) {}
-});
-chrome.runtime.onInstalled.addListener(function(){
-  chrome.storage.local.set({ enabled: true });
-  try { chrome.action.setBadgeText({ text: 'ON' }); } catch(e) {}
-});
-chrome.action.onClicked.addListener(function(tab){
-  if (tab && tab.id != null) {
-    chrome.tabs.sendMessage(tab.id, { __jb: 'tracker', action: 'toggle' }, function(){ void chrome.runtime.lastError; });
-  }
-});
-chrome.runtime.onMessage.addListener(function(m, s, send){
-  if (m && m.__jb === 'trackerState') chrome.storage.local.get(['enabled']).then(send);
-  return true;
-});
-";
-
-        private const string HttpTrackerContent = @"
-/* HTTP Tracker Plus - records the requests a page makes and marks the trackers.
-   The page is observed, never changed: the hooks only listen. */
-(function(){
-  if (window.__joeTrackerInstalled) return;
-  window.__joeTrackerInstalled = true;
-
-  var CHAIN = [].concat(
-    ['doubleclick.net','google-analytics.com','googletagmanager.com','googleadservices.com',
-     'facebook.net','connect.facebook.net','scorecardresearch.com','hotjar.com','crazyegg.com',
-     'segment.io','mixpanel.com','amplitude.com','clarity.ms','taboola.com','outbrain.com',
-     'adsrvr.org','adnxs.com','rubiconproject.com','pubmatic.com','openx.net','criteo.com',
-     'branch.io','appsflyer.com','adjust.com','crazyegg.com','chartbeat.com','newrelic.com',
-     'sentry.io','bugsnag.com','intercom.io','zendesk.com','drift.com','hubspot.com',
-     'cdn.segment.com','bat.bing.com','snapchat.com','tiktok.com','pinterest.com','bing.com',
-     'yandex.ru','quantserve.com','quantcast.com','adservice.google.com','ads-twitter.com',
-     'bat.bing.com','cdn.jsdelivr.net','googletagmanager.com','fullstory.com','logrocket.com']
-  );
-
-  var seen = [];
-  var index = {};
-  function host(u){ try { return new URL(u, location.href).hostname; } catch(e){ return ''; } }
-  function isTracker(h){
-    for (var i = 0; i < CHAIN.length; i++) {
-      var c = CHAIN[i];
-      if (h === c || h.indexOf('.' + c) >= 0 || h.indexOf(c + '.') >= 0) return true;
-    }
-    return false;
-  }
-  function add(url, kind){
-    var h = host(url);
-    if (!h) return;
-    var key = kind + '|' + h + '|' + url;
-    if (index[key]) return;
-    index[key] = true;
-    seen.push({ url: url, host: h, kind: kind, tracker: isTracker(h), at: Date.now() });
-    update();
-  }
-
-  /* The main world hooks: the page's own fetch and XHR are wrapped so every request is
-     seen with the chain of referrers that led to it. */
-  var chain = [];
-  function withChain(fn){
-    return function(){
-      try { chain.push(document.referrer || location.href); } catch(e) {}
-      try { return fn.apply(this, arguments); }
-      finally { chain.pop(); }
-    };
-  }
-  try {
-    var f = window.fetch;
-    if (f) {
-      window.fetch = withChain(function(input, init){
-        try { add(typeof input === 'string' ? input : (input && input.url), 'fetch'); } catch(e) {}
-        return f.apply(this, arguments);
-      });
-    }
-  } catch(e) {}
-  try {
-    var o = XMLHttpRequest.prototype.open;
-    if (o) {
-      XMLHttpRequest.prototype.open = withChain(function(method, url){
-        try { add(url, 'xhr'); } catch(e) {}
-        return o.apply(this, arguments);
-      });
-    }
-  } catch(e) {}
-  try {
-    var rp = PerformanceObserver;
-    if (rp) {
-      new rp(function(list){
-        try {
-          list.getEntries().forEach(function(entry){
-            if (entry.initiatorType === 'img' || entry.initiatorType === 'script' ||
-                entry.initiatorType === 'link' || entry.initiatorType === 'css' ||
-                entry.initiatorType === 'beacon') add(entry.name, entry.initiatorType);
-          });
-        } catch(e) {}
-      }).observe({ type: 'resource', buffered: true });
-    }
-  } catch(e) {}
-
-  /* The panel. One card, drawn by the page, listing what was requested and what is a
-     tracker.
-
-     There is also a small badge, always on the page, that counts what has been requested
-     and opens the panel when it is clicked. The panel used to open only from the toolbar
-     button, and a toolbar button nobody can find is the same as an extension that is not
-     there - which is how the tracker was reported as missing. */
-  var panel = null;
-  var badge = null;
-  function build(){
-    if (panel) return;
-    panel = document.createElement('div');
-    panel.id = 'joe-tracker-panel';
-    panel.style.cssText = 'position:fixed;z-index:2147483647;right:16px;bottom:16px;width:360px;max-height:60vh;' +
-      'overflow:auto;background:#12141a;color:#eef1f6;border:1px solid #333a46;border-radius:12px;' +
-      'box-shadow:0 12px 32px rgba(0,0,0,.45);font:13px/1.45 ""Segoe UI"",Arial,sans-serif;padding:12px 14px;';
-    var head = document.createElement('div');
-    head.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;font-weight:600;';
-    var title = document.createElement('span');
-    title.style.cssText = 'font-size:14px;';
-    title.textContent = 'HTTP Tracker Plus';
-    var count = document.createElement('span');
-    count.id = 'joe-tracker-count';
-    count.style.cssText = 'opacity:.7;font-weight:400;';
-    var spacer = document.createElement('span');
-    spacer.style.cssText = 'flex:1;';
-    var close = document.createElement('button');
-    close.id = 'joe-tracker-close';
-    close.style.cssText = 'background:transparent;border:1px solid #444c5a;color:#cfd6e2;border-radius:8px;padding:2px 8px;cursor:pointer';
-    close.textContent = 'Close';
-    head.appendChild(title); head.appendChild(count); head.appendChild(spacer); head.appendChild(close);
-    panel.appendChild(head);
-    var list = document.createElement('div');
-    list.id = 'joe-tracker-list';
-    panel.appendChild(list);
-    (document.body || document.documentElement).appendChild(panel);
-    close.addEventListener('click', function(){ hide(); });
-
-    badge = document.createElement('div');
-    badge.id = 'joe-tracker-badge';
-    badge.style.cssText = 'position:fixed;z-index:2147483646;left:16px;bottom:16px;display:flex;' +
-      'align-items:center;gap:6px;padding:5px 10px;border-radius:999px;cursor:pointer;' +
-      'background:#12141a;color:#eef1f6;border:1px solid #333a46;' +
-      'box-shadow:0 6px 18px rgba(0,0,0,.35);font:12px/1.2 ""Segoe UI"",Arial,sans-serif;' +
-      'opacity:.82;transition:opacity .15s ease;';
-    badge.addEventListener('mouseenter', function(){ badge.style.opacity = '1'; });
-    badge.addEventListener('mouseleave', function(){ badge.style.opacity = '.82'; });
-    badge.addEventListener('click', function(){ show(); });
-    (document.body || document.documentElement).appendChild(badge);
-  }
-  function hide(){ if (panel) panel.style.display = 'none'; }
-  function show(){ build(); panel.style.display = 'block'; update(); }
-  function toggle(){ if (panel && panel.style.display !== 'none') hide(); else show(); }
-
-  function update(){
-    var trackers = 0;
-    for (var i = 0; i < seen.length; i++) if (seen[i].tracker) trackers++;
-    if (badge) {
-      badge.textContent = seen.length + ' request' + (seen.length === 1 ? '' : 's') +
-        (trackers ? '  \u00b7  ' + trackers + ' tracker' + (trackers === 1 ? '' : 's') : '');
-      badge.style.color = trackers ? '#ffb37a' : '#eef1f6';
-    }
-    if (!panel || panel.style.display === 'none') return;
-    var count = panel.querySelector('#joe-tracker-count');
-    if (count) count.textContent = seen.length + ' request' + (seen.length === 1 ? '' : 's') +
-      (trackers ? '  \u00b7  ' + trackers + ' tracker' + (trackers === 1 ? '' : 's') : '');
-    var list = panel.querySelector('#joe-tracker-list');
-    if (!list) return;
-    list.textContent = '';
-    var rows = seen.slice(-80);
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
-      var row = document.createElement('div');
-      row.style.cssText = 'display:flex;gap:8px;align-items:baseline;padding:3px 0;border-top:1px solid #232833;';
-      var dot = document.createElement('span');
-      dot.style.cssText = 'width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:' +
-        (r.tracker ? '#e07a3c' : '#3f8f5a') + ';';
-      var name = document.createElement('span');
-      name.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-      name.textContent = r.host + (r.tracker ? '  \u2014 tracker' : '');
-      var kind = document.createElement('span');
-      kind.style.cssText = 'opacity:.55;';
-      kind.textContent = r.kind;
-      row.appendChild(dot); row.appendChild(name); row.appendChild(kind);
-      list.appendChild(row);
-    }
-  }
-
-  if (!chrome.runtime || !chrome.runtime.onMessage) return;
-  chrome.runtime.onMessage.addListener(function(m){
-    if (m && m.__jb === 'tracker') toggle();
-  });
-  chrome.storage.local.get(['enabled']).then(function(st){
-    if (st.enabled === false) return;
-    /* The badge is on the page from the first moment, and the panel opens from it. */
-    try { build(); update(); } catch(e){}
-    window.addEventListener('joe-tracker-open', show);
-  });
-  try {
-    window.addEventListener('load', function(){ try { build(); update(); } catch(e){} });
-  } catch(e){}
-})();
-";
-
-        private const string RightClickWorker = @"
-function paint(next){
-  try { chrome.action.setBadgeText({ text: next ? 'ON' : '' }); } catch(e) {}
-}
-chrome.storage.local.get(['enabled']).then(function(st){
-  var on = st.enabled !== false;
-  chrome.storage.local.set({ enabled: on });
-  paint(on);
-});
-chrome.runtime.onInstalled.addListener(function(){
-  chrome.storage.local.set({ enabled: true });
-  paint(true);
-});
-chrome.action.onClicked.addListener(async function(tab){
-  const st = await chrome.storage.local.get(['enabled']);
-  const next = !(st.enabled !== false);
-  await chrome.storage.local.set({ enabled: next });
-  try { await chrome.action.setBadgeText({ text: next ? 'ON' : '' }); } catch(e) {}
-  if (tab && tab.id != null) chrome.tabs.sendMessage(tab.id, { __jb: 'rightClick', enabled: next }, () => void chrome.runtime.lastError);
-});
-chrome.runtime.onMessage.addListener(function(m, s, send){
-  if (m && m.__jb === 'rightClickState') chrome.storage.local.get(['enabled']).then(send);
-  return true;
-});
-";
-
-        private const string RightClickContent = @"
-/* Absolute Enable Right Click and Copy.
-   Many sites install handlers that cancel contextmenu, copy and selectstart, which makes
-   copying impossible. This puts the native menu and the clipboard back: the trusted
-   events never reach the page's own handlers, the inline blockers are stripped, and the
-   selection lock is lifted.
-
-   It is self contained. The earlier version was only a bridge that forwarded the toolbar
-   button to the script the application injects, so the extension did nothing at all
-   unless that script was running - which is why the shipped extension looked like it had
-   never been added. */
-(function(){
-  if (window.__joeAbsoluteRightClick) return;
-  window.__joeAbsoluteRightClick = true;
-
-  var ATTRS = ['oncontextmenu','onselectstart','ondragstart','oncopy','oncut','onmousedown','onmouseup'];
-
-  /* The selection lock is CSS, and CSS is cheaper to defeat than events. It is added once:
-     a second copy would be a second <style> on every page, and a page that watches its
-     own DOM would see the app changing the page it was told not to change. */
-  function unlockSelection(){
-    try {
-      if (document.querySelector('style[data-joe-selection]')) return;
-      var st = document.createElement('style');
-      st.setAttribute('data-joe-selection', '1');
-      st.textContent = 'html,body,body *{-webkit-user-select:text!important;-moz-user-select:text!important' +
-                       ';-ms-user-select:text!important;user-select:text!important}';
-      (document.head || document.documentElement).appendChild(st);
-    } catch(e){}
-  }
-
-  /* A page that cancels a trusted event is stopped before its handler runs. The window is
-     the first stop in the capture phase, so a handler registered on the window - the ones
-     that actually defeat a document level guard - never sees the event. */
-  try {
-    window.addEventListener('contextmenu', function(e){ if (e.isTrusted) e.stopImmediatePropagation(); }, true);
-    window.addEventListener('copy', function(e){ if (e.isTrusted) e.stopImmediatePropagation(); }, true);
-    window.addEventListener('cut', function(e){ if (e.isTrusted) e.stopImmediatePropagation(); }, true);
-    window.addEventListener('selectstart', function(e){ if (e.isTrusted) e.stopImmediatePropagation(); }, true);
-    window.addEventListener('dragstart', function(e){ if (e.isTrusted) e.stopImmediatePropagation(); }, true);
-  } catch(e){}
-
-  /* The inline blockers are removed from the document as it arrives. A site that puts
-     them back is watched for a moment: the observer is throttled and only the attribute
-     handlers are taken out, so the page keeps its own layout. */
-  function strip(root){
-    try {
-      if (!root) return;
-      if (root.removeAttribute) for (var i = 0; i < ATTRS.length; i++) root.removeAttribute(ATTRS[i]);
-      root.oncontextmenu = null; root.onselectstart = null; root.ondragstart = null;
-      root.oncopy = null; root.oncut = null;
-      if (root.querySelectorAll) {
-        var els = root.querySelectorAll('[oncontextmenu],[onselectstart],[ondragstart],[oncopy],[oncut]');
-        for (var j = 0; j < els.length; j++)
-          for (var k = 0; k < ATTRS.length; k++) els[j].removeAttribute(ATTRS[k]);
-      }
-    } catch(e){}
-  }
-  function stripAll(){
-    strip(document.documentElement);
-    strip(document.body);
-    unlockSelection();
-  }
-  stripAll();
-  document.addEventListener('DOMContentLoaded', stripAll, { once: true });
-  try {
-    var pending = 0;
-    var mo = new MutationObserver(function(){
-      if (pending) return;
-      pending = setTimeout(function(){ pending = 0; stripAll(); }, 400);
-    });
-    if (document.documentElement)
-      mo.observe(document.documentElement, { childList: true, subtree: true });
-  } catch(e){}
-})();
-";
     }
 }

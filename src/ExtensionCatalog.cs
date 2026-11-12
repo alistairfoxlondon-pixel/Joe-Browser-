@@ -407,12 +407,12 @@ namespace JoeBrowser
                     bool present = false;
                     try { present = UsableManifest(Path.Combine(target, "manifest.json")); } catch { }
                     if (present) continue;
-                    /* The shipped pair is written by the application, so the first thing a
-                       repair does is write it again. The store is only a fallback for a
-                       machine where the writing failed. */
-                    try { ExtensionManager.WriteShippedPair(); } catch { }
-                    try { present = UsableManifest(Path.Combine(target, "manifest.json")); } catch { }
-                    if (present) { added++; continue; }
+                    /* The pair comes from the Chrome Web Store, not from the application.
+                       They are the two the owner named, and a user who wants them has the
+                       real thing - the listing, the version and the behaviour the store
+                       publishes - rather than a look-alike the application wrote. They are
+                       installed by default for a new profile and can be removed, and the
+                       removal is remembered. */
                     string skip = Path.Combine(AppPaths.Extensions, ".store-" + id + ".skip");
                     if (!force)
                     {

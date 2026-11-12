@@ -6,6 +6,19 @@ namespace JoeBrowser
 {
     internal static class FingerprintFactory
     {
+        /// <summary>
+        /// The graphics card this PC really has, and the vendor beside it.
+        ///
+        /// It is learned from the browser the application launches: the page reads the
+        /// adapter before anything is replaced and leaves it where the application can
+        /// read it. A profile that answers with this string is indistinguishable from a
+        /// real browser on this machine, which is the whole point of the fingerprint.
+        /// </summary>
+        public static string MachineRenderer = "";
+
+        /// <summary>The vendor that goes with <see cref="MachineRenderer"/>.</summary>
+        public static string MachineVendor = "";
+
         public static readonly string[] Timezones = new[]
         {
             "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto",
@@ -463,6 +476,19 @@ namespace JoeBrowser
             fp.WebGlVendor = pair[0];
             fp.WebGlRenderer = pair[1];
 
+            /* The card this PC really has, when the application has learned it. A profile
+               that claims a card the machine does not have is one of the few things a
+               scanner can see without a database of anything: the name says one GPU and
+               the limits that come with it come from another. The application learns the
+               real adapter from the browser it launches, so every profile it makes after
+               that answers with the hardware of the machine it runs on - which is what a
+               real browser on that machine would answer. */
+            if (!string.IsNullOrEmpty(MachineRenderer) && IsWindows(os))
+            {
+                fp.WebGlRenderer = MachineRenderer;
+                fp.WebGlVendor = string.IsNullOrEmpty(MachineVendor) ? fp.WebGlVendor : MachineVendor;
+            }
+
             // Cores and memory have to describe the same machine class as the GPU. A 24-core
             // desktop behind an integrated UHD 620, or 4 GB on an M4 Max, is a contradiction
             // that a single hardware-concurrency check exposes.
@@ -503,7 +529,12 @@ namespace JoeBrowser
 
             if (!hardwareOnly)
             {
-                fp.CanvasNoise = true;
+                /* The canvas is left alone by default. A canvas that differs from the one
+                   this PC produces is the one change a scanner can see without a
+                   database of anything: every profile on the machine then shares a canvas,
+                   and a profile that must not be linked to the others can have the noise
+                   turned on in the editor. The other surfaces are still rolled per profile. */
+                fp.CanvasNoise = false;
                 fp.AudioNoise = true;
                 fp.FontsNoise = true;
                 fp.WebRtcProtect = true;
@@ -679,6 +710,26 @@ namespace JoeBrowser
         /// <summary>
         /// Repairs a configuration that describes a machine that cannot exist.
         ///
+        /// <summary>
+        /// The vendor a renderer string belongs to.
+        ///
+        /// A browser always reports the two together - "Google Inc. (NVIDIA)" beside an
+        /// ANGLE string that names NVIDIA - and a renderer with the wrong vendor beside it
+        /// is as much of a tell as a renderer from another platform.
+        /// </summary>
+        private static string VendorForRenderer(string renderer)
+        {
+            string r = renderer ?? "";
+            if (r.Length == 0) return null;
+            if (r.IndexOf("NVIDIA", StringComparison.OrdinalIgnoreCase) >= 0) return "Google Inc. (NVIDIA)";
+            if (r.IndexOf("AMD", StringComparison.OrdinalIgnoreCase) >= 0) return "Google Inc. (AMD)";
+            if (r.IndexOf("Intel", StringComparison.OrdinalIgnoreCase) >= 0) return "Google Inc. (Intel)";
+            if (r.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) >= 0) return "Google Inc. (Apple)";
+            if (r.IndexOf("Mali", StringComparison.OrdinalIgnoreCase) >= 0) return "Google Inc. (ARM)";
+            return null;
+        }
+
+        /// <summary>
         /// Profiles arrive from places that can each produce an impossible combination: an
         /// imported JSON file written by an older build, a profile edited by hand, and the OS
         /// picker, which changes the target without re-deriving everything that follows from it.
@@ -724,19 +775,22 @@ namespace JoeBrowser
                 }
                 else
                 {
-                    /* Keep the vendor family when this platform has it - an NVIDIA string on a
-                       Windows profile stays NVIDIA - and otherwise take the pool's head. A real
-                       card of the right platform beats a coherent-looking lie. */
-                    int sameVendor = -1;
-                    for (int i = 0; i < gpuPool.Count; i++)
+                    /* A renderer that is not in the pool is the machine's own - the one a real
+                       browser on this PC reports - or one the user typed. Replacing it with an
+                       entry from the pool puts a card in the profile that this machine does
+                       not have, and a scanner that knows the hardware reads the difference:
+                       the limits that come with the real adapter and the name that claims
+                       another one cannot both be true. So the renderer is kept, and only the
+                       vendor beside it is made to agree.
+
+                       The old version took the pool's head instead, which is how a profile on
+                       an AMD machine ended up claiming an NVIDIA card. */
+                    string vendor = VendorForRenderer(fp.WebGlRenderer);
+                    if (!string.IsNullOrEmpty(vendor) && !string.Equals(vendor, fp.WebGlVendor, StringComparison.Ordinal))
                     {
-                        if (gpuPool[i] == null || gpuPool[i].Length < 2) continue;
-                        if (string.Equals(gpuPool[i][0], fp.WebGlVendor, StringComparison.Ordinal)) { sameVendor = i; break; }
+                        fp.WebGlVendor = vendor;
+                        repaired++;
                     }
-                    int pick = sameVendor >= 0 ? sameVendor : 0;
-                    fp.WebGlRenderer = gpuPool[pick][1];
-                    fp.WebGlVendor = gpuPool[pick][0];
-                    repaired++;
                 }
             }
             else if (fp.WebGlVendor == null) { fp.WebGlVendor = ""; }

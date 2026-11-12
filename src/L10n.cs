@@ -189,6 +189,7 @@ history.open=Open
 history.hops=Only passed through
 history.all=Every page
 history.title=History
+history.loading=Reading the history…
 history.empty=Nothing recorded yet
 history.empty.hint=Pages opened through this profile appear here, including the ones reached only by a redirect.
 history.one=page

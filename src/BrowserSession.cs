@@ -45,6 +45,8 @@ namespace JoeBrowser
         private bool _masterExtensions = true;
         private string _primarySession;
         private int _navCount;
+        /// <summary>Set once the machine's graphics adapter has been read.</summary>
+        private int _gpuLearned;
         private readonly object _scriptState = new object();
         /// <summary>Identifiers of injected documents, so a live re-apply replaces instead of stacking.</summary>
         private readonly Dictionary<string, string> _fpScripts = new Dictionary<string, string>();
@@ -54,6 +56,13 @@ namespace JoeBrowser
         private bool _extensionsLoaded;
 
         public event Action<BrowserSession> Closed;
+
+        /// <summary>
+        /// Raised once, when a browser reports the graphics card this PC really has.
+        /// The application keeps it, so every profile it makes after that answers with the
+        /// hardware of the machine it runs on.
+        /// </summary>
+        public static event Action<string, string> MachineGpuLearned;
 
         /// <summary>Fires when the configured proxy stopped answering and the session moved
         /// itself onto a direct connection. The argument is the proxy that failed.</summary>
@@ -235,6 +244,23 @@ namespace JoeBrowser
             s._browserIsEdge = browser.IsEdge;
 
             var fp = profile.Fp ?? new FingerprintConfig();
+            /* The profile has to report the build it actually runs. It was launching
+               Chromium 160 while it claimed Chrome 157, and the client hints - the GREASE
+               brand above all - are a property of the binary that is running, not of the
+               version the profile says. A scanner that compares the two reads the
+               difference as masking, and it is the single loudest tell in the interface.
+               A profile pinned to a kernel runs that kernel and keeps its own version;
+               every other profile reports the browser it is launched with. */
+            if (string.IsNullOrEmpty(profile.KernelFullVersion))
+            {
+                try
+                {
+                    string versionNote;
+                    BrowserVersions.Assign(profile, null, browser.Version, out versionNote);
+                    fp = profile.Fp ?? fp;
+                }
+                catch (Exception ex) { Log.Error("Could not align the profile to the browser it runs", ex); }
+            }
             /* Last line of defence before the script is injected. A profile edited by hand, or
                restored from a file written by an older build, can still describe an impossible
                machine; coercing here means the browser never launches with one, whatever state the
@@ -845,12 +871,51 @@ namespace JoeBrowser
             {
                 FingerprintFactory.ResolveUserAgent(fp, Browser);
                 await ApplyFingerprintAsync(fp, navigateTo, sessionId).ConfigureAwait(false);
+                await LearnMachineGpuAsync(sessionId).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 Log.Error("Fingerprint stamp failed", ex);
                 lock (_stamped) { _stamped.Remove(sessionId); }
             }
+        }
+
+        /// <summary>
+        /// Reads the graphics card this machine really has, once, from the page.
+        ///
+        /// The page keeps the adapter it read before the fingerprint replaced it, and
+        /// this asks for it. A profile that claims a card the machine does not have is one
+        /// of the few things a scanner can see without a database of anything, so every
+        /// profile the application makes after this answers with the hardware of the
+        /// machine it runs on - which is what a real browser on that machine answers.
+        /// </summary>
+        private async Task LearnMachineGpuAsync(string sessionId)
+        {
+            try
+            {
+                if (Interlocked.Exchange(ref _gpuLearned, 1) == 1) return;
+                if (!string.IsNullOrEmpty(FingerprintFactory.MachineRenderer)) return;
+                var res = await TrySendResult("Runtime.evaluate", new Dictionary<string, object>
+                {
+                    { "expression", "window.__jbRealGl || ''" },
+                    { "returnByValue", true }
+                }, sessionId).ConfigureAwait(false);
+                var inner = Get<Dictionary<string, object>>(res, "result");
+                string value = inner != null ? Str(inner, "value") : "";
+                if (string.IsNullOrEmpty(value)) return;
+                int bar = value.IndexOf("||", StringComparison.Ordinal);
+                if (bar <= 0) return;
+                FingerprintFactory.MachineRenderer = value.Substring(0, bar);
+                FingerprintFactory.MachineVendor = value.Substring(bar + 2);
+                Log.Info("This PC reports the graphics adapter: " + FingerprintFactory.MachineRenderer);
+                var learned = MachineGpuLearned;
+                if (learned != null)
+                {
+                    try { learned(FingerprintFactory.MachineRenderer, FingerprintFactory.MachineVendor); }
+                    catch { }
+                }
+            }
+            catch (Exception ex) { Log.Error("Could not read the machine's graphics adapter", ex); }
         }
 
         private static void ApplyWebRtcFlags(List<string> args, FingerprintConfig fp)
