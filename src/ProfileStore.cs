@@ -177,11 +177,17 @@ namespace JoeBrowser
                 */
             try
             {
-                string installed = InstalledFullVersion();
                 int repaired = 0;
                 foreach (var p in list)
                 {
                     bool pinned = !string.IsNullOrEmpty(p.KernelFullVersion) && BrowserVersions.IsReal(p.KernelFullVersion);
+                    /* The version of the binary this profile will be launched with, which is
+                       not always the same one: a profile that runs the bundled Chromium
+                       reports the Chromium's version and a profile that runs the installed
+                       Chrome reports Chrome's. The client hints belong to the binary that is
+                       running, so a profile that claims the other one's build is read as
+                       masking. */
+                    string installed = InstalledFullVersion(p.BrowserKind);
                     string running = pinned ? p.KernelFullVersion
                         : BrowserVersions.IsReal(installed) ? installed : "";
                     if (string.IsNullOrEmpty(running)) continue;
@@ -224,9 +230,23 @@ namespace JoeBrowser
         /// </summary>
         public static string InstalledFullVersion()
         {
+            return InstalledFullVersion("auto");
+        }
+
+        /// <summary>
+        /// The version of the browser a profile of this kind will actually be launched with.
+        ///
+        /// The binary matters: a profile that runs the bundled Chromium and a profile that
+        /// runs the installed Chrome are different builds, and each has to report its own
+        /// version - the client hints, the GREASE brand above all, belong to the binary that
+        /// is running.
+        /// </summary>
+        public static string InstalledFullVersion(string browserKind)
+        {
             try
             {
-                var info = BrowserLocator.Detect("auto", "");
+                string pref = string.IsNullOrEmpty(browserKind) ? "auto" : browserKind;
+                var info = BrowserLocator.Detect(pref, "");
                 return info != null ? info.Version ?? "" : "";
             }
             catch { return ""; }

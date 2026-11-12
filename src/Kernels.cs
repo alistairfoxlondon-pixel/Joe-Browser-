@@ -334,7 +334,18 @@ namespace JoeBrowser
             if (catalog == null || catalog.Count == 0)
                 throw new InvalidOperationException(
                     "No " + (engine ?? "") + " build is published right now. Try again later, or pick another engine.");
+            /* The newest build of an engine is usually a pre-release, and a profile that runs
+               a Canary and says so is read as a mask: the fingerprint sites compare the
+               version with the releases they know, and a pre-release is not one of them. The
+               default engine is therefore the newest STABLE build - which is also the one a
+               real browser on this machine would be. The newer channels are there for the
+               profiles that pin one. */
             var rel = catalog[0];
+            foreach (var r in catalog)
+            {
+                if (r == null) continue;
+                if (string.Equals(r.Channel, "Stable", StringComparison.OrdinalIgnoreCase)) { rel = r; break; }
+            }
             var installed = await InstallAsync(rel, progress, ct).ConfigureAwait(false);
             KernelDiversity.Invalidate();
             return installed;

@@ -115,6 +115,30 @@ namespace JoeBrowser
             MinimizeBox = true;
 
             _settings = _store.LoadSettings();
+            /* What this PC's graphics card is, learned the last time a browser ran here. It
+               is what a profile answers with, so a profile is what a real browser on this
+               machine would answer - and a card the machine does not have is the cheapest
+               tell a scanner has. */
+            if (_settings != null && !string.IsNullOrEmpty(_settings.MachineGlRenderer))
+            {
+                FingerprintFactory.MachineRenderer = _settings.MachineGlRenderer;
+                FingerprintFactory.MachineVendor = _settings.MachineGlVendor ?? "";
+            }
+            /* The browser reports the card this PC really has the first time it runs here.
+               It is kept, so every profile after that answers with the hardware of the
+               machine it runs on - which is what a real browser on this machine answers. */
+            BrowserSession.MachineGpuLearned += delegate(string renderer, string vendor)
+            {
+                try
+                {
+                    if (_settings == null) return;
+                    if (string.Equals(_settings.MachineGlRenderer, renderer, StringComparison.Ordinal)) return;
+                    _settings.MachineGlRenderer = renderer;
+                    _settings.MachineGlVendor = vendor ?? "";
+                    _store.SaveSettings(_settings);
+                }
+                catch { }
+            };
             /* The store asks this whenever a page navigates; a null provider would silently
                record nothing. Bound to the live settings object so the toggle in Settings takes
                effect on the next page without a restart. */
@@ -131,6 +155,15 @@ namespace JoeBrowser
                had actually finished, and a profile launched in that window started without the
                pair. The event arrives on the worker, so everything below marshals first. */
             ExtensionCatalog.DefaultsChanged += OnDefaultsChanged;
+            /* The two extensions that ride along with every profile are fetched from the
+               Chrome Web Store on a worker thread, so the window is never waiting for the
+               network. A profile opened in the first seconds may not have them yet; the
+               Extensions page and the next profile creation both fetch them again. */
+            try
+            {
+                System.Threading.Tasks.Task.Run(new Func<int>(delegate { return ExtensionCatalog.FetchMissing(false); }));
+            }
+            catch { }
             /* Browser downloads never start because the window opened - only because a profile
                that is being opened needs a kernel it does not have. That is the AdsPower
                behaviour: create the profile, open it, and only then the required engine is
@@ -290,6 +323,32 @@ namespace JoeBrowser
         protected override void OnScaleChanged()
         {
             LayoutAll();
+        }
+
+        /// <summary>
+        /// The window comes back to the front.
+        ///
+        /// A window that was covered, or that was on another monitor and came back, can be
+        /// left holding the pixels of wherever it was: the compositor keeps the last frame it
+        /// had, and a control that moved since then keeps the old picture in the place it
+        /// used to be. The page is laid out again and the whole window is repainted as one
+        /// piece, so what comes back is the window as it is now and not a picture of where
+        /// it was.
+        /// </summary>
+        protected override void OnActivated(EventArgs e)
+        {
+            base.OnActivated(e);
+            try
+            {
+                LayoutAll();
+                Invalidate(true);
+                foreach (Control child in Controls)
+                {
+                    try { if (child.Visible) child.Invalidate(); } catch { }
+                }
+                Native.ComposeNow(Handle, true);
+            }
+            catch { }
         }
 
         /// <summary>
@@ -1736,12 +1795,11 @@ namespace JoeBrowser
         }
 
         /// <summary>
-        /// Puts back one of the shipped pair that the user removed.
+        /// Puts back one of the two extensions that ride along with every profile.
         ///
         /// The removal is recorded with a mark, so it survives a restart and a re-download.
-        /// Taking the mark off and writing the extension again is what puts it back - and
-        /// nothing else: the pair is written by the application, so there is no download to
-        /// retry and no store to be blocked by.
+        /// Taking the mark off and fetching the extension again is what puts it back - and
+        /// the fetch is from the Chrome Web Store, which is where it came from.
         /// </summary>
         private void RestoreShipped(int statusIndex)
         {
@@ -1750,7 +1808,7 @@ namespace JoeBrowser
             string id = statuses[statusIndex][0];
             string name = statuses[statusIndex][1];
             ExtensionCatalog.MarkRemoved(id, false);
-            ExtensionManager.WriteShippedPair(id);
+            FetchShippedExtensions();
             _extensionPage.RefreshShipped();
             Toast("\"" + name + "\" is back. It is included with every new profile.", ToastKind.Success);
         }
@@ -2724,8 +2782,12 @@ namespace JoeBrowser
         private void SetPage(int page)
         {
             /* One window, one repaint: the pages are swapped with the redraw frozen, so the
-               new page is drawn in one piece and the old one is never seen underneath it. */
+               new page is drawn in one piece and the old one is never seen underneath it.
+               The time is logged: a page that takes a quarter of a second to arrive is felt
+               as a slow application even when nothing is actually wrong with it. */
+            var started = System.Diagnostics.Stopwatch.StartNew();
             FreezeRedraw(delegate { SetPageCore(page); });
+            Log.Info("Page " + page + " shown in " + started.ElapsedMilliseconds + " ms.");
         }
 
         private void SetPageCore(int page)

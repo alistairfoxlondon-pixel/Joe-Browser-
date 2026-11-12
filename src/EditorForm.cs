@@ -66,7 +66,11 @@ namespace JoeBrowser
         private JBLabel _lblGroup, _lblTags, _lblStatus;
         private JBLabel _lblOs, _lblScreen, _lblTz, _lblLang, _lblGpu, _lblCores, _lblRam;
         private JBLabel _lblOsVer, _lblFontSet;
+        /// <summary>What the canvas noise costs and what it buys, under the switch.</summary>
+        private JBLabel _canvasNote;
         private JBLabel _lblUa, _lblWebrtc, _lblGeo, _lblLat, _lblLng;
+        /// <summary>One click to answer with the graphics card this PC really has.</summary>
+        private JBLink _matchGpu;
         private JBLabel _lblType, _lblHost, _lblPort, _lblUser, _lblPass, _lblSaved;
         private JBLabel _lblExt, _lblSpeed, _lblInterval, _lblCustomExt, _lblExtHint;
 
@@ -679,6 +683,27 @@ namespace JoeBrowser
                 ApplyGpuSelection();
             };
 
+            /* One click to answer with the card this PC really has. A profile that names a
+               card the machine does not have is one of the few things a scanner can see
+               without a database of anything: the renderer names one GPU and the limits
+               that come with it come from another. The button is only there when the
+               application knows the machine's adapter. */
+            _matchGpu = new JBLink { Text = "Use this PC's graphics card" };
+            _matchGpu.Click += delegate
+            {
+                if (string.IsNullOrEmpty(FingerprintFactory.MachineRenderer)) return;
+                _suppress = true;
+                _fp.WebGlRenderer = FingerprintFactory.MachineRenderer;
+                _fp.WebGlVendor = string.IsNullOrEmpty(FingerprintFactory.MachineVendor)
+                    ? _fp.WebGlVendor : FingerprintFactory.MachineVendor;
+                _suppress = false;
+                RefreshFingerprintUi();
+                LayoutAll();
+                SetError("");
+            };
+            _tabFp.Controls.Add(_matchGpu);
+            _matchGpu.Visible = !string.IsNullOrEmpty(FingerprintFactory.MachineRenderer);
+
             _regen = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = "New fingerprint" };
             _regen.Click += delegate
             {
@@ -779,6 +804,14 @@ namespace JoeBrowser
             _fontSet.SetItems(fontLabels, 0);
             _hwNoise = new JBToggle { Text = "Hardware noise", Checked = _fp.HardwareNoise };
             _tabPriv.Controls.Add(_hwNoise);
+
+            _canvasNote = new JBLabel(LabelRole.Faint,
+                "Canvas noise off: the profile looks exactly like this PC, and every profile on it " +
+                "shares one canvas. On: each profile gets its own canvas, and the fingerprint " +
+                "sites read it as a modified canvas.");
+            _canvasNote.Wrap = true;
+            _canvasNote.TextAlign = ContentAlignment.TopLeft;
+            _tabPriv.Controls.Add(_canvasNote);
 
             _lblWebrtc = Lbl(_tabPriv, "WEBRTC LEAK");            _webrtcSel = Pick(_tabPriv, "shield");
             _webrtcSel.SetItems(LabelsOf(FingerprintFactory.WebRtcOptions), 0);
@@ -1535,6 +1568,11 @@ namespace JoeBrowser
 
             _lblGpu.SetBounds(0, y, cw, lh); y += lh + lg;
             _gpu.SetBounds(0, y, cw, fh); y += fh + rg;
+            if (_matchGpu != null && _matchGpu.Visible)
+            {
+                _matchGpu.SetBounds(0, y, cw, Ui.S(22));
+                y += Ui.S(22) + Ui.S(8);
+            }
 
             /* The pair shares the column: two long labels at a large scale were wider than the
                page, so the second button hung outside the content and its last word was cut. */
@@ -1593,6 +1631,17 @@ namespace JoeBrowser
             for (int i = 0; i < toggles.Length; i++)
                 toggles[i].SetBounds((i % cols) * (colW + tg), rowY + (i / cols) * (th + Ui.S(6)), colW, th);
             y = rowY + rows * (th + Ui.S(6)) + Ui.S(4);
+
+            /* What the canvas switch costs and what it buys. The canvas is the one surface a
+               scanner can compare with a reference, so a canvas that differs from this PC's
+               is read as a modified one - and a canvas that does not differ is shared by
+               every profile on the machine. Neither is a choice the user should have to
+               guess at, so it is written down. */
+            if (_canvasNote != null && _canvasNote.Visible)
+            {
+                _canvasNote.SetBounds(0, y, cw, Ui.S(40));
+                y += Ui.S(40) + Ui.S(4);
+            }
 
             FinishPage(page, host, cw, y);
         }

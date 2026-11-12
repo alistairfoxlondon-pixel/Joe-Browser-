@@ -293,6 +293,30 @@ namespace JoeBrowser
                 row.ActionRequested += delegate { RemoveBuild(k); };
                 AddBlock(row);
             }
+
+            /* A pre-release build reports a version the fingerprint sites have never seen, and
+               a version they do not know is read as a mask: the browser is pretending to be a
+               Chrome that does not exist yet. It says so here, where the build is chosen,
+               because it is the one thing that turns a perfect score into a warning and it
+               has nothing to do with the profile itself. */
+            var catalogue = KernelStore.CatalogCached(engine);
+            if (catalogue != null && catalogue.Count > 0)
+            {
+                foreach (var k in mine)
+                {
+                    bool stable = false;
+                    foreach (var r in catalogue)
+                        if (r != null && string.Equals(r.Version, k.Version, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(r.Channel, "Stable", StringComparison.OrdinalIgnoreCase)) { stable = true; break; }
+                    if (!stable)
+                    {
+                        AddMessage("This build is a pre-release. A profile that runs it reports a version " +
+                            "the fingerprint sites do not know yet, and they read that as a mask. " +
+                            "Install the Stable channel for a profile that has to look untouched.");
+                        break;
+                    }
+                }
+            }
         }
 
         private static List<KernelInstall> InstalledFor(string engine)

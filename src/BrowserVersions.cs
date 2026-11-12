@@ -75,8 +75,12 @@ namespace JoeBrowser
             int.TryParse(parts[0], out major);
             int.TryParse(parts[2], out build);
             int.TryParse(parts[3], out patch);
-            /* "157.0.0.0" never ships: the branch and the patch are always real numbers. */
-            return major >= 80 && build > 0 && patch > 0;
+            /* "157.0.0.0" never ships: the branch and the patch are always real numbers. The
+               branch is what says so - the reduced form has a zero there. The patch may be
+               zero: every Canary and every beta build of a branch ends in ".0", so requiring
+               it to be larger than zero threw away the version of the very engine the
+               application ships, and a profile that runs it could never be aligned with it. */
+            return major >= 80 && build > 0;
         }
 
         public static int MajorOf(string version)

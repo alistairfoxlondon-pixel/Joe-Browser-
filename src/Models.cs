@@ -426,6 +426,14 @@ namespace JoeBrowser
         /// <summary>Restored window size from the last session, in device-independent pixels.</summary>
         public int WinWidth { get; set; }
         public int WinHeight { get; set; }
+        /// <summary>
+        /// The graphics card this PC really has, read from the browser the app launches.
+        /// A profile that answers with it is what a real browser on this machine would
+        /// answer, and a card the machine does not have is a scanner's cheapest tell.
+        /// </summary>
+        public string MachineGlRenderer { get; set; }
+        /// <summary>The vendor that goes with <see cref="MachineGlRenderer"/>.</summary>
+        public string MachineGlVendor { get; set; }
 
         public AppSettings()
         {

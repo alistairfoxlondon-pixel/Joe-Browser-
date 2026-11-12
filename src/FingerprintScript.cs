@@ -139,18 +139,34 @@ namespace JoeBrowser
      by .length, and the parameter list toString() renders. V8 prints an accessor as
      'function get x() { [native code] }', so the replacement is built from the real function's
      own parameter names and that shape - inventing a marker string of ours would simply be a
-     signature a detector could match against. */
+     signature a detector could match against.
+
+     The parameter list comes from the function being REPLACED, not from the replacement. A
+     WebIDL method prints without its argument names - a real Chrome answers
+     'function getParameter() { [native code] }' - while the replacement is written in
+     JavaScript and carries them: 'function getParameter(pname) { [native code] }'. The
+     difference between the two is one line of text, and it is exactly what a scanner
+     compares: it is the 'WebGL exception' and the 'Canvas Tampering' verdict, both of them
+     raised against a browser that was never tampered with. */
   var FN_SRC = /^\s*(?:async\s+)?function[^(]*\(([^)]*)\)/;
 
-  function mark(fn, name, len) {
+  function mark(fn, name, len, native, params) {
     try {
       if (fakes) {
-        var params = '';
+        var ps = null;
         try {
-          var m = FN_SRC.exec(origToString.call(fn));
-          if (m) params = m[1];
+          /* The native it replaces is the reference. Its own source is the shape the
+             replacement has to reproduce. A method this script already replaced is its own
+             reference: the recorded shape is the native one, while its real source is
+             JavaScript again - so the recorded shape is read first. */
+          var src = null;
+          if (native && fakes && fakes.has(native)) src = fakes.get(native);
+          else src = native ? origToString.call(native) : origToString.call(fn);
+          var m = FN_SRC.exec(src);
+          if (m) ps = m[1];
         } catch (e) {}
-        fakes.set(fn, 'function ' + name + '(' + params + ') { [native code] }');
+        if (params != null) ps = params;
+        fakes.set(fn, 'function ' + name + '(' + (ps == null ? '' : ps) + ') { [native code] }');
       }
       /* A native accessor carries its own name ('get userAgent'); an anonymous replacement
          reports name === '', which is the first thing a descriptor scan looks for. */
@@ -187,7 +203,7 @@ namespace JoeBrowser
           }
         } catch (e) {}
         return new OrigBlob(parts, options);
-      }, 'Blob', 2);
+      }, 'Blob', 2, OrigBlob);
       try { JbBlob.prototype = OrigBlob.prototype; } catch (e) {}
       window.Blob = JbBlob;
     }
@@ -251,8 +267,22 @@ namespace JoeBrowser
 
   function method(obj, prop, fn, len) {
     try {
+      /* The native being replaced is the reference for the printed signature, and its
+         descriptor is the reference for the shape of the property. A WebIDL operation on a
+         prototype is enumerable, and a replacement that is not is visible to anything that
+         walks the prototype - which is how a scanner sees a canvas method that has been
+         replaced rather than a canvas that works. */
+      var native = null, desc = null;
+      try {
+        desc = Object.getOwnPropertyDescriptor(obj, prop);
+        var cur = obj[prop];
+        if (typeof cur === 'function') native = cur;
+      } catch (e) {}
       Object.defineProperty(obj, prop, {
-        value: mark(fn, prop, len), writable: true, enumerable: false, configurable: true
+        value: mark(fn, prop, len, native),
+        writable: desc ? desc.writable !== false : true,
+        enumerable: desc ? desc.enumerable === true : true,
+        configurable: true
       });
     } catch (e) {}
   }
@@ -342,7 +372,7 @@ namespace JoeBrowser
         } catch (e) {}
       }
       return out;
-    }, 'getExtension', 1);
+    }, 'getExtension', 1, __jbRE);
   } catch (e) {}
 
   function emptyList(tag) {
@@ -354,10 +384,13 @@ namespace JoeBrowser
     var a = proto ? Object.create(proto) : [];
     try {
       Object.defineProperty(a, 'length', { value: 0, configurable: true });
-      Object.defineProperty(a, 'item', { value: mark(function item(index) { return null; }, 'item', 1), configurable: true });
-      Object.defineProperty(a, 'namedItem', { value: mark(function namedItem(name) { return null; }, 'namedItem', 1), configurable: true });
+      /* The collection methods are native WebIDL operations and print without their
+         argument names, so the replacements have to print that way too - and they are
+         enumerable on a real collection, or a walk of the prototype finds them missing. */
+      Object.defineProperty(a, 'item', { value: mark(function item(index) { return null; }, 'item', 1, null, ''), writable: true, enumerable: true, configurable: true });
+      Object.defineProperty(a, 'namedItem', { value: mark(function namedItem(name) { return null; }, 'namedItem', 1, null, ''), writable: true, enumerable: true, configurable: true });
       if (tag === 'PluginArray')
-        Object.defineProperty(a, 'refresh', { value: mark(function refresh() { }, 'refresh', 0), configurable: true });
+        Object.defineProperty(a, 'refresh', { value: mark(function refresh() { }, 'refresh', 0, null, ''), writable: true, enumerable: true, configurable: true });
     } catch (e) {}
     return a;
   }
@@ -387,18 +420,18 @@ namespace JoeBrowser
         PlatformArch: { ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
         PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' }
       };
-      chromeStub.runtime.connect = mark(function connect() { throw new Error('Could not establish connection. Receiving end does not exist.'); }, 'connect', 0);
-      chromeStub.runtime.sendMessage = mark(function sendMessage() { throw new Error('Could not establish connection. Receiving end does not exist.'); }, 'sendMessage', 1);
+      chromeStub.runtime.connect = mark(function connect() { throw new Error('Could not establish connection. Receiving end does not exist.'); }, 'connect', 0, null, '');
+      chromeStub.runtime.sendMessage = mark(function sendMessage() { throw new Error('Could not establish connection. Receiving end does not exist.'); }, 'sendMessage', 1, null, '');
       /* Real Chrome returns an object from both; null is what a broken stub returns. */
       chromeStub.loadTimes = mark(function loadTimes() {
         return { requestTime: 0, startLoad: 0, commitLoad: 0, finishDocumentLoad: 0, finishLoad: 0,
           firstPaintTime: 0, firstPaintAfterLoadTime: 0, navigationType: 'Other',
           wasFetchedViaSpdy: false, wasNpnNegotiated: true, npnNegotiatedProtocol: 'h2',
           wasAlternateProtocolAvailable: false, connectionInfo: 'h2' };
-      }, 'loadTimes', 0);
+      }, 'loadTimes', 0, null, '');
       chromeStub.csi = mark(function csi() {
         return { startE: 0, onloadT: 0, pageT: Math.round(performance.now()), tran: 15 };
-      }, 'csi', 0);
+      }, 'csi', 0, null, '');
       Object.defineProperty(window, 'chrome', { value: chromeStub, writable: true, configurable: true, enumerable: true });
     }
   } catch (e) {}
@@ -724,6 +757,23 @@ namespace JoeBrowser
 
   /* ---- WebGL ---- */
   try {
+    /* The adapter this machine really has, read before anything is replaced.
+       The application asks the page for it once and keeps it: a profile that claims a
+       card the machine does not have is one of the few things a scanner can see without
+       a database of anything - the name says one GPU and the limits that come with it
+       come from another. */
+    try {
+      var rc = document.createElement('canvas');
+      var rg = rc.getContext('webgl2') || rc.getContext('webgl');
+      if (rg) {
+        var re = rg.getExtension('WEBGL_debug_renderer_info');
+        if (re) {
+          window.__jbRealGl = String(rg.getParameter(re.UNMASKED_RENDERER_WEBGL)) +
+            '||' + String(rg.getParameter(re.UNMASKED_VENDOR_WEBGL));
+        }
+      }
+    } catch (e2) {}
+
     var glParams = {};
     /* WebKit on iOS never ships WEBGL_debug_renderer_info, so the unmasked pair reads back as
        null there. Answering it under a Safari UA is a self-inflicted contradiction. */
@@ -1360,7 +1410,17 @@ namespace JoeBrowser
   }
   function method(o, p, fn, len) {
     try {
-      Object.defineProperty(o, p, { value: named(fn, p), writable: true, enumerable: false, configurable: true });
+      /* The descriptor of the method being replaced is the reference: a WebIDL operation on
+         a prototype is enumerable, and a replacement that is not is visible to anything
+         that walks the prototype. */
+      var desc = null;
+      try { desc = Object.getOwnPropertyDescriptor(o, p); } catch (e) {}
+      Object.defineProperty(o, p, {
+        value: named(fn, p),
+        writable: desc ? desc.writable !== false : true,
+        enumerable: desc ? desc.enumerable === true : true,
+        configurable: true
+      });
       if (len != null) Object.defineProperty(fn, 'length', { value: len, configurable: true });
     } catch (e) {}
   }

@@ -138,7 +138,38 @@ namespace JoeBrowser
                "Open" then opened a page from a different row than the one highlighted. */
             _selected = -1;
 
-            var all = Profile == null ? new List<HistoryStore.Entry>() : HistoryStore.Read(Profile.Id);
+            /* The history is a file that grows with every page a profile visits, and reading
+               it took the better part of a second on a busy profile - a second in which the
+               whole application is frozen, because the read happens on the thread that draws.
+               It is read on a worker now and the list is filled in when it arrives, so the
+               page is there the moment it is asked for. */
+            var profile = Profile;
+            int token = ++_loadToken;
+            _subtitle.Text = L10n.T("history.loading");
+            System.Threading.Tasks.Task.Run(new Func<List<HistoryStore.Entry>>(delegate
+            {
+                try { return profile == null ? new List<HistoryStore.Entry>() : HistoryStore.Read(profile.Id); }
+                catch { return new List<HistoryStore.Entry>(); }
+            })).ContinueWith(delegate(System.Threading.Tasks.Task<List<HistoryStore.Entry>> t)
+            {
+                try
+                {
+                    if (IsDisposed || !IsHandleCreated) return;
+                    BeginInvoke(new Action(delegate
+                    {
+                        /* A newer read has already answered, or the page was left. */
+                        if (token != _loadToken || IsDisposed) return;
+                        ApplyEntries(t.Result ?? new List<HistoryStore.Entry>());
+                    }));
+                }
+                catch { }
+            });
+        }
+
+        /// <summary>Fills the list from the entries that were read off the disk.</summary>
+        private void ApplyEntries(List<HistoryStore.Entry> all)
+        {
+            if (all == null) all = new List<HistoryStore.Entry>();
             int matching = 0;
             foreach (var e in all)
             {
@@ -175,6 +206,9 @@ namespace JoeBrowser
             UpdateButtons();
             LayoutCore();
         }
+
+        /// <summary>Counts the reads that were asked for, so a slow one cannot overwrite a newer.</summary>
+        private int _loadToken;
 
         private void UpdateButtons()
         {

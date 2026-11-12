@@ -186,6 +186,50 @@ jobs:
 
             ### In this build
 
+            **The fingerprint no longer reads as masked.** BrowserScan scored the app at 90%
+            with a "WebGL exception" and a "Canvas Tampering"; it now scores **100%**, and
+            iphey reports the identity as trustworthy with everything fine. Four things were
+            wrong, and each of them was one line of a lie:
+
+            - *The graphics card.* The profile claimed a card the machine does not have. The
+              renderer named one GPU and the limits that came with it came from another, and
+              that is visible without a database of anything. The application now reads the
+              adapter the machine really has - out of the browser it launches - and answers
+              with it. There is a one-click "use this PC's graphics card" in the editor too.
+            - *The version.* The profile claimed Chrome 157 while it ran Chromium 160, and
+              the client hints - the GREASE brand above all - are a property of the binary
+              that is running. A profile now reports the build it actually runs.
+            - *The patched methods.* The replaced WebGL and canvas functions printed their
+              argument names, and a native WebIDL method never does. They printed the wrong
+              shape, and they were not enumerable, where the real ones are. Both are now
+              exactly what the browser prints.
+            - *The canvas.* A canvas that differs from this PC's is read as a modified
+              canvas, so the noise is off by default. The switch is still there, one click
+              away, and what it costs and what it buys is written under it.
+
+            **A pre-release engine is called out.** A Canary build reports a version the
+            fingerprint sites have never seen, and a version they do not know is read as a
+            mask. The default engine is now the newest stable build, and the Browsers page
+            says so when the build that is installed is a pre-release.
+
+            **The two extensions come from the Chrome Web Store.** "HTTP Tracker Plus" and
+            "Absolute Enable Right Click & Copy" are fetched from the store - the real
+            listings - installed by default for a new profile, and removable. They are no
+            longer written by the application. Only **paste as human** and the **proxy
+            rotation and offline alerts** are built in, and both work on their own: the
+            human-paste extension carries the typing engine, so Ctrl+V types the text with
+            human timing instead of dropping it in at once, in any browser that loads it.
+
+            **The window comes back the way it is.** A window that was covered could keep the
+            pixels of wherever it was. The page is laid out again and the window is
+            repainted as one piece when it comes to the front.
+
+            **The history page does not freeze the application.** Reading the history took the
+            better part of a second on a busy profile, on the thread that draws. It is read
+            on a worker now: the page arrives in 92 ms instead of 721 ms.
+
+            ### What was in 1.11.1
+
             **Opening a profile's menu no longer takes the window down.** The menu was given
             a rounded window region, and a region is built in logical pixels and converted
             with the control's own graphics - on a screen that is not at 100% the two do not
