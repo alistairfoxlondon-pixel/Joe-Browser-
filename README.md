@@ -86,6 +86,15 @@ whatever the message said, so a short confirmation was a long empty bar with a s
 one end. The switch is a switch now - a pill with a round knob - and the sort button is a
 button with an icon instead of a line of text.
 
+## What changed in 1.13.1
+
+**The window comes back whole.** A window that was covered - or that was on another
+monitor and came back - is repainted by Windows region by region, and a user who looks
+at it in that moment sees a half drawn window: a button whose shape is there and whose text
+is stretched, a card that is a stripe, a caption bar in the old colour. The whole tree is
+now frozen, marked dirty and thawed, and the paint is done in one pass, so what appears is
+the window as it is.
+
 ## What changed in 1.13.0
 
 **The fingerprint no longer reads as masked.** BrowserScan scored the app at 90% with a

@@ -768,6 +768,46 @@ namespace JoeBrowser
         }
 
         /// <summary>
+        /// Repaints the whole window as one piece.
+        ///
+        /// A window that comes back from being covered - or that was on another monitor
+        /// and came back - is repainted by Windows region by region, and a user who looks
+        /// at it in that moment sees a half drawn window: a button whose shape is there
+        /// and whose text is stretched, a card that is a stripe, a caption bar in the old
+        /// colour. Every handle in the tree is frozen, everything is marked dirty, and the
+        /// paint is done in one pass, so what appears is the window as it is.
+        /// </summary>
+        protected void RepaintAsOnePiece()
+        {
+            try
+            {
+                var handles = new List<IntPtr>();
+                CollectHandles(this, handles);
+                foreach (var h in handles)
+                {
+                    try { Native.SendMessage(h, Native.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero); } catch { }
+                }
+                try
+                {
+                    Invalidate(true);
+                    foreach (Control child in Controls)
+                    {
+                        try { if (child.Visible) child.Invalidate(); } catch { }
+                    }
+                }
+                finally
+                {
+                    foreach (var h in handles)
+                    {
+                        try { Native.SendMessage(h, Native.WM_SETREDRAW, (IntPtr)1, IntPtr.Zero); } catch { }
+                    }
+                }
+                Native.ComposeNow(Handle, true);
+            }
+            catch { }
+        }
+
+        /// <summary>
         /// Marks every control under <paramref name="root"/> as needing a repaint.
         ///
         /// The window is repainted as one piece, so every control in it has to be part of

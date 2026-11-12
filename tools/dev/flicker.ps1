@@ -27,6 +27,7 @@ public static class F {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint d, uint e, uint o, IntPtr l);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
   [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int ht, bool repaint);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int ht, uint flags);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
@@ -80,7 +81,12 @@ function Grab([string]$path) {
     $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
 }
 
-# Real mouse click on the theme switch.
+# Real mouse click on the theme switch. Another application's window may hold the
+# foreground, and a click that lands on it goes there instead - so the ALT key is
+# pressed first, which is the documented way for a process to take the foreground.
+[F]::keybd_event(0x12, 0, 0, [IntPtr]::Zero)
+[F]::keybd_event(0x12, 0, 2, [IntPtr]::Zero)
+Start-Sleep -Milliseconds 120
 $sx = $r.Left + $SwitchX; $sy = $r.Top + $SwitchY
 [F]::SetCursorPos($sx, $sy) | Out-Null
 Start-Sleep -Milliseconds 150

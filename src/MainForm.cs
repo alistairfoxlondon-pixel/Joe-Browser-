@@ -328,27 +328,20 @@ namespace JoeBrowser
         /// <summary>
         /// The window comes back to the front.
         ///
-        /// A window that was covered, or that was on another monitor and came back, can be
-        /// left holding the pixels of wherever it was: the compositor keeps the last frame it
-        /// had, and a control that moved since then keeps the old picture in the place it
-        /// used to be. The page is laid out again and the whole window is repainted as one
-        /// piece, so what comes back is the window as it is now and not a picture of where
-        /// it was.
+        /// A window that was covered, or that was on another monitor and came back, is
+        /// repainted by Windows region by region, and a user who looks at it in that
+        /// moment sees a half drawn window - a button whose shape is there and whose text
+        /// is stretched, a card that is a stripe. The whole tree is frozen, marked dirty
+        /// and thawed, and the paint is done in one pass.
+        ///
+        /// The page is NOT laid out again here. The layout rebuilds the profile cards, and a
+        /// card that is replaced under the pointer never sees the mouse-down - the click is
+        /// lost, and the window looks as though it had swallowed it.
         /// </summary>
         protected override void OnActivated(EventArgs e)
         {
             base.OnActivated(e);
-            try
-            {
-                LayoutAll();
-                Invalidate(true);
-                foreach (Control child in Controls)
-                {
-                    try { if (child.Visible) child.Invalidate(); } catch { }
-                }
-                Native.ComposeNow(Handle, true);
-            }
-            catch { }
+            RepaintAsOnePiece();
         }
 
         /// <summary>
