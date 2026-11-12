@@ -32,9 +32,59 @@ both in place for you.
 | **Proxies** | HTTP, HTTPS and SOCKS5 with authentication. Credentials are applied by a local relay, so a password never appears in a browser command line. Swap the proxy of a running profile without closing its tabs. |
 | **Fingerprint check** | A fifteen point probe inside the profile's own session, plus one click buttons that open the well known checkers in that same session. |
 | **History per profile** | Every page a profile visits, including the redirect hops, isolated per account and clearable. |
-| **Extensions** | Three first party tools written by this app, two extensions included with every Chromium profile, and anything you add from a Chrome Web Store link, a `.crx` or a folder. The included pair show their state, and removing one keeps it removed. |
+| **Extensions** | Three first party tools written by this app, two extensions included with every Chromium profile, and anything you add from a Chrome Web Store link, a `.crx` or a folder. The included pair work on their own - in any Chromium that loads them - and removing one keeps it removed. |
 | **Built to be read** | 16 px body text, one measured layout at every window width, and no control that cuts its own label. |
 | **Private by default** | Profile data stays in `%APPDATA%\JoeBrowser`. Proxy passwords and the account store are encrypted with Windows DPAPI. No telemetry, no server, no cloud. |
+
+## What changed in 1.12.0
+
+**Opening a profile's menu no longer takes the window down.** The menu was given a rounded
+window region, and a region is built in logical pixels and converted with the control's own
+graphics - on a screen that is not at 100% the two do not agree, and the conversion throws
+"Parameter is not valid". The first profile menu opened on a scaled display closed the
+application. The menu is square now, like every other surface in the app.
+
+**Paste as human is the extension's job, and it works on its own.** It used to be a bridge:
+the extension forwarded its menu entry to the script the application injects, so in any
+browser the application did not launch it did nothing at all. The extension now carries the
+typing engine, and it replaces the plain paste - Ctrl+V types the text with human timing
+instead of dropping it in at once. Where the application also injects the feature, the two
+share a marker on the document so the text is typed once, not twice.
+
+**"Absolute Enable Right Click and Copy" does the work itself.** It was a bridge too: the
+right-click menu was restored by the injected script, and the extension did nothing on its
+own. It now restores the context menu, the copy and the selection by itself.
+
+**HTTP Tracker Plus is visible.** The request list opened only from a toolbar button, and a
+toolbar button nobody can find is the same as an extension that is not there. There is now a
+small badge on the page that counts the requests and the trackers, and it opens the list.
+
+**The proxy alerts follow the proxy.** A profile created without a proxy had the watch
+switched off, and adding a proxy later left it off - so the rotation and offline alerts
+never fired on exactly the profiles they matter for. Choosing a proxy turns the watch on.
+The application also says so itself now: a rotation, a proxy that stopped answering and a
+proxy that came back are all reported in the window.
+
+**The window is not scaled twice.** The application scales every measurement itself, and
+WinForms was scaling the controls as well. On a screen that is not at 100% every size was
+doubled, and the interface looked broken rather than scaled. The window now moves between
+monitors correctly: the scale is read, the fonts are rebuilt and the page is laid out again.
+
+**The theme change is quicker.** The restyle asked the window manager for every control's
+position, which is a round trip per control and cost half the time the change took. It is
+now a quarter of the time, and the log says how long a change took.
+
+**A new profile asks for four things.** Name, browser, browser build and group. The start
+page, the custom path, the tags, the status and the notes are one click away instead of
+five rows of form in front of the name. The profile menu went from nine entries to six. The
+Tools page keeps two switches: the right-click and selection tools are what the shipped
+extension does on every profile, and a switch for a thing that is always on is a switch
+that only teaches the user that the app has more switches than it needs.
+
+**The toast is as wide as its message.** It used to be a band across half the window
+whatever the message said, so a short confirmation was a long empty bar with a small mark at
+one end. The switch is a switch now - a pill with a round knob - and the sort button is a
+button with an icon instead of a line of text.
 
 ## What changed in 1.11.1
 

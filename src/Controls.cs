@@ -709,6 +709,7 @@ namespace JoeBrowser
         private void ApplyModeChange()
         {
             if (!IsHandleCreated) { Theme.Restyle(this); return; }
+            long started = Environment.TickCount;
 
             /* Every window handle in this tree is frozen, not only the form's. A child control
                has its own window, so freezing the parent left each one free to repaint the
@@ -720,6 +721,7 @@ namespace JoeBrowser
             {
                 try { Native.SendMessage(h, Native.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero); } catch { }
             }
+            long tFreeze = Environment.TickCount;
             try
             {
                 /* One restyle walk, not three. Theme.Restyle(this) calls ReStyle() on this
@@ -729,6 +731,7 @@ namespace JoeBrowser
             }
             finally
             {
+                long tRestyle = Environment.TickCount;
                 foreach (var h in handles)
                 {
                     try { Native.SendMessage(h, Native.WM_SETREDRAW, (IntPtr)1, IntPtr.Zero); } catch { }
@@ -738,9 +741,21 @@ namespace JoeBrowser
                 /* Thawing a window does not repaint it, so the whole tree is invalidated and
                    painted in one pass here. Without the invalidate the controls that were
                    frozen kept the pixels they had, and the window showed the new background
-                   over the old controls. */
+                   over the old controls.
+
+                   Every control is invalidated on its own, not only the form. A control whose
+                   background happens to be the same colour in both themes is not marked
+                   dirty by WinForms, and it kept the pixels of the old theme - the caption
+                   buttons and the badge on the About page were the two that showed it. */
                 Invalidate(true);
+                InvalidateEvery(this);
                 Native.ComposeNow(Handle, true);
+                /* How long the change took. A theme switch that takes a fifth of a second is
+                   felt as a flash even when every frame is correct, and the log is the only
+                   place that number exists. */
+                Log.Info("Theme change: freeze " + (tFreeze - started) + " ms, restyle " +
+                    (tRestyle - tFreeze) + " ms, paint " + (Environment.TickCount - tRestyle) +
+                    " ms, handles " + handles.Count + ".");
             }
         }
 
@@ -750,6 +765,22 @@ namespace JoeBrowser
             if (root == null) return;
             if (root.IsHandleCreated) into.Add(root.Handle);
             foreach (Control child in root.Controls) CollectHandles(child, into);
+        }
+
+        /// <summary>
+        /// Marks every control under <paramref name="root"/> as needing a repaint.
+        ///
+        /// The window is repainted as one piece, so every control in it has to be part of
+        /// that piece. WinForms only marks the ones whose own properties changed, and a
+        /// control that draws its surface itself - a button, a badge - is not marked at all
+        /// when only the palette under it changed. Those kept the pixels of the old theme,
+        /// and the change was visible as a window with two themes on it.
+        /// </summary>
+        private static void InvalidateEvery(Control root)
+        {
+            if (root == null) return;
+            try { if (root.Visible) root.Invalidate(); } catch { }
+            foreach (Control child in root.Controls) InvalidateEvery(child);
         }
 
         public JBForm()
@@ -771,6 +802,9 @@ namespace JoeBrowser
         }
 
         public bool Maximized { get { return _maximized; } }
+
+        /// <summary>Called after the display scale changed and the fonts were rebuilt.</summary>
+        protected virtual void OnDpiChanged() { }
 
         protected override CreateParams CreateParams
         {
@@ -937,10 +971,40 @@ namespace JoeBrowser
 
         protected override void WndProc(ref Message m)
         {
-            const int WM_NCHITTEST = 0x84, WM_NCLBUTTONDBLCLK = 0xA3;
+            const int WM_NCHITTEST = 0x84, WM_NCLBUTTONDBLCLK = 0xA3, WM_DPICHANGED = 0x02E0;
             const int HTCLIENT = 1, HTCAPTION = 2;
             const int HTLEFT = 10, HTRIGHT = 11, HTTOP = 12, HTTOPLEFT = 13, HTTOPRIGHT = 14,
                       HTBOTTOM = 15, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
+
+            /* The window moved to a screen with a different scale. Windows says so and offers
+               the rectangle it would like the window to take. The application scales its own
+               measurements, so it has to be told: the scale is read, the fonts are rebuilt at
+               the new size and the page is laid out again. Without this the window moved to a
+               scaled screen and every measurement stayed at the old factor, which is how a
+               layout ends up with text that does not fit its own row. */
+            if (m.Msg == WM_DPICHANGED)
+            {
+                int dpi = m.WParam.ToInt32() & 0xFFFF;
+                if (dpi > 0)
+                {
+                    float scale = dpi / 96f;
+                    if (scale < 1f) scale = 1f;
+                    if (Math.Abs(scale - Ui.Scale) > 0.001f)
+                    {
+                        Ui.Scale = scale;
+                        Theme.ClearFontCache();
+                        try
+                        {
+                            var r = (Rectangle)Marshal.PtrToStructure(m.LParam, typeof(Rectangle));
+                            SetBounds(r.Left, r.Top, r.Width, r.Height);
+                        }
+                        catch { }
+                        Theme.Restyle(this);
+                        OnDpiChanged();
+                        return;
+                    }
+                }
+            }
 
             if (m.Msg == WM_NCLBUTTONDBLCLK && AllowMaximize) { ToggleMaximize(); return; }
 
@@ -1038,22 +1102,32 @@ namespace JoeBrowser
                 e.Graphics.DrawRectangle(pen, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
         }
 
-        /// <summary>Rounds the dropdown window itself, the way a Windows 11 flyout looks.</summary>
+        /// <summary>
+        /// The dropdown window is square, like every other surface in the app.
+        ///
+        /// It used to be given a rounded window region. That region is built in logical
+        /// pixels, and <see cref="Control.Region"/> converts it to a native region with the
+        /// control's own graphics - on a screen that is not at 100% the two do not agree and
+        /// the conversion throws "Parameter is not valid", which took the whole window down
+        /// the first time a profile menu was opened. It also had to be re-applied on every
+        /// resize, and the moment between the plain rectangle and the rounded one showed as
+        /// a pale line around the menu.
+        ///
+        /// A square menu with a hairline border is what the app uses everywhere else, so
+        /// there is nothing to round.
+        /// </summary>
         private static void Round(ToolStrip strip)
         {
-            if (strip.Width <= 0 || strip.Height <= 0) return;
-            /* Square, like every other surface. A window region is also the one place a mistake is
-               visible for a whole second: while a context menu is still a plain rectangle the
-               default grey border shows at its edge, which is the pale line that flashed when a
-               menu opened before the region was applied. The old region is disposed before it is
-               replaced - WinForms does not do it, and every resize churned one native region. */
-            using (var path = Ui.Round(new RectangleF(0, 0, strip.Width, strip.Height), Ui.S(Theme.ButtonRadius)))
-            using (var region = new Region(path))
+            if (strip == null) return;
+            /* Any region left over from an older build is dropped, and no new one is set:
+               the crash was in the conversion, and a square menu needs no conversion. */
+            try
             {
                 var old = strip.Region;
-                strip.Region = region;
+                strip.Region = null;
                 if (old != null) old.Dispose();
             }
+            catch { }
         }
 
         protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
@@ -2205,16 +2279,16 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             float h = Height;
-            // windows-ui switch: 42x21 track, 13px thumb, 1px outline when off.
-            float trackW = Ui.S(42), trackH = Ui.S(21);
+            /* A switch is a switch: a pill with a round knob that slides across it. The square
+               track it used to be looked like a progress bar that had been squashed, and the
+               square knob inside it looked like a chip of dirt. Every switch a person has ever
+               used is a pill, and this is the one place where following that convention is
+               what makes the control read as a switch at a glance. */
+            float trackW = Ui.S(40), trackH = Ui.S(22);
             float ty = (h - trackH) / 2f;
             var track = new RectangleF(0.5f, ty, trackW, trackH);
+            float rad = trackH / 2f;
 
-            /* Square, like everything else on the surface: the track is the shape of the app,
-               and the knob is a square that slides. A pill here would be the one rounded thing
-               left on a page of square cards, which is exactly the inconsistency the radius
-               sweep is for. */
-            float rad = Ui.S(Theme.ButtonRadius);
             /* The track and the knob both read their tween: the fill eases between the empty
                and the accent track, and the knob travels the distance the switch covers. */
             float onT = _knobT.Value;
@@ -2228,18 +2302,18 @@ namespace JoeBrowser
                 Ui.Stroke(g, track, rad, Ui.Blend(Theme.TextDim, Theme.Accent, onT), 1f);
             }
 
-            float knobD = Ui.S(15);
+            float knobD = Ui.S(16);
             float ky = track.Y + (trackH - knobD) / 2f;
             float kxOff = track.X + Ui.S(3), kxOn = track.Right - knobD - Ui.S(3);
             float kx = kxOff + (kxOn - kxOff) * onT;
             using (var b = new SolidBrush(onT > 0.5f ? Theme.OnAccent : Theme.TextDim))
-                g.FillRectangle(b, kx, ky, knobD, knobD);
+                g.FillEllipse(b, kx, ky, knobD, knobD);
 
             if (!string.IsNullOrEmpty(Text))
                 Ui.Text(g, Text, Font, Enabled ? Theme.Text : Theme.TextFaint, trackW + Ui.S(10), (h - Font.GetHeight(g)) / 2f, Math.Max(0, Width - trackW - Ui.S(10)));
 
             if (Ui.FocusCues(this))
-                Ui.FocusRing(g, track, Ui.S(Theme.ButtonRadius));
+                Ui.FocusRing(g, track, rad);
         }
     }
 
@@ -2837,13 +2911,63 @@ namespace JoeBrowser
         /// Anchors the toast to a bottom edge and lets it grow upward for long messages.
         /// A one-line message keeps the standard 44px bar; longer ones wrap to at most three
         /// lines so nothing is silently clipped with an ellipsis.
+        ///
+        /// The bar is as wide as its message and no wider. It used to be a fixed band that
+        /// spanned half the window whatever the message said, so a short confirmation was a
+        /// long empty bar with a small mark at one end and a cross at the other.
         /// </summary>
-        public void Place(int x, int bottom, int width)
+        public void Place(int centreX, int bottom, int maxWidth)
         {
+            _centre = centreX;
             _bottom = bottom;
-            Width = Math.Max(Ui.S(200), width);
-            Left = x;
-            FitHeight();
+            _maxWidth = Math.Max(Ui.S(220), maxWidth);
+            Fit();
+        }
+
+        /// <summary>The middle of the bar: it is as wide as its message, so it is centred
+        /// after it has measured itself.</summary>
+        private int _centre;
+
+        /// <summary>The widest the bar may become, and the box the message is measured in.</summary>
+        private int _maxWidth = 520;
+
+        /// <summary>
+        /// Measures the message and gives the bar the size it needs.
+        ///
+        /// The width is the measured text plus the icon and the close button, capped at the
+        /// width the caller allowed. The height follows the number of lines.
+        /// </summary>
+        private void Fit()
+        {
+            int lineH = Math.Max(1, (int)Math.Ceiling(Font.GetHeight()));
+            int lines = 1;
+            int textW = 0;
+            if (!string.IsNullOrEmpty(_text))
+            {
+                try
+                {
+                    using (var g = CreateGraphics())
+                    {
+                        int avail = Math.Max(Ui.S(60), _maxWidth - Ui.S(78));
+                        Size sz = TextRenderer.MeasureText(g, _text, Font, new Size(avail, 4000),
+                            TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
+                        textW = sz.Width;
+                        lines = (int)Math.Round(sz.Height / (double)lineH);
+                    }
+                }
+                catch { lines = 1; }
+            }
+            /* Three lines was the cap, and a message longer than that was simply cut off: the
+               paint asks for WordBreak without EndEllipsis, so the tail vanished mid sentence
+               with nothing to say there was more. Five lines is enough for every message the app
+               shows, and the timer still dismisses it. */
+            _lines = Math.Max(1, Math.Min(5, lines));
+            int target = Ui.S(52) + (_lines - 1) * lineH;
+            if (Height != target) Height = target;
+            int want = Math.Min(_maxWidth, textW + Ui.S(78));
+            if (Width != want) Width = Math.Max(Ui.S(220), want);
+            if (_centre > 0) Left = _centre - Width / 2;
+            if (_bottom > 0) Top = _bottom - Height;
         }
 
         public void Show(string text, ToastKind kind)
@@ -2852,7 +2976,7 @@ namespace JoeBrowser
             _kind = kind;
             Visible = true;
             BringToFront();
-            FitHeight();
+            Fit();
             Invalidate();
             _timer.Stop();
             // Warnings and errors carry instructions the user has to read; keep them up longer.
@@ -2871,30 +2995,7 @@ namespace JoeBrowser
 
         private void FitHeight()
         {
-            int lineH = Math.Max(1, (int)Math.Ceiling(Font.GetHeight()));
-            int lines = 1;
-            if (!string.IsNullOrEmpty(_text) && Width > Ui.S(60))
-            {
-                try
-                {
-                    using (var g = CreateGraphics())
-                    {
-                        int avail = Math.Max(Ui.S(60), Width - Ui.S(56) - Ui.S(40));
-                        Size sz = TextRenderer.MeasureText(g, _text, Font, new Size(avail, 4000),
-                            TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
-                        lines = (int)Math.Round(sz.Height / (double)lineH);
-                    }
-                }
-                catch { lines = 1; }
-            }
-            /* Three lines was the cap, and a message longer than that was simply cut off: the
-               paint asks for WordBreak without EndEllipsis, so the tail vanished mid sentence
-               with nothing to say there was more. Five lines is enough for every message the app
-               shows, and the timer still dismisses it. */
-            _lines = Math.Max(1, Math.Min(5, lines));
-            int target = Ui.S(52) + (_lines - 1) * lineH;
-            if (Height != target) Height = target;
-            if (_bottom > 0) Top = _bottom - Height;
+            Fit();
         }
 
         protected override void OnClick(EventArgs e) { _timer.Stop(); Hide(); base.OnClick(e); }
@@ -2909,16 +3010,16 @@ namespace JoeBrowser
             base.OnMouseLeave(e);
         }
 
-        public void ReStyle() { Font = Theme.Body; FitHeight(); Invalidate(); }
+        public void ReStyle() { Font = Theme.Body; Fit(); Invalidate(); }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
             Ui.Quality(g);
             /* A floating panel, not a tinted strip. The bar is a solid raised surface with a
-               hairline, a round icon chip in the status colour and the message beside it, so a
+               hairline, a rounded chip in the status colour and the message beside it, so a
                warning for one second reads as a warning and not as a coloured background with
-               text on it. The 4 px radius was the giveaway that it was a rectangle. */
+               text on it. */
             var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             float rad = Ui.S(Theme.ButtonRadius);
             Ui.Shadow(g, r, rad, 2, Theme.Dark);
@@ -2931,26 +3032,32 @@ namespace JoeBrowser
             string icon = _kind == ToastKind.Error ? "error"
                 : _kind == ToastKind.Warn ? "alert"
                 : _kind == ToastKind.Info ? "info" : "check-circle";
-            float chip = Ui.S(30);
+            /* A rounded square, not a pale circle. A circle that big around a small mark is
+               mostly empty, and on a light surface it reads as a hole rather than a badge. */
+            float chip = Ui.S(26);
             var cr = new RectangleF(Ui.S(12), (Height - chip) / 2f, chip, chip);
-            Ui.Fill(g, cr, chip / 2f, Color.FromArgb(Theme.Dark ? 40 : 28, tint));
-            float ic = Ui.S(17);
+            Ui.Fill(g, cr, Ui.S(7), Color.FromArgb(Theme.Dark ? 44 : 30, tint));
+            float ic = Ui.S(15);
             Icons.Draw(g, icon, new RectangleF(cr.X + (chip - ic) / 2f, cr.Y + (chip - ic) / 2f, ic, ic), tint);
 
-            float textX = cr.Right + Ui.S(12);
+            float textX = cr.Right + Ui.S(10);
             float lineH = Font.GetHeight(g);
             if (_lines <= 1)
-                Ui.Text(g, _text, Font, Theme.Text, textX, (Height - lineH) / 2f, Width - textX - Ui.S(32));
+                Ui.Text(g, _text, Font, Theme.Text, textX, (Height - lineH) / 2f, Width - textX - Ui.S(34));
             else
                 /* WordBreak without EndEllipsis draws nothing for the part that does not fit, so
                    a message one line longer than the box silently loses its tail. EndEllipsis
                    cannot be combined with WordBreak, so the width is what is trusted here and the
                    line count above is measured from the same font and width. */
                 Ui.Text(g, _text, Font, Theme.Text, textX, (Height - lineH * _lines) / 2f,
-                    Math.Max(Ui.S(80), Width - textX - Ui.S(32)), "left", _lines);
+                    Math.Max(Ui.S(80), Width - textX - Ui.S(34)), "left", _lines);
 
-            float close = Ui.S(16);
-            Icons.Draw(g, "close", new RectangleF(Width - Ui.S(14) - close, (Height - close) / 2f, close, close),
+            /* The close button sits in its own quiet circle, so it is a target rather than a
+               stray cross at the end of the bar. */
+            float close = Ui.S(18);
+            var xr = new RectangleF(Width - Ui.S(10) - close, (Height - close) / 2f, close, close);
+            if (_hover) Ui.Fill(g, xr, close / 2f, Theme.HoverOverlay);
+            Icons.Draw(g, "close", new RectangleF(xr.X + Ui.S(3), xr.Y + Ui.S(3), Ui.S(12), Ui.S(12)),
                 _hover ? Theme.Text : Theme.TextFaint);
         }
     }

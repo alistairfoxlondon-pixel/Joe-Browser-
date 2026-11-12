@@ -644,10 +644,13 @@ namespace JoeBrowser
         /// display scale. Called when the window moves to a monitor with a different DPI; the
         /// cache key includes the scale, so this also keeps the cache from growing without
         /// bound when a laptop is docked and undocked all day.
+        ///
+        /// The fonts are not disposed. A control may still be painting with one of them, and
+        /// disposing a font out from under a control is how a page ends up throwing
+        /// "Font is not a valid GDI+ font" while it draws. The garbage collector takes them.
         /// </summary>
         public static void ClearFontCache()
         {
-            foreach (var f in FontCache.Values) { try { f.Dispose(); } catch { } }
             FontCache.Clear();
             /* The heights were measured from those very fonts, so they go with them: a stale
                entry would hand a page the line height of a disposed font after a theme flip. */
@@ -673,7 +676,13 @@ namespace JoeBrowser
         /// </summary>
         public static Font F(double px, FontStyle style = FontStyle.Regular)
         {
-            long key = ((long)Math.Round(px * 100) << 8) | (long)(uint)style;
+            /* The scale is part of the key. The font is built in device pixels, so the same
+               size asked for on a 100% screen and on a 150% one is two different faces - and
+               the cache used to hand back the face of the screen the window was on when it
+               was built, which is how text ended up in the wrong size after the window moved
+               to another monitor. */
+            long key = (((long)Math.Round(px * 100) << 8) | (long)(uint)style) ^
+                ((long)Math.Round(Ui.Scale * 1000) << 20);
             Font f;
             if (FontCache.TryGetValue(key, out f)) return f;
 
@@ -1043,6 +1052,11 @@ namespace JoeBrowser
         public static Color SurfaceColor(Control c)
         {
             if (c == null) return Theme.Bg;
+            /* The offset of the control inside the form is summed from the layout instead of
+               asked of the window manager. The walk visits every control in the tree on every
+               theme change, and a screen-to-client conversion per control turned a walk that
+               should take a moment into one that took thirty milliseconds. */
+            int x = 0;
             for (Control p = c.Parent; p != null; p = p.Parent)
             {
                 if (p is ProfileCard) return Theme.Card;
@@ -1050,13 +1064,14 @@ namespace JoeBrowser
                 var f = p as JBForm;
                 if (f != null)
                 {
-                    try { return f.SurfaceAt(f.PointToClient(c.PointToScreen(Point.Empty))); }
+                    try { return f.SurfaceAt(new Point(x + c.Left, 0)); }
                     catch { return p.BackColor; }
                 }
                 /* Everything else paints its own BackColor, whatever that is: a page column is a
                    plain Panel on the page background, not a Theme.Panel card. Guessing from the
                    control type put a grey strip behind every label on the plan page in dark mode. */
                 if (p.BackColor.A == 255) return p.BackColor;
+                x += p.Left;
             }
             return Theme.Bg;
         }
