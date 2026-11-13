@@ -8,15 +8,33 @@ namespace JoeBrowser
     /// <summary>Result of the in-session fingerprint check: one line per question asked.</summary>
     internal sealed class LeakForm : JBForm
     {
+        /// <summary>
+        /// The checkers people actually judge a profile with. They open INSIDE the running
+        /// session, so the verdict describes the profile and not the desktop browser. Only two
+        /// were offered before; the pair that flags a masked WebGL renderer and the two Whoer
+        /// variants were a URL the user had to find and paste by hand.
+        /// </summary>
+        private static readonly string[][] Checkers = new[]
+        {
+            new[] { "iphey.com", "https://iphey.com/" },
+            new[] { "pixelscan.net", "https://pixelscan.net/" },
+            new[] { "browserscan.net", "https://www.browserscan.net/" },
+            new[] { "ipfighter.com", "https://ipfighter.com/" },
+            new[] { "whoer.net", "https://whoer.net/" },
+            new[] { "whoer.com", "https://whoer.com/" }
+        };
+
         private readonly LeakResult _result;
         private readonly string _profileName;
         private readonly JBScrollHost _host;
         private readonly Panel _column = new Panel();
         private readonly JBButton _close;
-        private readonly JBButton _browserScan, _ipFighter, _report;
+        private readonly JBButton _report;
         private readonly BrowserSession _session;
         private readonly JBIconButton _x;
         private readonly List<LeakRow> _rows = new List<LeakRow>();
+        private readonly List<JBButton> _checkers = new List<JBButton>();
+        private readonly JBLabel _checkersHeading;
         private bool _built;
 
         public LeakForm(LeakResult result, string profileName) : this(result, profileName, null) { }
@@ -33,11 +51,30 @@ namespace JoeBrowser
             BackColor = Theme.Bg;
             ShowInTaskbar = false;
             MinimumSize = new Size(Ui.S(480), Ui.S(360));
-            Size = Ui.FitToScreen(this, Ui.S(620), Ui.S(520));
+            Size = Ui.FitToScreen(this, Ui.S(680), Ui.S(560));
 
             _column.BackColor = Theme.Bg;
             _host = new JBScrollHost(_column);
             Controls.Add(_host);
+
+            bool canOpen = session != null && session.IsRunning;
+
+            _checkersHeading = new JBLabel(LabelRole.Accent, "OPEN A CHECKER IN THIS PROFILE");
+            _checkersHeading.Visible = canOpen;
+            _column.Controls.Add(_checkersHeading);
+            foreach (var site in Checkers)
+            {
+                var b = new JBButton
+                {
+                    Kind = BtnKind.Soft, Icon = "external", Text = site[0],
+                    Radius = Theme.ButtonRadius, Height = Theme.Field,
+                    Tip = site[1], Visible = canOpen
+                };
+                string url = site[1];
+                b.Click += delegate { Open(url); };
+                _checkers.Add(b);
+                _column.Controls.Add(b);
+            }
 
             foreach (var item in _result.Items)
             {
@@ -49,18 +86,6 @@ namespace JoeBrowser
             _close = new JBButton { Kind = BtnKind.Primary, Icon = "check", Text = "Done", Radius = Theme.ButtonRadius, Height = Theme.Field };
             _close.Click += delegate { Close(); };
             Controls.Add(_close);
-
-            /* The two pages people actually use to judge a profile. Opening them inside this
-               session is the only way the result describes this profile and not the desktop. */
-            _browserScan = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "browserscan.net", Radius = Theme.ButtonRadius, Height = Theme.Field };
-            _browserScan.Click += delegate { Open("https://www.browserscan.net/"); };
-            Controls.Add(_browserScan);
-            _ipFighter = new JBButton { Kind = BtnKind.Soft, Icon = "external", Text = "ipfighter.com", Radius = Theme.ButtonRadius, Height = Theme.Field };
-            _ipFighter.Click += delegate { Open("https://ipfighter.com/"); };
-            Controls.Add(_ipFighter);
-            bool canOpen = session != null && session.IsRunning;
-            _browserScan.Visible = canOpen;
-            _ipFighter.Visible = canOpen;
 
             /* A failed check is exactly when a user wants a human: one button, the report is
                pre-filled with the failed lines so the message needs no technical wording. */
@@ -114,7 +139,30 @@ namespace JoeBrowser
             int top = Ui.S(96);
             _host.SetBounds(pad, top, w - pad * 2, Math.Max(Ui.S(100), h - top - Ui.S(56)));
             int cw = Math.Max(Ui.S(200), _host.Width - Ui.S(10));
+            int gap = Ui.S(8);
             int y = 0;
+
+            /* The checker buttons flow into as many rows as the dialog needs. Six fixed-width
+               buttons in one footer row used to be the reason only two sites were offered; a
+               measured wrap lets every one of them stay one click away at any dialog width. */
+            if (_checkersHeading.Visible)
+            {
+                _checkersHeading.SetBounds(0, y, cw, Theme.LineHeight(Theme.SmallBold) + Ui.S(4));
+                y += Theme.LineHeight(Theme.SmallBold) + Ui.S(12);
+
+                int x = 0;
+                int lineH = 0;
+                foreach (var b in _checkers)
+                {
+                    int bw = Math.Min(cw - gap, b.PreferredWidth(Ui.S(110)));
+                    if (x > 0 && x + bw > cw) { x = 0; y += lineH + gap; lineH = 0; }
+                    b.SetBounds(x, y, bw, Theme.Field);
+                    x += bw + gap;
+                    lineH = Math.Max(lineH, Theme.Field);
+                }
+                y += lineH + Ui.S(20);
+            }
+
             foreach (var r in _rows)
             {
                 r.SetBounds(0, y, cw, Ui.S(48));
@@ -123,17 +171,13 @@ namespace JoeBrowser
             _column.SetBounds(0, 0, Math.Max(cw, _host.Width - Ui.S(10)), Math.Max(y, _host.Height));
             _host.SyncExtent();
 
-            int bw = _close.PreferredWidth(Ui.S(96));
-            _close.SetBounds(w - pad - bw, h - Ui.S(16) - Ui.S(Theme.ControlHeight), bw, Ui.S(Theme.ControlHeight));
+            int bwDone = _close.PreferredWidth(Ui.S(96));
+            _close.SetBounds(w - pad - bwDone, h - Ui.S(16) - Ui.S(Theme.ControlHeight), bwDone, Ui.S(Theme.ControlHeight));
 
-            /* The footer buttons used to be laid out from the left with no regard for Close on
-               the right, so on a narrow window the report button was drawn under it. They flow
-               now and wrap, and the measured widths of all four are taken into account. */
-            JBButton[] footer = _browserScan.Visible
-                ? new[] { _browserScan, _ipFighter, _report }
-                : new[] { _report };
+            /* The footer buttons are laid out from the left with room measured against Close on
+               the right, so a narrow window can never draw Report under it. */
             int avail = Math.Max(Ui.S(120), _close.Left - Ui.S(8) - pad);
-            Ui.FlowButtons(footer, pad, h - Ui.S(16) - Ui.S(Theme.ControlHeight), avail, Ui.S(8), Ui.S(Theme.ControlHeight));
+            Ui.FlowButtons(new[] { _report }, pad, h - Ui.S(16) - Ui.S(Theme.ControlHeight), avail, gap, Ui.S(Theme.ControlHeight));
         }
 
         private void Open(string url)

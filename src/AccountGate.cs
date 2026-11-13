@@ -46,6 +46,10 @@ namespace JoeBrowser
                 Size = new Size(Ui.S(360), Ui.S(22)),
                 Location = new Point(Ui.S(40), Ui.S(64))
             };
+            /* The sentence is longer than the 368 px column at the body size, and a fixed
+               one-line label cut it to "stay on this de...". It wraps now, and LayoutForm
+               measures how many lines it actually needs. */
+            _subtitle.Wrap = true;
 
             _email = new JBTextBox { Location = new Point(Ui.S(40), Ui.S(104)), Size = new Size(Ui.S(360), Ui.S(36)) };
             _email.Placeholder = "Email address";
@@ -159,7 +163,11 @@ namespace JoeBrowser
             /* Both titles are set in the display face and both are one line at 440 px; the
                measure is here so a longer translation cannot be clipped at the bottom. */
             int titleH = Math.Max(Ui.S(30), Theme.LineHeight(Theme.H1));
-            int subH = Math.Max(Ui.S(20), Theme.LineHeight(Theme.Small));
+            /* Measure the subtitle against the column. A translated sentence can take two or
+               three lines; giving it one and letting AutoEllipsis trim it is the clipped text
+               a user sees on the very first screen of the product. */
+            int subLines = CountLines(_subtitle.Text, _subtitle.Font, inner);
+            int subH = Math.Max(Ui.S(20), subLines * Theme.LineHeight(Theme.Small));
 
             int y = Ui.S(30);
             _title.SetBounds(pad, y, inner, titleH);

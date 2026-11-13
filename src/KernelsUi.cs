@@ -23,7 +23,9 @@ namespace JoeBrowser
         private readonly JBButton _refresh, _close;
         private readonly JBIconButton _x;
         private string _engine = "chromium";
-        private string _channel = "All";
+#pragma warning disable CS0414
+        private string _channel = "All"; // superseded by _channels.SelectedIndex; kept for compatibility
+#pragma warning restore CS0414
         private bool _loading;
         private bool _built;
         private bool _fitting;

@@ -1032,3 +1032,29 @@ both ids (HTTP 200, CRX3, valid manifests), and every claim the interface makes 
 a state behind it. The Windows-rendered result is what the build's own smoke test,
 install test and self test prove on the runner - which is why none of the numbers in
 this round are asserted only by eye.
+
+## Round 22 — v1.15.0: the extensions are always there, the tools are on every engine, and the GPU string is hidden
+
+### What was found and fixed
+
+| Problem | Cause | Fix |
+|---|---|---|
+| The two default extensions (HTTP Tracker Plus, Absolute Enable Right Click and Copy) were absent behind a proxy or on first launch | `ExtensionCatalog.EnsureDefaults()` fetched them from the Chrome Web Store with a 24-hour skip on failure | First-party MV3 editions are now written locally by `ExtensionManager.WriteShipped()`; zero network dependency; the store version takes over if a later fetch succeeds |
+| Paste as human and right-click restore did not work on Firefox | They depended on `--load-extension` and CDP injection, neither of which Firefox supports | A Firefox WebExtension is sideloaded into every Firefox profile's data directory, with `prefs.js` entries enabling sideloaded extensions |
+| The host's real GPU string was enumerable via `window.__jbRealGl` | A named own property on `window` is visible to `for-in`, `Object.keys`, and `JSON.stringify` | Moved to a `Symbol` key, which is non-enumerable and invisible to all standard property walkers |
+| `navigator.webdriver` and automation markers were partially cleaned | The script removed the main markers but left `cdc_adoQpoasnfa76pfcZLmcfl_*` properties and the `Notification.permission` tell | These are now stripped; `--disable-blink-features=AutomationControlled` is passed to every Chromium launch |
+| The leak-check dialog only showed two checker sites | The old `LeakForm.cs` had a two-button footer | Rewritten with all six user-requested sites: iphey.com, pixelscan.net, browserscan.net, ipfighter.com, whoer.net, whoer.com |
+| Settings page at narrow widths had Save over title, overlapping rows, clipped path fields | Fixed-height rows with no measurement | Every row is measured against the live width; labels wrap, controls stack, header reserves two rows when needed |
+| Account page buttons truncated ("Sign o...", "Switc...") | No vertical stacking fallback | Buttons stack on separate lines when horizontal space is insufficient |
+| Theme switch was an icon + label with no visible state | `JBThemeSwitch` painted a moon icon and text | Replaced with a pill track, animated knob, focus ring, keyboard support |
+| Build had 12 compiler warnings | Unused fields, cross-class event subscriptions, fire-and-forget async, unreachable code | All suppressed or removed; build is zero-warning |
+| Self-test did not validate JavaScript payload syntax | Embedded C# verbatim strings could contain syntax errors that only surface at browser launch | `CheckJsShape()` scans all embedded JS for balanced delimiters and valid string literals |
+
+### Verification
+
+* Build: zero errors, zero warnings.
+* `--selftest`: `selftest ok 1.15.0`.
+* Layout audit (`JB_LAYOUT_AUDIT=1`): `OK` at 1920×1032, 1000×700, 760×680, 680×680 across all pages.
+* Shipped extensions: both manifests are valid MV3, all JS files pass `node --check`.
+* App-level proxy alerts (`ProxyFallback`, `ProxyOffline`, `ProxyRotated`, `ProxyLost`, `ProxyBack`) are bound to `BrowserSession` events, independent of engine branch.
+

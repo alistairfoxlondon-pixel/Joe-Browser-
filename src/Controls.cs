@@ -184,7 +184,9 @@ namespace JoeBrowser
     internal sealed class NavGroup : Control, IReStyle
     {
         private readonly string _text;
-        private bool _hover;
+#pragma warning disable CS0414
+        private bool _hover; // tracked but painting uses _hoverT tween
+#pragma warning restore CS0414
         private bool _active;
         private readonly AnimValue _hoverT;
 
@@ -1373,9 +1375,11 @@ namespace JoeBrowser
         private string _tip = "";
         public string Tip { get { return _tip; } set { _tip = value ?? ""; _tipShown = null; ToolTips.Attach(this, _tip); } }
         private string _tipShown;
+#pragma warning disable CS0414
+        // Hover/down state is tracked for potential synchronous checks; painting uses
+        // the animated tween values (_hoverT/_downT) for smooth transitions.
         private bool _hover, _down;
-
-        /// <summary>Width needed for this button's icon and label, so text is never clipped.</summary>
+#pragma warning restore CS0414
         public int PreferredWidth(int minimum)
         {
             /* Measured on the shared ruler: CreateGraphics() on every button in a footer is a
@@ -1466,10 +1470,17 @@ namespace JoeBrowser
                     /* The selected fill eases in/out so the accent bar and the soft background
                        grow into place instead of snapping, which is the difference between a
                        reactive shell and a stiff one. */
-                    bg = Ui.Blend(Color.Transparent, Theme.AccentOnBg, _selectT.Value);
-                    bg = Ui.Blend(bg, Theme.HoverOverlay, _hoverT.Value * (1f - _selectT.Value * 0.5f));
+                    /* A selected row must keep saying "you are here" while the pointer rests on
+                       it. Blending the grey hover overlay into the accent fill used to wash the
+                       active row out to a neutral grey, so coming back to a page looked as though
+                       the selection had been lost. Hover now brightens the accent itself. */
+                    float sel = _selectT.Value;
+                    bg = Ui.Blend(Color.Transparent, Theme.AccentOnBg, sel);
+                    bg = sel > 0.01f
+                        ? Ui.Blend(bg, Theme.AccentHi, _hoverT.Value * 0.10f * sel)
+                        : Ui.Blend(bg, Theme.HoverOverlay, _hoverT.Value);
                     bg = Ui.Blend(bg, Theme.ActiveBg, _downT.Value * 0.6f);
-                    fg = Ui.Blend(Theme.TextDim, Theme.Text, Math.Max(_selectT.Value, _hoverT.Value));
+                    fg = Ui.Blend(Theme.TextDim, Theme.Text, Math.Max(sel, _hoverT.Value));
                     break;
 
                 default:
@@ -1685,7 +1696,6 @@ namespace JoeBrowser
         private JBIconButton _trailing;
         private readonly bool _multiline;
         private readonly Label _cue;
-        private int _wheelCarry;
 
         public JBTextBox(bool multiline = false)
         {
@@ -3224,9 +3234,16 @@ namespace JoeBrowser
     /// windows-ui navbar theme switch: a sun/moon glyph with the current mode beside it.
     /// Clicking the row flips the theme.
     /// </summary>
+    /// <summary>
+    /// The theme control is a switch, so it has to LOOK like a switch. It used to be an icon
+    /// and a caption: nothing on screen said the row was interactive, and the only way to learn
+    /// what it did was to click it and watch the whole window change. A pill with a moving knob
+    /// is the control people already know, and its state is readable without a click.
+    /// </summary>
     internal sealed class JBThemeSwitch : Control, IReStyle
     {
         private bool _checked, _hover;
+        private readonly AnimValue _knobT;
 
         /// <summary>Localisable caption for each state.</summary>
         public string NightText = "Night Mode";
@@ -3242,6 +3259,10 @@ namespace JoeBrowser
             Ui.Opaque(this);
             Height = Ui.S(42);
             TabStop = true;
+            _knobT = new AnimValue(this);
+            AccessibleRole = AccessibleRole.CheckButton;
+            AccessibleName = "Night Mode";
+            AccessibleDescription = "Switch between the dark and light theme";
         }
 
         public bool Checked
@@ -3251,10 +3272,27 @@ namespace JoeBrowser
             {
                 if (_checked == value) return;
                 _checked = value;
+                /* The knob eases across instead of jumping, but the state a screen reader
+                   reports changes now, not when the animation has finished. Before the handle
+                   exists there is no message pump to drive the tween, so the initial value is
+                   set outright - otherwise the first frame shows a checked blue track with its
+                   knob still parked on the left. */
+                if (!IsHandleCreated) _knobT.Set(_checked ? 1f : 0f);
+                else _knobT.Toward(_checked, 0.24f);
+                AccessibleName = _checked ? NightText : DayText;
                 Invalidate();
                 var h = CheckedChanged;
                 if (h != null) h(this, EventArgs.Empty);
             }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            /* Whatever state the switch was given before its window existed, the first painted
+               frame has to agree with it. A tween started before Application.Run had a pump to
+               tick it left the knob at 0 while the track already said "on". */
+            _knobT.Set(_checked ? 1f : 0f);
+            base.OnHandleCreated(e);
         }
 
         protected override void OnClick(EventArgs e) { Checked = !Checked; base.OnClick(e); }
@@ -3263,11 +3301,14 @@ namespace JoeBrowser
         protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
 
-        protected override bool IsInputKey(Keys keyData) { return keyData == Keys.Space || base.IsInputKey(keyData); }
+        protected override bool IsInputKey(Keys keyData)
+        {
+            return keyData == Keys.Space || keyData == Keys.Enter || base.IsInputKey(keyData);
+        }
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Space) { Checked = !Checked; e.Handled = true; }
+            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter) { Checked = !Checked; e.Handled = true; }
             base.OnKeyDown(e);
         }
 
@@ -3280,12 +3321,33 @@ namespace JoeBrowser
             var r = new RectangleF(0, 0, Width, Height);
             if (_hover) Ui.Fill(g, r, Ui.S(Theme.ButtonRadius), Theme.HoverStrong);
 
-            float s = Ui.S(22);
-            Icons.Draw(g, _checked ? "moon" : "sun", new RectangleF(Ui.S(15), (Height - s) / 2f, s, s), Theme.Text);
-            Ui.Text(g, _checked ? NightText : DayText, Theme.Body, Theme.Text,
-                Ui.S(47), (Height - Theme.Body.GetHeight(g)) / 2f, Width - Ui.S(58));
+            /* The switch takes its own column on the right. The label is measured against what
+               is left, so a longer translation is ellipsised instead of running under the pill. */
+            float trackW = Ui.S(46), trackH = Ui.S(25);
+            float trackX = Width - trackW - Ui.S(14);
+            float trackY = (Height - trackH) / 2f;
+            float labelW = Math.Max(Ui.S(90), trackX - Ui.S(47) - Ui.S(12));
 
-            if (Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(Theme.ButtonRadius));
+            float s = Ui.S(22);
+            Icons.Draw(g, _checked ? "moon" : "sun", new RectangleF(Ui.S(15), (Height - s) / 2f, s, s),
+                _checked ? Theme.AccentHi : Theme.Text);
+            Ui.Text(g, _checked ? NightText : DayText, Theme.Body, Theme.Text,
+                Ui.S(47), (Height - Theme.Body.GetHeight(g)) / 2f, labelW);
+
+            var track = new RectangleF(trackX, trackY, trackW, trackH);
+            Ui.Fill(g, track, trackH / 2f,
+                _checked ? Theme.Accent : Theme.Panel2);
+            Ui.Stroke(g, track, trackH / 2f,
+                _checked ? Theme.AccentHi : Theme.ButtonBorder, 1f);
+
+            float knob = trackH - Ui.S(6);
+            float travel = trackW - knob - Ui.S(6);
+            float kx = trackX + Ui.S(3) + travel * _knobT.Value;
+            float ky = trackY + (trackH - knob) / 2f;
+            using (var b = new SolidBrush(_checked ? Theme.OnAccent : Theme.TextDim))
+                g.FillEllipse(b, kx, ky, knob, knob);
+
+            if (Focused && Ui.FocusCues(this)) Ui.FocusRing(g, r, Ui.S(Theme.ButtonRadius));
         }
     }
 
