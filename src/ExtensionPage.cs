@@ -23,6 +23,8 @@ namespace JoeBrowser
     {
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
+        /// <summary>The control the main window hands the wheel to when the pointer is over it.</summary>
+        internal Control ScrollTarget { get { return _host; } }
         private readonly List<ExtensionRow> _rows = new List<ExtensionRow>();
         private readonly List<RecommendCard> _cards = new List<RecommendCard>();
         /// <summary>Logos are read from disk once per path: an extension folder can hold a

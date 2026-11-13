@@ -683,12 +683,30 @@ namespace JoeBrowser
     }
 
     /// <summary>Borderless window with rounded corners, edge resizing and caption dragging.</summary>
+    /// <summary>
+    /// The control that should receive <c>WM_MOUSEWHEEL</c> even though it is not the focused
+    /// one. Windows routes the wheel to the focused window, not the one under the pointer, so
+    /// a page that scrolls itself and might not be focused claims the message here. The main
+    /// window points this at the current page's scroller.
+    /// </summary>
+    internal interface IWheelPage
+    {
+        /// <summary>One notch of the wheel, delta as Windows reports it (multiples of 120).</summary>
+        void WheelBy(int delta);
+    }
+
     internal class JBForm : Form, IReStyle
     {
         public bool Resizable = true;
         public bool AllowMaximize = true;
         public bool DraggableSidebar = false;
         public int HeaderHit = 48;
+
+        /// <summary>
+        /// The control that should get the wheel when the pointer is over it, regardless of
+        /// what has focus. See <see cref="IWheelPage"/>.
+        /// </summary>
+        public Control WheelTarget { get; set; }
 
         private bool _maximized;
         private Rectangle _restoreBounds = Rectangle.Empty;
@@ -1015,6 +1033,32 @@ namespace JoeBrowser
             const int HTCLIENT = 1, HTCAPTION = 2;
             const int HTLEFT = 10, HTRIGHT = 11, HTTOP = 12, HTTOPLEFT = 13, HTTOPRIGHT = 14,
                       HTBOTTOM = 15, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
+            const int WM_MOUSEWHEEL = 0x020A;
+
+            /* The wheel normally goes to the focused window, not the one under the pointer, so
+               a page that scrolls itself without focus did nothing with the notches at all. The
+               target is whoever is on screen as the current page's scroller; reaching here
+               first means the notches always land, focused or not. */
+            if (m.Msg == WM_MOUSEWHEEL)
+            {
+                var target = WheelTarget;
+                if (target != null && !target.IsDisposed && target.Visible && target.IsHandleCreated
+                    && target is IWheelPage)
+                {
+                    try
+                    {
+                        var bounds = target.RectangleToScreen(target.ClientRectangle);
+                        if (bounds.Contains(Control.MousePosition))
+                        {
+                            int delta = unchecked((int)(short)((long)m.WParam >> 16));
+                            ((IWheelPage)target).WheelBy(delta);
+                            m.Result = (IntPtr)1;
+                            return;
+                        }
+                    }
+                    catch { }
+                }
+            }
 
             /* The window moved to a screen with a different scale. Windows says so and offers
                the rectangle it would like the window to take. The application scales its own
@@ -2512,7 +2556,7 @@ namespace JoeBrowser
     }
 
     /// <summary>Scrollable host with a thin, self-drawn scrollbar that only appears when needed.</summary>
-    internal class JBScrollHost : Panel, IReStyle
+    internal class JBScrollHost : Panel, IReStyle, IWheelPage
     {
         private readonly Control _content;
         private int _offset;
@@ -2758,6 +2802,9 @@ namespace JoeBrowser
         /// One notch of the wheel. Kept separate so a descendant that handles the wheel itself
         /// (a multiline field, the grid) can hand the rest of the gesture up to the page.
         /// </summary>
+        /// <summary>One notch of the wheel, the way the main window hands it over.</summary>
+        public void WheelBy(int delta) { Wheel(delta); }
+
         public void Wheel(int delta)
         {
             if (delta == 0 || MaxOffset == 0) return;

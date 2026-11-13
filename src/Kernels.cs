@@ -178,6 +178,30 @@ namespace JoeBrowser
             return null;
         }
 
+        /// <summary>
+        /// True when a build the application ships is a pre-release - a version the fingerprint
+        /// sites have never seen. A profile that runs it reports a build they do not know, and
+        /// any version they do not know is read as a mask: browserscan answers that with a
+        /// small deduction and a line saying the engine is not what it claims.
+        /// Only known from the cached catalog, which is where the channel comes from; a build
+        /// that is not in the catalogue (the user's own installed browser) answers false.
+        /// </summary>
+        public static bool IsPreRelease(string engine, string version)
+        {
+            string e = (engine ?? "").Trim().ToLowerInvariant();
+            string v = (version ?? "").Trim();
+            if (e.Length == 0 || v.Length == 0) return false;
+            var catalog = CatalogCached(e);
+            if (catalog == null) return false;
+            foreach (var r in catalog)
+            {
+                if (r == null) continue;
+                if (!string.Equals(r.Version, v, StringComparison.OrdinalIgnoreCase)) continue;
+                return !string.Equals(r.Channel, "Stable", StringComparison.OrdinalIgnoreCase);
+            }
+            return false;
+        }
+
         /// <summary>The executable a profile pinned to this build should launch, or null.</summary>
         public static string ResolveExe(string engine, string version)
         {

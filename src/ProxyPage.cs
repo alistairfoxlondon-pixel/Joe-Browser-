@@ -21,6 +21,8 @@ namespace JoeBrowser
     {
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
+        /// <summary>The control the main window hands the wheel to when the pointer is over it.</summary>
+        internal Control ScrollTarget { get { return _host; } }
         private readonly List<ProxyRow> _rows = new List<ProxyRow>();
         private JBButton _addBtn, _importBtn, _checkBtn;
         private JBPanel _empty;

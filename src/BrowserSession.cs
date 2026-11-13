@@ -268,6 +268,24 @@ namespace JoeBrowser
             try
             {
                 int repaired = FingerprintFactory.Coerce(fp);
+                /* A profile that claims a card this PC does not have is one of the few things a
+                   scanner can see without a database of anything: the name says one GPU and the
+                   limits that come with it come from another - browserscan prints "WebGL
+                   exception -5%". A new profile answers with the machine's own adapter, and a
+                   stored profile claimed whatever the pool rolled for it; the claim is corrected
+                   to the adapter the machine really has, because that is what a real browser on
+                   this machine reports. Firefox keeps its direct reports, which are already true. */
+                if (!string.IsNullOrEmpty(FingerprintFactory.MachineRenderer) && IsChromiumLike(browser))
+                {
+                    if (!string.Equals(fp.WebGlRenderer, FingerprintFactory.MachineRenderer, StringComparison.Ordinal))
+                    {
+                        fp.WebGlRenderer = FingerprintFactory.MachineRenderer;
+                        if (!string.IsNullOrEmpty(FingerprintFactory.MachineVendor))
+                            fp.WebGlVendor = FingerprintFactory.MachineVendor;
+                        repaired++;
+                        Log.Info("Profile " + profile.Name + " reports this PC's graphics adapter, not a card it does not have");
+                    }
+                }
                 if (repaired > 0)
                     Log.Info("Repaired " + repaired + " incoherent fingerprint field(s) for " + profile.Name);
             }
@@ -778,7 +796,14 @@ namespace JoeBrowser
                 string lang = string.IsNullOrEmpty(fp.Language) ? "en-US" : fp.Language;
                 string baseLang = lang.Split('-')[0];
                 string[] languages = lang.IndexOf('-') > 0 ? new[] { lang, baseLang } : new[] { lang };
-                var meta = BuildUaMetadata(fp, null, _browserFullVersion);
+                bool workerCap = false;
+                try
+                {
+                    string cap = BrowserVersions.CapToStable(_browserFullVersion);
+                    workerCap = !string.Equals(cap, _browserFullVersion, StringComparison.Ordinal);
+                }
+                catch { }
+                var meta = BuildUaMetadata(fp, null, _browserFullVersion, workerCap);
                 string script = FingerprintScript.Build(fp, fp.UserAgent, fp.Platform, lang, languages, meta);
                 /* No Runtime.enable here: on a worker session it waits for a domain handshake
                    that never completes on every build, while evaluate reaches the default
@@ -849,6 +874,12 @@ namespace JoeBrowser
         /// configured once, so a popup Chrome reports twice does not get two script copies.
         /// The first target that gets stamped also loads the start page.
         /// </summary>
+        /// <summary>True for anything that is not Firefox - the Chromium family the WebGL work applies to.</summary>
+        private static bool IsChromiumLike(BrowserInfo browser)
+        {
+            return browser != null && !browser.IsFirefox;
+        }
+
         private async Task StampSessionAsync(string sessionId, string navigateTo, string targetUrl)
         {
             lock (_stamped)
@@ -1351,14 +1382,27 @@ namespace JoeBrowser
                 string kernel = BrowserVersions.IsReal(Profile != null ? Profile.KernelFullVersion : null) ? Profile.KernelFullVersion : null;
                 own = !string.IsNullOrEmpty(kernel) ? kernel : _browserFullVersion;
             }
+            /* A build the fingerprint sites have never seen is not a version the hints can name:
+               the user agent and the client hints are read together, and the only coherent
+               claim for a pre-release binary is the newest stable the sites know. The live build
+               stays in the log, and a pinned kernel keeps its own version, because a pin is the
+               one case where the claim has to be the binary's own. */
+            bool cappedClaim = false;
+            string capped = BrowserVersions.CapToStable(own);
+            if (!string.Equals(capped, own, StringComparison.Ordinal))
+            {
+                Log.Info("This build reports " + own + "; the fingerprint sites only know " + capped + ", so the profile claims that");
+                own = capped;
+                cappedClaim = true;
+            }
             /* A profile pinned to a specific build reports that build, because that is the binary
-               the pin starts. Everything else reports what the browser answered with. */
+               the pin starts. Everything else reports the newest stable claim. */
             if (BrowserVersions.IsReal(own))
             {
                 fp.BrowserVersion = own;
                 if (Profile != null) Profile.BrowserVersion = own;
             }
-            return BuildUaMetadata(fp, await ReadRealClientHintsAsync(session).ConfigureAwait(false), own);
+            return BuildUaMetadata(fp, await ReadRealClientHintsAsync(session).ConfigureAwait(false), own, cappedClaim);
         }
 
         /// <summary>The build the running browser claims for itself, before any override.</summary>
@@ -1382,7 +1426,7 @@ namespace JoeBrowser
             return null;
         }
 
-        private Dictionary<string, object> BuildUaMetadata(FingerprintConfig fp, Dictionary<string, object> real, string installedFull)
+        private Dictionary<string, object> BuildUaMetadata(FingerprintConfig fp, Dictionary<string, object> real, string installedFull, bool cappedClaim)
         {
             int major = 131;
             string full = null;
@@ -1474,6 +1518,22 @@ namespace JoeBrowser
                 : (IsRealBuild(brandFull) ? brandFull : (IsRealBuild(chromiumFull) ? chromiumFull : FingerprintFactory.FullChromiumVersion(null, major)));
             if (!IsRealBuild(chromiumFull)) chromiumFull = realFullVersion;
             if (!IsRealBuild(brandFull)) brandFull = realFullVersion;
+            /* The versions copied out of the live browser are the running build's own, which may
+               be newer than the claim - the exact "user agent says one thing, hints say another"
+               mismatch. The hints are capped at the same number the profile claims. */
+            chromiumFull = BrowserVersions.CapToStable(chromiumFull);
+            brandFull = BrowserVersions.CapToStable(brandFull);
+            /* The GREASE brand is the version the binary ships, so a claim ahead of the binary
+               would carry the Canary's token beside a 157 user agent - a mismatch on its own.
+               Not-A.Brand 99 is what a real 157 answers with (verified on this machine); it is
+               only used when the claim was capped, which is the case where the live token does
+               not belong. Move it with LatestStable in the same release. */
+            if (cappedClaim)
+            {
+                greaseBrand = "Not-A.Brand";
+                greaseVersion = "99";
+                greaseFull = "99.0.0.0";
+            }
             if (greaseBrand != null)
             {
                 reduced.Add(new Dictionary<string, object> { { "brand", greaseBrand }, { "version", greaseVersion ?? "8" } });

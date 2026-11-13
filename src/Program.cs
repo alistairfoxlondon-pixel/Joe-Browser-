@@ -500,6 +500,22 @@ namespace JoeBrowser
                     Ui.Scale = Math.Max(1f, g.DpiX / 96f);
             }
             catch { Ui.Scale = 1f; }
+            try
+            {
+                /* The same hidden switch the main window honours, honoured here too: fonts are
+                   picked before the first window exists, so a forced scale has to reach this
+                   point as well or the test layout is not the shipped one. */
+                string forced = Environment.GetEnvironmentVariable("JB_FORCE_SCALE");
+                float f;
+                if (!string.IsNullOrEmpty(forced) &&
+                    float.TryParse(forced, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out f) &&
+                    f >= 1f && f <= 3f)
+                {
+                    Ui.Scale = f;
+                }
+            }
+            catch { }
             /* A display between 100% and the next whole step rounds its layout to the nearest
                quarter, because a half scaled 15 point font and a half scaled row height disagree
                about where a baseline sits. The quarter is what the eye is comparing when it says

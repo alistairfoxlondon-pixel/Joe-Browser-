@@ -247,7 +247,11 @@ namespace JoeBrowser
             {
                 string pref = string.IsNullOrEmpty(browserKind) ? "auto" : browserKind;
                 var info = BrowserLocator.Detect(pref, "");
-                return info != null ? info.Version ?? "" : "";
+                string v = info != null ? info.Version ?? "" : "";
+                /* Same rule as the assignment path: a build the sites have never seen is not a
+                   version a profile can safely claim, so the stored claim stops at the newest
+                   stable the application knows about. */
+                return BrowserVersions.CapToStable(v);
             }
             catch { return ""; }
         }

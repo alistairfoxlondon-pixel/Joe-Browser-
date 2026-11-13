@@ -169,11 +169,11 @@ namespace JoeBrowser
             Text = "Report a problem";
             Resizable = true;
             DraggableSidebar = false;
-            HeaderHit = 92;
+            HeaderHit = 96;
             BackColor = Theme.Bg;
             ShowInTaskbar = false;
-            MinimumSize = new Size(Ui.S(480), Ui.S(320));
-            Size = Ui.FitToScreen(this, Ui.S(560), Ui.S(380));
+            MinimumSize = new Size(Ui.S(520), Ui.S(360));
+            Size = Ui.FitToScreen(this, Ui.S(620), Ui.S(430));
 
             _what = new JBTextBox(true) { Height = Ui.S(96) };
             if (!string.IsNullOrEmpty(preset)) _what.Value = preset;
@@ -229,19 +229,28 @@ namespace JoeBrowser
             if (!_built) return;
             int w = ClientSize.Width, h = ClientSize.Height;
             int pad = Ui.S(24);
-            _x.SetBounds(w - pad - Ui.S(30), Ui.S(14), Ui.S(30), Ui.S(30));
+            _x.SetBounds(w - pad - Ui.S(30), Ui.S(16), Ui.S(30), Ui.S(30));
 
-            int top = Ui.S(96);
-            _what.SetBounds(pad, top, w - pad * 2, Math.Max(Ui.S(64), h - top - Ui.S(120)));
-            _status.SetBounds(pad, h - Ui.S(56), Math.Max(Ui.S(100), w - pad * 2 - Ui.S(200)), Ui.S(20));
+            int top = Ui.S(100);
+            /* The bottom strip is one row: the status note on the left, the two buttons on the
+               right, both on the same baseline. The note used to sit above the buttons with the
+               two rectangles crossing - a status line drawn over a button it did not own. */
+            int buttonH = Ui.S(Theme.ControlHeight);
+            int bottom = h - pad;
+            int buttonsY = bottom - buttonH;
+            _what.SetBounds(pad, top, w - pad * 2, Math.Max(Ui.S(80), buttonsY - top - Ui.S(16)));
 
             int sw = _send.PreferredWidth(Ui.S(150));
             int cw = _copy.PreferredWidth(Ui.S(120));
             /* The pair is measured before either is placed: at a large scale they were wider
                than the window and the left button was pushed under the window edge. */
             Ui.FitPair(ref cw, ref sw, Ui.S(8), Math.Max(Ui.S(200), w - pad * 2), Ui.S(72), Ui.S(72));
-            _send.SetBounds(w - pad - sw, h - Ui.S(16) - Ui.S(Theme.ControlHeight), sw, Ui.S(Theme.ControlHeight));
-            _copy.SetBounds(w - pad - sw - Ui.S(8) - cw, h - Ui.S(16) - Ui.S(Theme.ControlHeight), cw, Ui.S(Theme.ControlHeight));
+            _send.SetBounds(w - pad - sw, buttonsY, sw, buttonH);
+            _copy.SetBounds(w - pad - sw - Ui.S(8) - cw, buttonsY, cw, buttonH);
+
+            int statusY = buttonsY + (buttonH - Ui.S(18)) / 2;
+            int statusW = Math.Max(Ui.S(80), (w - pad - sw - Ui.S(8) - cw) - pad - Ui.S(8));
+            _status.SetBounds(pad, statusY, statusW, Ui.S(18));
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -251,13 +260,16 @@ namespace JoeBrowser
             Ui.Quality(g);
             int pad = Ui.S(24);
             int w = ClientSize.Width;
-            Ui.Text(g, "Report a problem", Theme.H2, Theme.Text, pad, Ui.S(14), w - pad * 2 - Ui.S(40));
-            Ui.Text(g, "Telegram opens with your message. App details are copied too.",
-                Theme.Small, Theme.TextDim, pad, Ui.S(46), w - pad * 2 - Ui.S(40));
-            Ui.Text(g, "Message goes to Telegram: @" + Report.TelegramUser, Theme.Caption, Theme.TextFaint,
-                pad, Ui.S(70), w - pad * 2 - Ui.S(40));
+            Ui.Text(g, "Report a problem", Theme.H1, Theme.Text, pad, Ui.S(16), w - pad * 2 - Ui.S(40));
+            /* One line each, three fixed rows, no wrapping. The layout used to let the
+               subtitle wrap into the caption row, so the two painted over each other on a
+               dialog that said what a user reports with. */
+            Ui.Text(g, "Your message opens in Telegram, already typed.",
+                Theme.Small, Theme.TextDim, pad, Ui.S(48), w - pad * 2 - Ui.S(40), "left", 1);
+            Ui.Text(g, "Opens Telegram: @" + Report.TelegramUser + " — details on the clipboard.",
+                Theme.Caption, Theme.TextFaint, pad, Ui.S(70), w - pad * 2 - Ui.S(40), "left", 1);
             using (var p = new Pen(Theme.Line))
-                g.DrawLine(p, pad, Ui.S(88), w - pad, Ui.S(88));
+                g.DrawLine(p, pad, Ui.S(96), w - pad, Ui.S(96));
         }
     }
 }
