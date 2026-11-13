@@ -16,11 +16,20 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $fw = Join-Path $env:WINDIR "Microsoft\NET\Framework64\v4.0.30319"
 if (-not (Test-Path $fw)) { $fw = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319" }
-$csc = $Csc
-if (-not $csc) { $csc = Join-Path $PSScriptRoot "tools\csc.exe" }
-if (-not (Test-Path $csc)) {
-    throw "No compiler at $csc. Pass -Csc <path to a C# compiler>, or place one at build\tools\csc.exe."
+function Find-Csc {
+    $candidates = @()
+    if ($Csc) { $candidates += $Csc }
+    $candidates += (Join-Path $PSScriptRoot "tools\csc.exe")
+    $candidates += (Join-Path $env:TEMP "2\opencode\roslyn\tasks\net472\csc.exe")
+    $candidates += "C:\Users\Administrator\AppData\Local\Temp\2\opencode\roslyn\tasks\net472\csc.exe"
+    $candidates += (Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe")
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path $c)) { return $c }
+    }
+    throw "No C# compiler found. Install the .NET Framework 4.8 Developer Pack, or pass -Csc <path to csc.exe>."
 }
+$csc = Find-Csc
+Write-Host "Using compiler: $csc"
 if (-not $Out) { $Out = Join-Path $root "dist\JoeBrowserSetup.exe" }
 
 $app = Join-Path $root "dist\JoeBrowser.exe"
