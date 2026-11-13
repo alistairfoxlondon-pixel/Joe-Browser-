@@ -46,6 +46,29 @@ namespace JoeBrowser
         public const int Oldest = 120;
         public const int Newest = 159;
 
+        /// <summary>
+        /// The newest release of Chromium this build is willing to claim for a profile that is
+        /// not pinned to a kernel. Anything newer is a build the fingerprint sites have never
+        /// seen, and on both of those sites "a version that does not exist yet" is
+        /// indistinguishable from a mask: browserscan answers with "WebGL exception -5%" and
+        /// pixelscan answers with "Masking detected" while 157.0.8103.x scores a clean sweep.
+        /// A pinned kernel keeps the version it really runs - that is what a pin is. Move this
+        /// forward in the same release that adds the next stable branch to the table.
+        /// </summary>
+        public const string LatestStable = "157.0.8103.51";
+
+        /// <summary>A version newer than the newest stable is claimed as the newest stable.</summary>
+        public static string CapToStable(string version)
+        {
+            if (string.IsNullOrEmpty(version)) return version;
+            try
+            {
+                if (MajorOf(version) > MajorOf(LatestStable)) return LatestStable;
+            }
+            catch { }
+            return version;
+        }
+
         /// <summary>The build branch for a major, interpolated in the same rhythm if unknown.</summary>
         public static int BranchFor(int major)
         {
@@ -223,7 +246,10 @@ namespace JoeBrowser
         /// </summary>
         public static int FreeMajor(ICollection<string> takenVersions, int start)
         {
-            int top = Math.Min(Newest, Math.Max(start, Oldest));
+            /* Newer than the newest stable is unclaimed territory: no fingerprint site has a
+               verdict for it, and "a version that does not exist" is the one input they all
+               agree reads as a mask. The pool stops at the newest known stable release. */
+            int top = Math.Min(Math.Min(Newest, MajorOf(LatestStable)), Math.Max(start, Oldest));
             int bottom = Math.Max(Oldest, top - 28);
             for (int candidate = top; candidate >= bottom; candidate--)
             {
@@ -271,7 +297,13 @@ namespace JoeBrowser
             if (target == null) return false;
             if (target.Fp == null) target.Fp = new FingerprintConfig();
 
-            string running = IsReal(baseVersion) ? baseVersion.Trim() : "";
+            /* A build nobody - not even the fingerprint sites - knows yet is not a version a
+               profile can safely claim. The truth about a Canary is never the answer: a checker
+               compares the claim with the releases it has seen, and it has never seen a Canary.
+               The newest claim is the newest stable, whatever the binary is; a pinned kernel
+               keeps its own version, because a pin is the one case where the claim has to be
+               the binary's own. */
+            string running = IsReal(baseVersion) ? CapToStable(baseVersion.Trim()) : "";
 
             /* A pinned kernel is a fact about the executable, so it wins outright. */
             if (!string.IsNullOrEmpty(target.KernelFullVersion) && IsReal(target.KernelFullVersion))

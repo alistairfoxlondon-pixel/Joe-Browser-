@@ -299,6 +299,22 @@ namespace JoeBrowser
             }
             catch { Ui.Scale = 1f; }
             if (Ui.Scale < 1f) Ui.Scale = 1f;
+            /* A hidden switch for the people who build this: JB_FORCE_SCALE=1.25 lays the
+               whole app out as it is seen at that display scale, without touching the
+               display. It is not a setting and is never shown anywhere in the UI. */
+            try
+            {
+                string forced = Environment.GetEnvironmentVariable("JB_FORCE_SCALE");
+                float f;
+                if (!string.IsNullOrEmpty(forced) &&
+                    float.TryParse(forced, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out f) &&
+                    f >= 1f && f <= 3f)
+                {
+                    Ui.Scale = (float)(Math.Round(f * 4f) / 4f);
+                }
+            }
+            catch { }
 
             /* The floor is derived from what must never be cut: one profile card (320), the
                page gutters (64) and the navigation rail (280). A narrower window had to clip one
@@ -1956,9 +1972,9 @@ namespace JoeBrowser
 
             /* The one line to the developer when anything looks wrong. It opens Telegram with
                the user's own words; the technical details ride on the clipboard. */
-            _setReport = new JBButton { Kind = BtnKind.Soft, Icon = "error", Text = L10n.T("btn.report"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
+            _setReport = new JBButton { Kind = BtnKind.Soft, Icon = "flag", Text = L10n.T("btn.report"), Radius = Theme.ButtonRadius, Height = Ui.S(34) };
             _setReport.Click += delegate { Report.OpenForm(this, ""); };
-            Row(storage, "set.row.report", new[] { Ui.S(96) }, _setReport);
+            Row(storage, "set.row.report", new[] { Ui.S(128) }, _setReport);
 
             /* Account and security. Everything here is optional for daily use: the email
                account only exists so the sign-in gate can remember who is using the app. */
@@ -2816,6 +2832,24 @@ namespace JoeBrowser
             // changes this line, and a stale count would quietly contradict the page next door.
             if (page == 4) RefreshKernelInfo();
             _toolsPage.Visible = page == 5;
+            /* Every scrollable page hands the wheel to whatever is under the pointer, not only
+               whatever has focus: Windows routes the wheel to the focused window, so a page that
+               lost focus mid-gesture swallowed the notches. The page containers list what they
+               scroll, and the main window points the form's forwarding at the visible one. */
+            Control wheelTarget = null;
+            switch (page)
+            {
+                case 0: wheelTarget = _host; break;
+                case 1: wheelTarget = _proxyPage != null ? _proxyPage.ScrollTarget : null; break;
+                case 2: wheelTarget = _extensionPage != null ? _extensionPage.ScrollTarget : null; break;
+                case 3: wheelTarget = _browsersPage != null ? _browsersPage.ScrollTarget : null; break;
+                case 4: wheelTarget = _settingsHost; break;
+                case 5: wheelTarget = _toolsPage; break;
+                case 6: wheelTarget = _aboutHost; break;
+                case 8: wheelTarget = _historyPage != null ? _historyPage.ScrollTarget : null; break;
+                case 9: wheelTarget = _accountPage != null ? _accountPage.ScrollTarget : null; break;
+            }
+            WheelTarget = wheelTarget;
             _aboutPage.Visible = page == 6;
             _historyPage.Visible = page == 8;
             if (page == 8) RefreshHistory();
@@ -3884,6 +3918,19 @@ namespace JoeBrowser
                        told once rather than left to assume a phone is being faked completely. */
                     ready += ". The page sees " + p.Fp.Os + ", the hardware is this PC";
                     kind = ToastKind.Info;
+                }
+
+                /* A pre-release build reports a version the fingerprint sites have never
+                   seen, and any version they do not know is read as a mask. The warning was
+                   on the Browsers page, where it changed nothing at the moment of the score
+                   - it belongs here, on the launch, for the profile that runs it. */
+                string engine = session.Browser != null ? session.Browser.EngineKey : "";
+                string running = session.Browser != null ? session.Browser.Version : "";
+                if (!string.IsNullOrEmpty(engine) && !string.IsNullOrEmpty(running) &&
+                    KernelStore.IsPreRelease(engine, running))
+                {
+                    ready += ". This build is a pre-release; the scanners read its version as a mask";
+                    if (kind == ToastKind.Success) kind = ToastKind.Warn;
                 }
                 Toast(ready, kind);
                 Invalidate();

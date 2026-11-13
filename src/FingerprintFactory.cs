@@ -795,6 +795,20 @@ namespace JoeBrowser
             }
             else if (fp.WebGlVendor == null) { fp.WebGlVendor = ""; }
 
+            /* When the machine's own adapter is known, a Windows profile reports it - full
+               stop. A stored claim for a card this PC does not have cannot survive a scan:
+               the limits that come with the real adapter and the name of another one cannot
+               both be true. This is the only repair that throws away the user's GPU choice,
+               and it throws away something that was never true. Firefox reports the adapter
+               directly, and the machine value is what it reports anyway. */
+            if (!string.IsNullOrEmpty(MachineRenderer) && IsWindows(os) &&
+                !string.Equals(fp.WebGlRenderer, MachineRenderer, StringComparison.Ordinal))
+            {
+                fp.WebGlRenderer = MachineRenderer;
+                if (!string.IsNullOrEmpty(MachineVendor)) fp.WebGlVendor = MachineVendor;
+                repaired++;
+            }
+
             // ---- deviceMemory is a power of two, capped at 8 -----------------------------
             if (fp.Memory != 2 && fp.Memory != 4 && fp.Memory != 8)
             {

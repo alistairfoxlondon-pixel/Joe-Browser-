@@ -17,7 +17,7 @@ namespace JoeBrowser
     /// wrong surface, which is what used to leave white patches when the page was resized while
     /// hidden. Text comes from L10n at paint time, so a language change needs no relayout.
     /// </summary>
-    internal sealed class ToolsPage : Control, IReStyle
+    internal sealed class ToolsPage : Control, IReStyle, IWheelPage
     {
         private sealed class Tile
         {
@@ -91,7 +91,7 @@ namespace JoeBrowser
                page read as filler, and every gesture is discoverable in the place that uses it. */
             Add("clean", "sync", "tools.clean", "tools.clean.desc", "btn.clean");
             Add("audit", "fingerprint", "tools.audit", "tools.audit.desc", "btn.audit");
-            Add("report", "error", "tools.report", "tools.report.desc", "btn.report");
+            Add("report", "flag", "tools.report", "tools.report.desc", "btn.report");
         }
 
         private void Add(string key, string icon, string titleKey, string descKey, string btnKey)
@@ -285,8 +285,21 @@ namespace JoeBrowser
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             base.OnMouseWheel(e);
-            if (_maxScroll <= 0) return;
-            int next = _scroll - Math.Sign(e.Delta) * Ui.S(48);
+            WheelBy(e.Delta);
+        }
+
+        /// <summary>
+        /// One notch of the wheel. The same implementation is used when the main window hands
+        /// the wheel over because the page is not focused: a multiline field deeper in the tree
+        /// still gets its own notches first; these are the page's.
+        /// </summary>
+        public void WheelBy(int delta)
+        {
+            if (delta == 0 || _maxScroll <= 0) return;
+            int next = _scroll - (delta / 120) * Ui.S(64);
+            /* A wheel that reports a fraction of a notch still has to move; sign-only scrolling
+               used to double-count those on some mice. */
+            if (next == _scroll) next = _scroll - Math.Sign(delta) * Ui.S(64);
             next = Math.Max(0, Math.Min(_maxScroll, next));
             if (next != _scroll) { _scroll = next; Invalidate(); }
         }
@@ -326,13 +339,19 @@ namespace JoeBrowser
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
+            /* The whole page takes focus on any click, not only on a tile's action area. The
+               wheel goes to the focused window, not the one under the pointer - so a click on
+               the empty gutter used to leave focus outside the page, and the wheel did nothing
+               at all: the tiles below the fold were unreachable by mouse wheel. OnGotFocus
+               gives the keyboard cursor the first tile, which is what a keyboard user expects
+               after clicking anywhere on the page. */
+            if (!Focused) Focus();
             int hit = HitTest(e.Location);
             if (hit >= 0)
             {
                 // A click parks the keyboard cursor on the tile it activated, so Enter afterwards
                 // repeats the obvious action instead of firing whatever was there before.
                 _focusIndex = hit;
-                Focus();
                 Raise(_tiles[hit].Key);
             }
         }
@@ -345,9 +364,13 @@ namespace JoeBrowser
             if (_tiles.Count == 0) return;
             if (_tiles[0].Rect.IsEmpty) LayoutTiles();
 
-            g.TranslateTransform(0, -_scroll);
-            foreach (var t in _tiles) PaintTile(g, t);
-            g.ResetTransform();
+            /* The scroll offset is folded into the coordinates instead of a world transform:
+               GDI+ honours TranslateTransform and GDI (TextRenderer) does not, so under a
+               transform a tile's card slid up with the scroll while its label stayed where it
+               was painted - the "Report it" pill and every other action button rendered empty
+               with the text hanging off the tile below it. */
+            float dy = -_scroll;
+            foreach (var t in _tiles) PaintTile(g, t, dy);
 
             /* The bar used to be drawn inside the translated space with the scroll offset added
                back in, so it drifted a pixel per notch and could sit off either end of the page.
@@ -370,10 +393,13 @@ namespace JoeBrowser
             }
         }
 
-        private void PaintTile(Graphics g, Tile t)
+        private void PaintTile(Graphics g, Tile t, float dy)
         {
-            var r = t.Rect;
-            if (r.Bottom < _scroll || r.Top > _scroll + Height) return;
+            /* The rect in content coordinates, then shifted into the viewport. Everything the
+               tile draws derives from it (or from the button rect, shifted the same way), so
+               GDI and GDI+ see one set of numbers and agree on where things are. */
+            var r = new RectangleF(t.Rect.X, t.Rect.Y + dy, t.Rect.Width, t.Rect.Height);
+            if (r.Bottom < 0 || r.Top > Height) return;
 
             float rad = Ui.S(Theme.ButtonRadius);
             var box = new RectangleF(r.X + 0.5f, r.Y + 0.5f, r.Width - 1.5f, r.Height - 1.5f);
@@ -408,7 +434,7 @@ namespace JoeBrowser
             PaintWrapped(g, desc, Theme.Caption, Theme.TextFaint, textLeft, descTop, textW,
                 Math.Max(1, t.DescLines));
 
-            var b = t.Button;
+            var b = new RectangleF(t.Button.X, t.Button.Y + dy, t.Button.Width, t.Button.Height);
             /* In dark the secondary fill has to sit above the card, not below it: Panel2 is darker
                than a card, so the pill read as a hole punched in the tile. */
             Ui.Fill(g, b, Ui.S(Theme.ButtonRadius), t.Hover ? Theme.AccentOnBg : (Theme.Dark ? Theme.ButtonBg : Theme.Panel2));

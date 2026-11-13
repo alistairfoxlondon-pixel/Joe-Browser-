@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -32,6 +32,8 @@ namespace JoeBrowser
     {
         private readonly Panel _column = new Panel();
         private readonly JBScrollHost _host;
+        /// <summary>The control the main window hands the wheel to when the pointer is over it.</summary>
+        internal Control ScrollTarget { get { return _host; } }
         private readonly JBSegment _engines, _channels;
         private readonly JBButton _refresh, _openFolder;
         private readonly List<Control> _blocks = new List<Control>();

@@ -86,6 +86,47 @@ whatever the message said, so a short confirmation was a long empty bar with a s
 one end. The switch is a switch now - a pill with a round knob - and the sort button is a
 button with an icon instead of a line of text.
 
+## What changed in 1.14.0
+
+**The window no longer lies about what it is running.** A pre-release build is a
+build the fingerprint sites have never seen, and "a version that does not exist" is
+the one input every one of those sites agrees reads as a mask: browserscan answered
+a Canary with "WebGL exception -5%" and pixelscan answered it with "Masking detected",
+while 157.0.8103.x scores a clean sweep on both. The application now claims the
+newest release the fingerprint sites know for any profile that runs a newer build -
+the user agent, the client hints, the brands and the GREASE token all say the same
+thing - and a pinned kernel still reports the binary it is. Stored profiles are
+repaired on load.
+
+**Existing profiles stopped claiming cards the machine does not have.** The store kept
+whatever GPU the pool rolled for the profile, whatever the machine really had: the
+renderer named one adapter and the limits that came with it came from another, and
+that difference is visible without a database of anything. The claim is repaired on
+load and again at launch - to the adapter this PC actually has - so the fingerprint
+matches what a real browser on the machine would answer.
+
+**The Tools page paints what it says.** The action pill moved with the scroll and its
+label stayed where it would be at the top of the list: "Report it" and every other
+tool printed the label underneath its own card with the pill empty. The page also did
+not take focus on any click, so the mouse wheel scrolled nothing at all. The buttons
+now follow the scroll, the page takes focus anywhere, and the wheel moves every page
+under the pointer, focused or not.
+
+**The report dialog is a dialog again.** The subtitle wrapped into the line beneath
+it and painted over what it was supposed to say; the status note and the two buttons
+shared a row with overlapping boxes. One fixed line per row now; the note and the
+buttons sit on one baseline and are measured to fit.
+
+**Pre-release is now called out where it matters.** The Browsers page says it, and the
+launch toast says it: a profile opened on a Canary is opened with the knowledge that
+the fingerprint sites flag builds they do not know yet. Install a Stable build from
+the Browsers page and pin the profile to it - or let the next profile default to it -
+and the score comes back.
+
+One honest note on browserscan: its WebGL exception is intermittent on repeat visits to
+the same fingerprint - 95% or 100% on identical input - and it is not a defect of the
+profile. iphey, ipfighter and pixelscan pass consistently.
+
 ## What changed in 1.13.1
 
 **The window comes back whole.** A window that was covered - or that was on another

@@ -19,19 +19,5 @@ $raw = $seg.Substring($open + 1, $close - $open - 1)
 $items = @()
 foreach ($m in [regex]::Matches($raw, '"((?:[^"\\]|\\.)*)"')) { $items += $m.Groups[1].Value }
 Write-Host ("items: " + $items.Count)
-# The table is rotated before it is used, so the index of a string is not the
-# position it was written at. Two strings that are known from the code around
-# the checks give the shift.
-$known = @{ 317 = 'indexOf'; 312 = '/png;base64' }
-$shift = $null
-foreach ($k in $known.Keys) {
-    $want = $known[$k]
-    $pos = [array]::IndexOf($items, $want)
-    if ($pos -ge 0) { $s = $pos - ($k - 252); if ($null -eq $shift) { $shift = $s } elseif ($shift -ne $s) { $shift = -1 } }
-}
-if ($null -eq $shift -or $shift -lt 0) { Write-Host "could not work out the shift"; $shift = 0 }
-Write-Host ("shift: " + $shift)
-foreach ($n in $Index) {
-    $idx = $n - 252 + $shift
-    if ($idx -ge 0 -and $idx -lt $items.Count) { Write-Host ("{0} = '{1}'" -f $n, $items[$idx]) }
-}
+for ($n = 0; $n -lt $items.Count; $n++) { Write-Host ("{0} = '{1}'" -f (252 + $n), $items[$n]) }
+return
