@@ -155,20 +155,28 @@ namespace JoeBrowser
                had actually finished, and a profile launched in that window started without the
                pair. The event arrives on the worker, so everything below marshals first. */
             ExtensionCatalog.DefaultsChanged += OnDefaultsChanged;
-            /* The two extensions that ride along with every profile are fetched from the
-               Chrome Web Store on a worker thread, so the window is never waiting for the
-               network. A profile opened in the first seconds may not have them yet; the
-               Extensions page and the next profile creation both fetch them again. */
-            try
-            {
-                System.Threading.Tasks.Task.Run(new Func<int>(delegate { return ExtensionCatalog.FetchMissing(false); }));
-            }
-            catch { }
+            /* The two included extensions are already on disk as built-in editions before this
+               window exists. Program starts the single optional Web Store upgrade on a worker;
+               this constructor used to start a second one, and two downloads racing for the
+               same folder was one of the reasons the pair looked half-installed. */
             /* Browser downloads never start because the window opened - only because a profile
                that is being opened needs a kernel it does not have. That is the AdsPower
                behaviour: create the profile, open it, and only then the required engine is
                fetched, behind the dialog that asked for permission. Nothing pulls ~180 MB off
                the wire just because the app came up. */
+        }
+
+        /// <summary>What the shipped rows said at the last refresh. The background store check
+        /// reports back on every start even when nothing changed; a toast on every start for a
+        /// pair that was already installed is noise, not feedback.</summary>
+        private string _shippedSnapshot;
+
+        private static string ShippedSnapshot()
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var row in ExtensionCatalog.DefaultStatuses())
+                sb.Append(row[0]).Append('|').Append(row[2]).Append('|').Append(row[3]).Append(';');
+            return sb.ToString();
         }
 
         private void OnDefaultsChanged()
@@ -178,16 +186,21 @@ namespace JoeBrowser
                 if (IsDisposed || Disposing) return;
                 if (InvokeRequired) { BeginInvoke(new Action(OnDefaultsChanged)); return; }
                 _extensions = ExtensionCatalog.Load();
-                _extensionPage.SetItems(VisibleExtensions(_extensions));
-                _extensionPage.RefreshShipped();
-                /* A new install typically lands both files at once; tell the user their two
-                   extensions are ready instead of leaving the state change silent. */
+                if (_extensionPage != null)
+                {
+                    _extensionPage.SetItems(VisibleExtensions(_extensions));
+                    _extensionPage.RefreshShipped();
+                }
+                string snapshot = ShippedSnapshot();
+                bool first = _shippedSnapshot == null;
+                bool changed = !string.Equals(snapshot, _shippedSnapshot, StringComparison.Ordinal);
+                _shippedSnapshot = snapshot;
+                if (!first && !changed) return;
                 int present = 0;
                 foreach (var row in ExtensionCatalog.DefaultStatuses()) if (row[2] == "Installed") present++;
-                if (present > 0)
+                if (present > 0 && !first)
                     Toast(present + " of " + ExtensionCatalog.DefaultStoreExtensions.Length +
-                        " included extensions are installed and will load with the next profile",
-                        ToastKind.Success);
+                        " included extensions are ready for the next profile", ToastKind.Success);
             }
             catch (Exception ex) { Log.Error("Refresh after shipped extension fetch failed", ex); }
         }
@@ -404,6 +417,59 @@ namespace JoeBrowser
 
         /// <summary>Set by OnSurfaceChanged, cleared by the layout that follows it.</summary>
         private bool _pendingLayout;
+
+        /// <summary>
+        /// JB_LAYOUT_AUDIT=1 turns the layout into a measurement. Every settings card child is
+        /// checked against every other, and the toolbar is checked against the title band, and
+        /// one line per layout says whether anything overlaps. A fixed-height row used to pass
+        /// every compile check while drawing its caption under the next row; this is the gate
+        /// that would have caught it, and it stays in the shipped build as a diagnostic.
+        /// </summary>
+        private readonly bool _layoutAudit =
+            string.Equals(Environment.GetEnvironmentVariable("JB_LAYOUT_AUDIT"), "1", StringComparison.Ordinal);
+
+        private void AuditLayout()
+        {
+            if (!_layoutAudit) return;
+            var issues = new List<string>();
+            try
+            {
+                foreach (var card in _setCards)
+                {
+                    if (card == null || card.Panel == null) continue;
+                    var kids = new List<Control>();
+                    foreach (Control c in card.Panel.Controls) if (c != null && c.Visible) kids.Add(c);
+                    for (int i = 0; i < kids.Count; i++)
+                        for (int j = i + 1; j < kids.Count; j++)
+                        {
+                            Rectangle a = kids[i].Bounds, b = kids[j].Bounds;
+                            Rectangle hit = Rectangle.Intersect(a, b);
+                            if (hit.Width > Ui.S(3) && hit.Height > Ui.S(3))
+                                issues.Add(card.Key + ": " + (kids[i].Text ?? kids[i].GetType().Name) +
+                                    " overlaps " + (kids[j].Text ?? kids[j].GetType().Name) +
+                                    " by " + hit.Width + "x" + hit.Height);
+                        }
+                    foreach (Control c in kids)
+                        if (c.Left < -1 || c.Right > card.Panel.Width + 1 || c.Bottom > card.Panel.Height + 1)
+                            issues.Add(card.Key + ": " + (c.Text ?? c.GetType().Name) + " outside its card");
+                }
+                /* The title band is painted, not a control, so it has to be checked against the
+                   toolbar by arithmetic: anything that reaches into it covers the page name. */
+                int textX = Ui.S(SidebarW) + Ui.S(ContentPad);
+                var title = new Rectangle(textX, Ui.S(10),
+                    Math.Max(Ui.S(120), ClientSize.Width - textX - Ui.S(ContentPad) - _toolbarReserve), Ui.S(52));
+                foreach (Control c in new Control[] { _search, _sortBtn, _newBtn, _saveSettings })
+                {
+                    if (c == null || !c.Visible || _headerH > Ui.S(HeaderH)) continue;
+                    Rectangle hit = Rectangle.Intersect(title, c.Bounds);
+                    if (hit.Width > Ui.S(3) && hit.Height > Ui.S(3))
+                        issues.Add("toolbar covers the page title by " + hit.Width + "x" + hit.Height);
+                }
+            }
+            catch (Exception ex) { issues.Add("audit failed: " + ex.Message); }
+            Log.Info("LAYOUT " + ClientSize.Width + "x" + ClientSize.Height + " page=" + _page +
+                (issues.Count == 0 ? " OK" : " " + issues.Count + " issue(s): " + string.Join(" | ", issues.ToArray())));
+        }
 
         private JBButton Nav(string text, string icon, EventHandler click)
         {
@@ -1510,8 +1576,12 @@ namespace JoeBrowser
             try { return new Uri(url).Host; } catch { return url; }
         }
 
-        private async System.Threading.Tasks.Task BrowserActionCore(string key, string engine)
+        private System.Threading.Tasks.Task BrowserActionCore(string key, string engine)
         {
+            /* This path is entirely synchronous; it returns a completed Task only because
+               Guard() takes a Func<Task> so every action shares one error boundary. Declaring
+               it 'async' with no await made the compiler warn and, more importantly, suggested
+               work was happening off the UI thread when it was not. */
             try
             {
                 /* The browsers page carries out its own installs, removals and reveals; the
@@ -1521,7 +1591,7 @@ namespace JoeBrowser
                 {
                     Directory.CreateDirectory(KernelStore.Root);
                     Process.Start("explorer.exe", "\"" + KernelStore.Root + "\"");
-                    return;
+                    return System.Threading.Tasks.Task.CompletedTask;
                 }
 
                 if (key == "rescan")
@@ -1531,7 +1601,7 @@ namespace JoeBrowser
                     Toast(n == 0 ? "No browser build is installed" : n + " browser build" +
                         (n == 1 ? "" : "s") + " installed", ToastKind.Info);
                     RefreshKernelInfo();
-                    return;
+                    return System.Threading.Tasks.Task.CompletedTask;
                 }
 
                 if (key == "kernels")
@@ -1539,7 +1609,7 @@ namespace JoeBrowser
                     using (var dlg = new KernelForm()) dlg.ShowDialog(this);
                     _browsersPage.Load();
                     RefreshKernelInfo();
-                    return;
+                    return System.Threading.Tasks.Task.CompletedTask;
                 }
             }
             catch (Exception ex)
@@ -1547,6 +1617,7 @@ namespace JoeBrowser
                 Log.Error("Browser action failed: " + key, ex);
                 Toast(ShortError(ex), ToastKind.Error);
             }
+            return System.Threading.Tasks.Task.CompletedTask;
         }
 
         /// <summary>
@@ -2334,83 +2405,102 @@ namespace JoeBrowser
             _maxBtn.SetBounds(w - cw * 2, 0, cw, ch);
             _minBtn.SetBounds(w - cw * 3, 0, cw, ch);
 
-            /* One toolbar row, laid out from the right edge inwards, and every control on it is
-               placed before anything is shown: the row is measured, whatever does not fit is
-               hidden, and only then are the bounds set. That is what stops a button being drawn
-               under another at a narrow width, which is the single most reported fault. */
+            /* The header is one measured band, not two independent guesses. The old layout
+               computed "does the toolbar need a second row?" from the Profiles toolbar only,
+               so on Settings the Save button stayed on the title's row and covered the word
+               "Settings" on a narrow window. Every page's toolbar is measured here before
+               anything is placed. */
             int toolbarRight = w - cw * 3 - Ui.S(16);
             int headerBase = Ui.S(HeaderH);
-            int toolbarY = (headerBase - Ui.S(34)) / 2 - Ui.S(4);
-            int newW = Math.Min(Ui.S(148), Math.Max(Ui.S(96), _newBtn.PreferredWidth(Ui.S(124))));
+            int textX = sb + Ui.S(ContentPad);
+            int capReserve = cw * 3 + Ui.S(24);
+            int gap = Ui.S(8);
+            int titleRoom = Ui.S(240);
             bool profilesPage = _page == 0;
+            bool settingsPage = _page == 4;
+
+            int newW = Math.Min(Ui.S(148), Math.Max(Ui.S(96), _newBtn.PreferredWidth(Ui.S(124))));
+            int sortW = _sortBtn.PreferredWidth(Ui.S(108));
+            int saveW = Math.Min(Ui.S(170), _saveSettings.PreferredWidth(Ui.S(140)));
+            int searchMin = Ui.S(150);
 
             /* Where the header's controls are before and after this layout. A control that
                moves or is hidden does not ask the window to paint over the place it was, so
-               its pixels stay on the screen until something else covers them - which is how a
-               button from the page before last ends up sitting in the header of the page
-               after it. The region is invalidated once the new bounds are known. */
+               its pixels stay on the screen - the ghost button from the page before last. */
             var dirty = Rectangle.Empty;
             foreach (Control c in new Control[] { _search, _sortBtn, _newBtn, _saveSettings })
                 if (c != null && c.Visible) dirty = Rectangle.Union(dirty, c.Bounds);
 
-            _newBtn.Visible = profilesPage;
-            _sortBtn.Visible = profilesPage;
-            _search.Visible = profilesPage;
-            _saveSettings.Visible = _page == 4;
+            /* How much width the toolbar needs at its narrowest, with every control it wants.
+               If that leaves less than a readable title, the whole toolbar moves to its own
+               row and the title keeps the first one. */
+            int minNeeded = profilesPage ? newW + gap + sortW + gap + searchMin
+                : settingsPage ? saveW : 0;
+            bool twoRows = minNeeded > 0 && (toolbarRight - minNeeded - textX) < titleRoom;
+            int allowedLeft = twoRows ? textX : textX + titleRoom;
+            int toolbarY = twoRows ? headerBase + Ui.S(7) : (headerBase - Ui.S(34)) / 2 - Ui.S(4);
+            headerH = twoRows ? headerBase + Ui.S(48) : headerBase;
+            _headerH = headerH;
 
-            int textX = sb + Ui.S(ContentPad);
+            _newBtn.Visible = profilesPage;
+            _sortBtn.Visible = false;
+            _search.Visible = false;
+            _saveSettings.Visible = settingsPage;
+
             int cursor = toolbarRight;
-            if (profilesPage) cursor -= newW + Ui.S(10);
-            int sortW = _sortBtn.PreferredWidth(Ui.S(108));
-            int searchMin = Ui.S(150);
-            int leftEdge = textX;
-            bool showSort = profilesPage && cursor - Ui.S(8) - sortW >= leftEdge + searchMin + Ui.S(10);
-            if (showSort) cursor -= sortW + Ui.S(8);
-            bool showSearch = profilesPage && cursor - Ui.S(8) >= leftEdge + searchMin;
-            int searchW = showSearch ? Math.Min(Ui.S(280), cursor - Ui.S(8) - leftEdge) : 0;
-            if (showSearch) cursor -= searchW + Ui.S(8);
+            int newLeft = 0, sortLeft = 0, searchLeft = 0, saveLeft = 0;
+            if (profilesPage)
+            {
+                newLeft = cursor - newW;
+                cursor = newLeft - gap;
+            }
+            else if (settingsPage)
+            {
+                saveLeft = cursor - saveW;
+                cursor = saveLeft - gap;
+            }
+
+            /* The search field is the useful part of a profile toolbar, so it comes before
+               the sort button when space is short. Neither is ever placed left of the room
+               the title needs. */
+            bool showSort = false, showSearch = false;
+            int searchW = 0;
+            if (profilesPage)
+            {
+                showSearch = cursor - searchMin >= allowedLeft;
+                if (showSearch)
+                {
+                    searchW = Math.Min(twoRows ? Ui.S(360) : Ui.S(280), cursor - allowedLeft);
+                    searchLeft = cursor - searchW;
+                    cursor = searchLeft - gap;
+                }
+                showSort = cursor - sortW >= allowedLeft;
+                if (showSort) { sortLeft = cursor - sortW; cursor = sortLeft - gap; }
+            }
 
             _sortBtn.Visible = showSort;
             _search.Visible = showSearch;
 
-            /* Where the left-most visible control of the toolbar starts. The page title has to
-               fit to the left of it, and when it does not, the toolbar moves to a second row. */
-            int newLeft = toolbarRight - newW;
-            int sortLeft = newLeft - Ui.S(8) - sortW;
-            int searchLeft = cursor;
             int toolbarLeft = profilesPage
-                ? (showSearch ? searchLeft : showSort ? sortLeft : newLeft)
-                : toolbarRight;
-
-            /* The page title needs a row of its own. On a narrow window the toolbar takes the
-               whole band - the search field alone is wider than the title - and the title was
-               then drawn underneath it, so the page had no name at all. The toolbar drops to a
-               second row instead, and the title keeps the first one. */
-            bool twoRows = toolbarLeft - textX < Ui.S(200);
-            headerH = twoRows ? headerBase + Ui.S(48) : headerBase;
-            if (twoRows) toolbarY = headerBase + Ui.S(7);
-            _headerH = headerH;
+                ? (showSort ? sortLeft : showSearch ? searchLeft : newLeft)
+                : settingsPage ? saveLeft : toolbarRight;
 
             if (profilesPage) _newBtn.SetBounds(newLeft, toolbarY, newW, Ui.S(34));
             if (showSort) _sortBtn.SetBounds(sortLeft, toolbarY, sortW, Ui.S(34));
             if (showSearch) _search.SetBounds(searchLeft, toolbarY, searchW, Ui.S(34));
+            if (settingsPage) _saveSettings.SetBounds(saveLeft, toolbarY, saveW, Ui.S(34));
 
-            /* What the toolbar occupies on the right, so the page title above it is drawn into
-               the space that is left instead of under the buttons. On a second row the toolbar
-               has no title beside it and the title has the whole width. */
-            _toolbarReserve = twoRows ? 0 : Math.Max(Ui.S(180), toolbarRight - toolbarLeft + Ui.S(24));
-
-            if (_page == 4)
-            {
-                int saveW = Math.Min(Ui.S(170), _saveSettings.PreferredWidth(Ui.S(140)));
-                _saveSettings.SetBounds(toolbarRight - saveW, toolbarY, saveW, Ui.S(34));
-                if (!twoRows) _toolbarReserve = Math.Max(Ui.S(200), saveW + Ui.S(40));
-                else _toolbarReserve = 0;
-            }
+            /* The paint pass trims the title to this reserve. It is derived from the actual
+               left edge of the toolbar, not a guessed constant, so no button can sit on top
+               of the title on any page at any width. Even with the toolbar on its own row the
+               caption buttons still occupy the top right corner. */
+            _toolbarReserve = twoRows ? capReserve
+                : Math.Max(capReserve, w - toolbarLeft + Ui.S(12));
 
             /* The header is painted again over everything it used to hold. */
             foreach (Control c in new Control[] { _search, _sortBtn, _newBtn, _saveSettings })
                 if (c != null && c.Visible) dirty = Rectangle.Union(dirty, c.Bounds);
+            if (!dirty.IsEmpty) dirty = Rectangle.Union(dirty, new Rectangle(sb, 0, w - sb, headerH));
             if (!dirty.IsEmpty) Invalidate(dirty);
 
             int contentX = sb;
@@ -2483,6 +2573,7 @@ namespace JoeBrowser
 
             ResumeLayout(false);
             Invalidate();
+            AuditLayout();
         }
 
         /// <summary>
@@ -2519,18 +2610,24 @@ namespace JoeBrowser
                     (used == 1 ? " in use" : " in use") + ". New profiles take a build the workspace has not used.";
         }
 
+        /// <summary>
+        /// The settings page is a measured layout, not a list of fixed-height rows.
+        ///
+        /// A row used to be 60 px tall, or 76 px if it had a value label. On a narrow window
+        /// "Detected browser" wraps to two lines, the kernel summary wraps to four, and the
+        /// three controls on the right were still placed from a running x that could go
+        /// negative - so fields were drawn half outside the card and the next row's text was
+        /// printed over the row above. Every row now measures the text it carries in the width
+        /// it actually has, and any row whose controls cannot share that width puts them on a
+        /// second line of its own.
+        /// </summary>
         private void LayoutSettings()
         {
             if (_settingsColumn == null || _setCards.Count == 0) return;
-            int hostW = Math.Max(Ui.S(320), _settingsHost.Width - Ui.S(10));
-            // Windows UI pages run edge to edge; a centered column only wasted the viewport.
-            int colW = Math.Max(Ui.S(320), hostW - Ui.S(8));
-            /* Row heights follow the type scale: a title and its value need a line each plus
-               their padding, and the old 54 was 6 px short of that once the fonts were fixed. */
-            int headH = Ui.S(48), rowH = Ui.S(60), pad = Ui.S(20), gap = Ui.S(16);
-            /* One row runs to two lines of text - the browser-build summary - and a wrapped label
-               in a 54px row would be clipped by the divider under it. */
-            int tallRowH = Ui.S(76);
+            int hostW = Math.Max(Ui.S(280), _settingsHost.Width - Ui.S(10));
+            int colW = Math.Max(Ui.S(280), hostW - Ui.S(8));
+            int headH = Ui.S(48), pad = Ui.S(20), gap = Ui.S(16);
+            int inner = Math.Max(Ui.S(200), colW - pad * 2);
 
             _settingsColumn.SetBounds(0, 0, Math.Max(colW, hostW), _settingsColumn.Height);
 
@@ -2538,20 +2635,20 @@ namespace JoeBrowser
             foreach (var card in _setCards)
             {
                 int rowsH = 0;
-                foreach (var r in card.Rows) rowsH += RowHeight(r, rowH, tallRowH);
+                foreach (var r in card.Rows) rowsH += MeasureRow(r, colW, pad, inner).Height;
                 int h = headH + rowsH + Ui.S(6);
                 card.Panel.SetBounds(0, y, colW, h);
                 var lbl = card.Panel.Tag as JBLabel;
-                if (lbl != null) lbl.SetBounds(pad, Ui.S(15), colW - pad * 2, Theme.LineHeight(Theme.H2));
+                if (lbl != null) lbl.SetBounds(pad, Ui.S(15), Math.Max(Ui.S(80), colW - pad * 2), Theme.LineHeight(Theme.H2));
 
                 var divs = new float[Math.Max(0, card.Rows.Count - 1)];
                 int rowY = headH;
                 for (int i = 0; i < card.Rows.Count; i++)
                 {
                     if (i > 0) divs[i - 1] = rowY;
-                    int rh = RowHeight(card.Rows[i], rowH, tallRowH);
-                    LayoutSetRow(card.Rows[i], colW, rowY, rh, pad);
-                    rowY += rh;
+                    var m = MeasureRow(card.Rows[i], colW, pad, inner);
+                    PlaceRow(card.Rows[i], m, colW, rowY, pad);
+                    rowY += m.Height;
                 }
                 card.Panel.Dividers = divs;
                 card.Panel.Invalidate();
@@ -2559,87 +2656,179 @@ namespace JoeBrowser
             }
 
             _settingsColumn.Height = y + Ui.S(8);
-            _settingsColumn.Width = Math.Max(colW + Ui.S(20), hostW);
+            /* No extra width: a column wider than its host creates a phantom horizontal scroll
+               and lets the last control sit one gutter outside the visible area. */
+            _settingsColumn.Width = Math.Max(colW, hostW);
             _settingsHost.SyncExtent();
         }
 
-        /// <summary>Rows that carry a wrapped explanatory value need the extra height.</summary>
-        private int RowHeight(SetRow row, int normal, int tall)
+        private sealed class RowMeasure
         {
-            return row.Value != null && Wraps(row.Value) ? tall : normal;
+            public int Height;
+            public int[] Widths;
+            public bool Stacked;
+            /// <summary>Controls get a line each: fields full width, buttons on the last one.</summary>
+            public bool Wrapped;
+            public int TitleW;
+            public int ValueW;
+            public int TextH;
+            public int ControlH;
         }
 
-        private static bool Wraps(Control c)
+        /// <summary>Whole lines a label needs in a given width, measured with the same ruler the
+        /// label paints with. A clipped caption is a layout bug, not a typography choice.</summary>
+        private static int LabelLines(Control c, int width)
         {
             var l = c as JBLabel;
-            return l != null && !l.AutoEllipsis;
+            if (l == null || string.IsNullOrEmpty(l.Text) || width <= 0) return 1;
+            Font f = l.Font ?? Theme.Body;
+            float lineH = Math.Max(1f, (float)Math.Ceiling(f.GetHeight()));
+            float used = Ui.MeasureWrapped(null, l.Text, f, width, 8);
+            return Math.Max(1, (int)Math.Round(used / lineH));
         }
 
-        private void LayoutSetRow(SetRow row, int colW, int rowY, int rowH, int pad)
+        private RowMeasure MeasureRow(SetRow row, int colW, int pad, int inner)
         {
-            int[] w = RowWidths(row, colW, pad);
-            int right = colW - pad;
-            int edge = right;
-            for (int i = row.Controls.Length - 1; i >= 0; i--)
+            var m = new RowMeasure();
+            int n = row.Controls.Length;
+            int gap = Ui.S(8);
+            int minTitle = Ui.S(150);
+            int[] w = RowWidths(row, inner);
+            int total = 0;
+            foreach (int x in w) total += x;
+            if (n > 1) total += gap * (n - 1);
+            m.ControlH = 0;
+            foreach (var c in row.Controls) m.ControlH = Math.Max(m.ControlH, c.Height);
+
+            /* Controls that would leave less than a readable label move to their own line.
+               The old code kept subtracting from a running x until it went below zero. */
+            m.Stacked = n > 0 && total > inner - minTitle;
+            if (m.Stacked)
             {
-                var c = row.Controls[i];
-                edge -= w[i];
-                c.SetBounds(edge, rowY + (rowH - c.Height) / 2, w[i], c.Height);
-                if (i > 0) edge -= Ui.S(8);
+                /* On its own line the group has the whole card. Fields give ground first, but
+                   never to a width nobody can type in; if even that is not enough the group
+                   wraps - one full-width field line and a button line beneath it. */
+                w = RowWidths(row, inner);
+                total = 0;
+                foreach (int x in w) total += x;
+                if (n > 1) total += gap * (n - 1);
+                int over = total - inner;
+                if (over > 0)
+                {
+                    int floor = Ui.S(120);
+                    for (int i = 0; i < n && over > 0; i++)
+                    {
+                        if (row.Controls[i] is JBButton) continue;
+                        int cut = Math.Min(over, Math.Max(0, w[i] - floor));
+                        w[i] -= cut; over -= cut;
+                    }
+                }
+                m.Wrapped = over > 0;
+                if (m.Wrapped)
+                {
+                    /* Buttons keep their measured width in wrapped mode; only the fields are
+                       given a whole line. Recompute so no button is drawn narrower than its
+                       label. */
+                    w = RowWidths(row, inner);
+                }
+            }
+            m.Widths = w;
+            if (m.Wrapped)
+            {
+                /* One line per field, then one line of buttons. This is the only shape that
+                   keeps a path field usable on a 680 px window next to two labelled buttons. */
+                int h = 0, buttonH = 0;
+                foreach (var c in row.Controls)
+                {
+                    if (c is JBButton) buttonH = Math.Max(buttonH, c.Height);
+                    else h += c.Height + gap;
+                }
+                m.ControlH = h + buttonH;
             }
 
-            int valRight = row.Controls.Length > 0 ? edge - Ui.S(16) : right;
-            int usable = Math.Max(Ui.S(120), valRight - pad);
-            // A row with a value splits the card between the label and its current setting.
-            int titleW = row.Value == null ? usable : Math.Min(Ui.S(320), (int)(usable * 0.45f));
-            // Labels stop a pixel short of the boundary: an opaque label would paint over the hairline.
-            int ly = rowY + 1, lh = rowH - 2;
-            row.Title.SetBounds(pad, ly, titleW, lh);
+            int textRight = m.Stacked ? colW - pad : colW - pad - total - (n > 0 ? Ui.S(16) : 0);
+            int usable = Math.Max(Ui.S(120), textRight - pad);
+            m.TitleW = row.Value == null ? usable : Math.Min(Ui.S(320), Math.Max(Ui.S(90), (int)(usable * 0.45f)));
+            m.ValueW = row.Value == null ? 0 : Math.Max(Ui.S(80), usable - m.TitleW - Ui.S(16));
+
+            int titleH = LabelLines(row.Title, m.TitleW) * Theme.LineHeight(row.Title.Font ?? Theme.BodyBold);
+            int valueH = row.Value == null ? 0 : LabelLines(row.Value, m.ValueW) * Theme.LineHeight(row.Value.Font ?? Theme.Body);
+            m.TextH = Math.Max(titleH, valueH);
+            m.Height = Math.Max(Ui.S(52), m.Stacked
+                ? m.TextH + Ui.S(8) + m.ControlH + Ui.S(18)
+                : Math.Max(m.TextH, m.ControlH) + Ui.S(18));
+            return m;
+        }
+
+        private static void PlaceRow(SetRow row, RowMeasure m, int colW, int rowY, int pad)
+        {
+            int right = colW - pad;
+            int n = row.Controls.Length;
+            int gap = Ui.S(8);
+            int edge = right;
+
+            if (m.Wrapped)
+            {
+                int inner = Math.Max(Ui.S(160), colW - pad * 2);
+                int cy = rowY + m.TextH + Ui.S(8);
+                for (int i = 0; i < n; i++)
+                {
+                    if (row.Controls[i] is JBButton) continue;
+                    row.Controls[i].SetBounds(pad, cy, inner, row.Controls[i].Height);
+                    cy += row.Controls[i].Height + gap;
+                }
+                for (int i = n - 1; i >= 0; i--)
+                {
+                    if (!(row.Controls[i] is JBButton)) continue;
+                    edge -= m.Widths[i];
+                    row.Controls[i].SetBounds(Math.Max(pad, edge), cy,
+                        Math.Max(Ui.S(40), m.Widths[i]), row.Controls[i].Height);
+                    edge -= gap;
+                }
+            }
+            else if (m.Stacked)
+            {
+                int ctrlY = rowY + m.TextH + Ui.S(8);
+                for (int i = n - 1; i >= 0; i--)
+                {
+                    edge -= m.Widths[i];
+                    row.Controls[i].SetBounds(Math.Max(pad, edge), ctrlY, Math.Max(Ui.S(40), m.Widths[i]), row.Controls[i].Height);
+                    if (i > 0) edge -= gap;
+                }
+            }
+            else
+            {
+                for (int i = n - 1; i >= 0; i--)
+                {
+                    edge -= m.Widths[i];
+                    row.Controls[i].SetBounds(Math.Max(pad, edge), rowY + (m.Height - row.Controls[i].Height) / 2,
+                        Math.Max(Ui.S(40), m.Widths[i]), row.Controls[i].Height);
+                    if (i > 0) edge -= gap;
+                }
+            }
+
+            int ly = rowY + 1;
+            int lh = m.Stacked ? Math.Max(Ui.S(20), m.TextH) : m.Height - 2;
+            row.Title.SetBounds(pad, ly, Math.Max(Ui.S(60), m.TitleW), lh);
             if (row.Value == null) return;
-            int vx = pad + titleW + Ui.S(16);
-            row.Value.SetBounds(vx, ly, Math.Max(Ui.S(60), valRight - vx), lh);
+            int vx = pad + m.TitleW + Ui.S(16);
+            row.Value.SetBounds(vx, ly, Math.Max(Ui.S(60), m.ValueW), lh);
         }
 
         /// <summary>
         /// Resting widths for a row's controls, re-measured for buttons so a longer translation
-        /// cannot clip them. Text fields absorb any overflow first; the label keeps its space.
+        /// cannot clip them. Widths are capped at the space the row actually has.
         /// </summary>
-        private int[] RowWidths(SetRow row, int colW, int pad)
+        private static int[] RowWidths(SetRow row, int limit)
         {
             int n = row.Controls.Length;
             var w = new int[n];
-            int total = n > 1 ? Ui.S(8) * (n - 1) : 0;
-            int flexCount = 0;
             for (int i = 0; i < n; i++)
             {
                 int wi = row.Widths[i];
                 var b = row.Controls[i] as JBButton;
                 if (b != null) wi = b.PreferredWidth(wi);
-                else if (row.Controls[i] is JBTextBox) flexCount++;
-                w[i] = wi;
-                total += wi;
-            }
-
-            int limit = colW - pad * 2 - Ui.S(300);
-            if (total > limit && flexCount > 0)
-            {
-                int over = total - limit;
-                int shrunk = 0;
-                for (int i = 0; i < n; i++)
-                {
-                    if (!(row.Controls[i] is JBTextBox)) continue;
-                    int share = over / flexCount;
-                    int nw = Math.Max(Ui.S(140), w[i] - share);
-                    shrunk += w[i] - nw;
-                    w[i] = nw;
-                }
-                if (shrunk < over)
-                {
-                    // Even at their floor the fields overflow; let the label give ground instead.
-                    int still = over - shrunk;
-                    for (int i = 0; i < n; i++)
-                        if (row.Controls[i] is JBTextBox) { w[i] = Math.Max(Ui.S(100), w[i] - still / flexCount); break; }
-                }
+                w[i] = Math.Max(Ui.S(56), Math.Min(wi, Math.Max(Ui.S(56), limit)));
             }
             return w;
         }
@@ -2820,7 +3009,10 @@ namespace JoeBrowser
             bool inWorkspace = page <= 3 || page == 8 || page == 9;
             if (_navGroupWorkspace != null) _navGroupWorkspace.Active = inWorkspace;
             if (_navGroupSystem != null) _navGroupSystem.Active = !inWorkspace;
-            _host.Visible = profiles && _cards.Count > 0;
+            /* A search that matches nothing leaves cards in the grid but none on screen.
+               Showing the scroll host because _cards.Count > 0 put it under the empty state
+               and gave the wheel a grid nobody could see. Both views read the same number. */
+            _host.Visible = profiles && ShownCount() > 0;
             if (!profiles) _picks.Clear();
             _bulk.Visible = profiles && _picks.Count > 1;
             _emptyPanel.Visible = profiles && ShownCount() == 0;
@@ -2862,10 +3054,12 @@ namespace JoeBrowser
             _saveSettings.Visible = page == 4;
             _themeSwitch.Visible = true;
             /* Hiding a child control does not ask the parent to paint over it, so the search
-               field's pixels stayed on the window after the Profiles page was left. The band
-               the toolbar lived in is invalidated here, so the header is drawn again. */
+               field's pixels stayed on the window after the Profiles page was left. The whole
+               header is invalidated - including the second row a narrow window uses - so no
+               part of the previous page's toolbar survives the switch. */
             Invalidate(new Rectangle(Ui.S(SidebarW), 0,
-                Math.Max(1, ClientSize.Width - Ui.S(SidebarW)), Ui.S(HeaderH)));
+                Math.Max(1, ClientSize.Width - Ui.S(SidebarW)),
+                Math.Max(Ui.S(HeaderH + 48), _headerH)));
 
             /* The newly visible page has to come forward over the other page containers...
                and then the fixed chrome has to be put back on top of everything. Every page
@@ -2907,6 +3101,18 @@ namespace JoeBrowser
             }
             ResumeLayout(false);
             LayoutAll();
+            /* Keyboard state follows the destination. A page reached by clicking its nav row
+               used to leave focus on whichever page control had it before, so the focus ring
+               appeared on the first visit and vanished on the next, and Tab started from a
+               different place every time. The active destination owns focus after a switch. */
+            try
+            {
+                JBButton active = null;
+                for (int i = 0; i < navs.Length; i++)
+                    if (pageOf[i] == page) { active = navs[i]; break; }
+                if (active != null && !active.Focused && Visible) active.Focus();
+            }
+            catch { }
         }
 
         private void ReloadCards(bool fromDisk)
@@ -3771,9 +3977,13 @@ namespace JoeBrowser
                    than refusing or opening a second one. */
                 if (!string.IsNullOrEmpty(startUrl))
                 {
+                    // Fire-and-forget navigation in the existing window; the faulted
+                    // continuation handles errors without blocking the UI thread.
+#pragma warning disable CS4014
                     var nav = existing.NavigateAsync(startUrl);
                     nav.ContinueWith(delegate(System.Threading.Tasks.Task<bool> t) { var ignored = t.Exception; },
                         System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted);
+#pragma warning restore CS4014
                 }
                 return;
             }

@@ -14,6 +14,81 @@ namespace JoeBrowser
         [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int cmd);
 
+        /// <summary>
+        /// A shape check for every script the application injects into a page. The C# compiler
+        /// cannot see inside a verbatim string: one stray brace once made the entire CDP tool
+        /// script a SyntaxError, so paste-as-human, the right-click guard and every proxy banner
+        /// stopped working on the engines that rely on injection, while the build still passed.
+        /// Counting delimiters outside strings and comments catches that whole class of mistake.
+        /// </summary>
+        private static string ScriptShapeError(string script)
+        {
+            if (string.IsNullOrEmpty(script)) return "the script is empty";
+            int braces = 0, parens = 0, brackets = 0;
+            char quote = '\0';
+            bool lineComment = false, blockComment = false;
+            for (int i = 0; i < script.Length; i++)
+            {
+                char c = script[i];
+                char n = i + 1 < script.Length ? script[i + 1] : '\0';
+                if (lineComment) { if (c == '\n' || c == '\r') lineComment = false; continue; }
+                if (blockComment) { if (c == '*' && n == '/') { blockComment = false; i++; } continue; }
+                if (quote != '\0')
+                {
+                    if (c == '\\') { i++; continue; }
+                    if (c == quote) quote = '\0';
+                    continue;
+                }
+                if (c == '/' && n == '/') { lineComment = true; i++; continue; }
+                if (c == '/' && n == '*') { blockComment = true; i++; continue; }
+                /* A regular expression is skipped as one opaque token. Its character classes
+                   can contain unmatched parentheses - /[^(]/ is a valid regex - and counting
+                   those as code would report a healthy script as broken. A slash is a regex
+                   opener only when the previous significant character cannot end an operand. */
+                if (c == '/' && RegexStarts(script, i))
+                {
+                    i++;
+                    bool charClass = false;
+                    while (i < script.Length)
+                    {
+                        char r = script[i];
+                        if (r == '\\') { i += 2; continue; }
+                        if (r == '\n' || r == '\r') break;
+                        if (r == '[') charClass = true;
+                        else if (r == ']') charClass = false;
+                        else if (r == '/' && !charClass) break;
+                        i++;
+                    }
+                    continue;
+                }
+                if (c == '\'' || c == '"' || c == '`') { quote = c; continue; }
+                if (c == '{') braces++;
+                else if (c == '}') braces--;
+                else if (c == '(') parens++;
+                else if (c == ')') parens--;
+                else if (c == '[') brackets++;
+                else if (c == ']') brackets--;
+                if (braces < 0 || parens < 0 || brackets < 0) return "a closing delimiter has no partner";
+            }
+            if (quote != '\0' || blockComment) return "an unterminated string or comment";
+            if (braces != 0 || parens != 0 || brackets != 0)
+                return "unbalanced delimiters " + braces + "/" + parens + "/" + brackets;
+            return null;
+        }
+
+        /// <summary>Whether a slash at this position opens a regex literal rather than dividing
+        /// two values. Deliberately conservative: a division whose left operand ends in a
+        /// letter, digit, closing bracket or quote is never mistaken for a regex.</summary>
+        private static bool RegexStarts(string s, int at)
+        {
+            int j = at - 1;
+            while (j >= 0 && char.IsWhiteSpace(s[j])) j--;
+            if (j < 0) return true;
+            char p = s[j];
+            return !(char.IsLetterOrDigit(p) || p == '_' || p == '$' ||
+                     p == ')' || p == ']' || p == '}' || p == '\'' || p == '"' || p == '`');
+        }
+
         [STAThread]
         private static int Main(string[] args)
         {
@@ -226,12 +301,21 @@ namespace JoeBrowser
                        rather than eyeballed: body text at 16 px or more and nothing anywhere
                        below 14 px at 100%. "The font is too small" has come back once; a build
                        that reintroduces it should fail here instead of in a screenshot. */
-                    if (Theme.PxBody < 16) sb.Append(" [body text is below 16 px]");
-                    if (Math.Min(Theme.PxMicro, Theme.PxCaption) < 14) sb.Append(" [text below 14 px is in the scale]");
+                    /* Read the constants into locals first. Comparing them directly let the
+                       compiler fold the condition to false and report the assertion body as
+                       unreachable, which made a real build warning out of a useful check. */
+                    double bodyPx = Theme.PxBody;
+                    double smallestPx = Math.Min(Theme.PxMicro, Theme.PxCaption);
+                    if (bodyPx < 16) sb.Append(" [body text is below 16 px]");
+                    if (smallestPx < 14) sb.Append(" [text below 14 px is in the scale]");
                     /* The 1.9.2 pass deliberately re-introduced rounding: square corners were
                        the single biggest "low-quality app" tell, and the fill/stroke paths
-                       already supported it. The promise now runs the other way. */
-                    if (Theme.ButtonRadius < 8 || Theme.CardRadius < 10) sb.Append(" [corners lost their rounding]");
+                       already supported it. The promise now runs the other way.
+                       Read into locals so the compiler does not fold the comparison and flag
+                       the branch unreachable — it is a build-time regression guard. */
+                    int btnR = Theme.ButtonRadius;
+                    int cardR = Theme.CardRadius;
+                    if (btnR < 8 || cardR < 10) sb.Append(" [corners lost their rounding]");
 
                     /* The layout is measured, so it can be proven: every line of text drawn on a
                        card or a row has to fit the width it is given, at the new type sizes and
@@ -346,10 +430,65 @@ namespace JoeBrowser
                            extension removed on every machine that ever ran the self test -
                            and the release build runs the self test. */
                         ExtensionCatalog.MarkRemoved(shipped, wasRemoved);
+
+                        /* "Always installed" is now an assertion, not a hope. Both first-party
+                           editions must be written and loadable with no network at all: the store
+                           copy is an upgrade, never a prerequisite. A broken manifest, a writer
+                           that throws, or a resolver that only looks at ImportedRoot fails here
+                           instead of on a machine that happens to be offline. */
+                        ExtensionManager.EnsureShippedFallbacks();
+                        foreach (var entry in ExtensionCatalog.DefaultStoreExtensions)
+                        {
+                            string own = System.IO.Path.Combine(
+                                ExtensionCatalog.ShippedFolder(entry[0]), "manifest.json");
+                            if (!ExtensionCatalog.UsableManifest(own))
+                                sb.Append(" [included extension " + entry[1] + " has no built-in edition]");
+                            bool builtin;
+                            if (ExtensionCatalog.ResolveDefaultFolder(entry[0], out builtin).Length == 0)
+                                sb.Append(" [included extension " + entry[1] + " cannot be resolved]");
+                        }
+                        if (ExtensionCatalog.DefaultFolders().Count < ExtensionCatalog.DefaultStoreExtensions.Length)
+                            sb.Append(" [not every included extension would load]");
                     }
                     catch (Exception ex)
                     {
                         sb.Append(" [version checks threw " + ex.GetType().Name + ": " + ex.Message + "]");
+                    }
+
+                    /* Every script that is injected into a page has to parse. A build that links
+                       is not a build whose features run: the CDP tools and the fingerprint stamp
+                       are C# verbatim strings, and one stray brace in either one silently turns
+                       the whole payload into a SyntaxError in the browser. */
+                    try
+                    {
+                        string tools = ExtensionManager.BuildToolScript(new ToolConfig(), "self test", false);
+                        string shape = ScriptShapeError(tools);
+                        if (shape != null) sb.Append(" [injected tool script: " + shape + "]");
+                        if (tools.IndexOf("proxyState", StringComparison.Ordinal) < 0)
+                            sb.Append(" [the proxy alert banner is missing from the tool script]");
+                        if (tools.IndexOf("restoreContextMenu", StringComparison.Ordinal) < 0)
+                            sb.Append(" [the right-click guard is missing from the tool script]");
+                        var fp = profiles.Count > 0 && profiles[0].Fp != null
+                            ? profiles[0].Fp : new FingerprintConfig();
+                        string stamp = FingerprintScript.Build(fp, "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                            "Win32", "en-US", new[] { "en-US", "en" }, null);
+                        shape = ScriptShapeError(stamp);
+                        if (shape != null) sb.Append(" [fingerprint script: " + shape + "]");
+                        if (stamp.IndexOf("__jbRealGl", StringComparison.Ordinal) >= 0)
+                            sb.Append(" [the fingerprint still exposes the host GPU on a named window global]");
+                        /* The shipped editions are written above; their own files have to parse
+                           as well, or Chromium loads an extension whose worker never starts. */
+                        if (Directory.Exists(ExtensionCatalog.ShippedRoot))
+                            foreach (string file in Directory.GetFiles(ExtensionCatalog.ShippedRoot, "*.js",
+                                SearchOption.AllDirectories))
+                        {
+                            shape = ScriptShapeError(File.ReadAllText(file));
+                            if (shape != null) sb.Append(" [" + Path.GetFileName(file) + ": " + shape + "]");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        sb.Append(" [script shape checks threw " + ex.GetType().Name + ": " + ex.Message + "]");
                     }
 
                     /* Every routed rectangle in the app is square. Asserted as a swept range rather
@@ -589,19 +728,18 @@ namespace JoeBrowser
                    whose content actually changed. */
                 ExtensionManager.EnsureAll();
                 Log.Info("Extensions prepared " + sw.ElapsedMilliseconds + " ms");
-                /* Three of the brief's named defaults already exist as first party extensions -
-                   paste as human, enable right click, proxy watch - and are written above. What
-                   was missing is that the extensions page never learned about them on a machine
-                   that had never opened it: EnsureDefaults only ran when the page was built, so
-                   a profile launched straight from a fresh install had the folders on disk and
-                   the catalog listing them as absent. Listing is cheap and idempotent. */
+                /* The built-in editions of the two included extensions were written above, with
+                   no network. Listing them before the first window is what makes the Extensions
+                   page and the launch path agree on a machine that has never opened that page:
+                   EnsureDefaults used to run only when the page was built, so a profile launched
+                   straight from a fresh install had the folders on disk and the catalog showing
+                   them as absent. Listing is cheap and idempotent. */
                 try { ExtensionCatalog.ListPresentDefaults(); } catch (Exception ex) { Log.Error("Default extensions", ex); }
-                /* And fetch whatever is not there, off the launch path. The two shipped store
-                   extensions were downloaded from the browser launch path, which meant a fifteen
-                   second timeout in front of every launch and a silent failure behind a proxy -
-                   reported, accurately, as "the two extensions are never installed". One
-                   background attempt per process, started here, with the Extensions page able to
-                   retry at once if it fails. */
+                /* Upgrade to the real Web Store listings off the launch path. A failed store
+                   request no longer means "the extension is not installed": the built-in edition
+                   stays in place, and only that optional upgrade is retried once a day. One
+                   background attempt per process, with the Extensions page able to retry at
+                   once if the user has just fixed a proxy. */
                 System.Threading.ThreadPool.QueueUserWorkItem(delegate
                 {
                     try

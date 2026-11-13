@@ -352,27 +352,26 @@ namespace JoeBrowser
     if (window.devtools) { try { delete window.devtools; } catch (e) { window.devtools = undefined; } }
   } catch (e) {}
 
-  /* Headless builds leave their own fingerprints in the WebGL context list and in the amount of
-     GPU information they report. The renderer and vendor are already overridden by the profile;
-     what is added here is the SwiftShader marker that appears when a headless build falls back to
-     software rendering, and the empty extension list that only a headless context returns. */
+  /* A fixed list of driver globals goes stale the day a framework adds one. Sweep the own names
+     of window, document and the document prototypes instead, and delete only the ones whose name
+     is unmistakably an automation artefact. This runs at document_start, before any site script
+     has had a chance to define a property of its own, so nothing belonging to the page is at
+     risk. Object.getOwnPropertyNames also catches the non-enumerable cdc_ properties that a
+     for-in loop misses. */
   try {
-    var __jbBad = /swiftshader|llvmpipe|software|mesa offscreen|angle \(google, vulkan/i;
-    var __jbRE = WebGLRenderingContext.prototype.getExtension;
-    WebGLRenderingContext.prototype.getExtension = mark(function getExtension(name) {
-      var out = __jbRE.apply(this, arguments);
-      /* A headless context answers getExtension for the debug renderer info with a software
-         adapter even when getParameter has already been overridden. Reporting nothing is what a
-         machine without the extension does, and it matches the hardware renderer the profile
-         claims. */
-      if (out && name && /WEBGL_debug_renderer_info/i.test(String(name))) {
-        try {
-          var vendor = this.getParameter(out.UNMASKED_VENDOR_WEBGL);
-          if (vendor && __jbBad.test(String(vendor))) return null;
-        } catch (e) {}
+    var BAD_NAME = /^(?:cdc_|\$cdc_|\$wdc_|__webdriver|__driver|__selenium|__fxdriver|__nightmare|__playwright|__pw_|__puppeteer|__lastWatir|domAutomation|_Selenium_IDE_Recorder|callPhantom|_phantom)/i;
+    var ROOTS = [window, document];
+    try { ROOTS.push(Object.getPrototypeOf(document)); } catch (e) {}
+    try { ROOTS.push(Document.prototype); } catch (e) {}
+    for (var ri0 = 0; ri0 < ROOTS.length; ri0++) {
+      var root = ROOTS[ri0];
+      if (!root) continue;
+      var keys = Object.getOwnPropertyNames(root);
+      for (var ki = 0; ki < keys.length; ki++) {
+        if (!BAD_NAME.test(keys[ki])) continue;
+        try { delete root[keys[ki]]; } catch (e) {}
       }
-      return out;
-    }, 'getExtension', 1, __jbRE);
+    }
   } catch (e) {}
 
   function emptyList(tag) {
@@ -768,8 +767,19 @@ namespace JoeBrowser
       if (rg) {
         var re = rg.getExtension('WEBGL_debug_renderer_info');
         if (re) {
-          window.__jbRealGl = String(rg.getParameter(re.UNMASKED_RENDERER_WEBGL)) +
-            '||' + String(rg.getParameter(re.UNMASKED_VENDOR_WEBGL));
+          /* The application reads the machine's real adapter once, through CDP, so new profiles
+             never claim a card this PC does not have. It used to be parked on a named,
+             enumerable window property holding the HOST's GPU string, which a single for-in
+             loop over window could find. It now lives under a symbol key,
+             non-enumerable, and the reader deletes it as soon as it has the value. */
+          try {
+            var gpuKey = Symbol.for('jb.gpu');
+            Object.defineProperty(window, gpuKey, {
+              value: String(rg.getParameter(re.UNMASKED_RENDERER_WEBGL)) +
+                '||' + String(rg.getParameter(re.UNMASKED_VENDOR_WEBGL)),
+              configurable: true
+            });
+          } catch (e3) {}
         }
       }
     } catch (e2) {}
@@ -806,6 +816,7 @@ namespace JoeBrowser
         var origExt = proto.getExtension;
         if (typeof origExt === 'function') {
           method(proto, 'getExtension', function getExtension(name) {
+            var out = origExt.call(this, name);
             try {
               var n = String(name || '').toLowerCase();
               if (!claimedNv && n.indexOf('nv_') === 0) return null;
@@ -813,8 +824,20 @@ namespace JoeBrowser
                  null is a contradiction of a different kind: WebKit simply does not hand it
                  out, so under a Safari identity the extension itself goes away. */
               if (isSafari && n === 'webgl_debug_renderer_info') return null;
+              /* A headless or software adapter still answers this extension with its real
+                 SwiftShader vendor even when getParameter has been replaced. Reporting nothing
+                 is what a machine without the extension does, and it agrees with the hardware
+                 renderer the profile claims. */
+              if (out && n === 'webgl_debug_renderer_info') {
+                /* Read through the captured native, not this.getParameter: by now that one
+                   answers with the profile's vendor, so it can never reveal a software adapter.
+                   'orig' is the real WebIDL method saved before this prototype was patched. */
+                var softVendor = orig.call(this, out.UNMASKED_VENDOR_WEBGL);
+                if (softVendor && /swiftshader|llvmpipe|software|mesa offscreen|angle \(google, vulkan/i.test(String(softVendor)))
+                  return null;
+              }
             } catch (e) {}
-            return origExt.call(this, name);
+            return out;
           }, 1);
         }
         var origSup = proto.getSupportedExtensions;

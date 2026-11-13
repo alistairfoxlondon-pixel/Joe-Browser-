@@ -339,7 +339,11 @@ namespace JoeBrowser
                 int buttons = Theme.Field + Ui.S(20);
                 bool stack = width < Ui.S(560);
                 int text = top + title + Ui.S(6) + line + Ui.S(18);
-                return stack ? text + buttons + Ui.S(14) : Math.Max(text, top + Theme.Field + Ui.S(20));
+                /* Two full-width actions on a narrow card, one line each. Reserving the second
+                   line here is what stops the upper button covering the account details, and it
+                   lets both labels stay readable instead of being cut to "Sign o..." . */
+                return stack ? text + buttons + Ui.S(14) + Theme.Field + Ui.S(8)
+                    : Math.Max(text, top + Theme.Field + Ui.S(20));
             }
 
             protected override void OnPaint(PaintEventArgs e)
@@ -375,19 +379,50 @@ namespace JoeBrowser
                 if (!string.IsNullOrEmpty(_line))
                     Ui.Text(g, _line, Theme.Small, Theme.TextFaint, left, my + Theme.LineHeight(Theme.H1) + Ui.S(6), textW, "left");
 
-                if (stack) SetBoundsCoreForButtons(left, Height - Theme.Field - Ui.S(14), Math.Max(Ui.S(120), Width - left - Ui.S(20)), btnW);
-                else SetBoundsCoreForButtons(Width - btnW - Ui.S(18), my + (m - Theme.Field) / 2f, btnW, btnW);
+                if (stack) SetBoundsCoreForButtons(left, Height - Theme.Field - Ui.S(14), Math.Max(Ui.S(120), Width - left - Ui.S(20)), btnW, true);
+                else SetBoundsCoreForButtons(Width - btnW - Ui.S(18), my + (m - Theme.Field) / 2f, btnW, btnW, false);
             }
 
-            private void SetBoundsCoreForButtons(float x, float y, float available, float wanted)
+            private void SetBoundsCoreForButtons(float x, float y, float available, float wanted, bool vertical)
             {
                 int sw = Switch.PreferredWidth(Ui.S(130));
                 int gw = SignOut.PreferredWidth(Ui.S(100));
-                if (sw + gw + Ui.S(8) > available) { sw = (int)available; gw = 0; }
-                if (gw > 0) SignOut.SetBounds((int)x, (int)y, gw, Theme.Field);
-                SignOut.Visible = gw > 0 && _signedIn;
-                Switch.SetBounds((int)(gw > 0 ? x + gw + Ui.S(8) : x), (int)y,
-                    Math.Min(sw, (int)Math.Max(Ui.S(80), available - gw)), Theme.Field);
+                if (vertical)
+                {
+                    int lineW = (int)Math.Max(Ui.S(80), available);
+                    int upper = (int)(y - Theme.Field - Ui.S(8));
+                    if (_signedIn)
+                    {
+                        SignOut.SetBounds((int)x, upper, Math.Min(gw, lineW), Theme.Field);
+                        SignOut.Visible = true;
+                    }
+                    else SignOut.Visible = false;
+                    Switch.SetBounds((int)x, (int)y, Math.Min(sw, lineW), Theme.Field);
+                    Switch.Visible = true;
+                    return;
+                }
+                /* A narrow window used to drop Sign out entirely: the only way to leave the
+                   account was to make the window wider. Both actions stay reachable; when the
+                   pair cannot fit they share the row and their labels are ellipsised, with the
+                   full text in the tooltip. */
+                if (sw + gw + Ui.S(8) > available)
+                {
+                    int half = Math.Max(Ui.S(80), (int)((available - Ui.S(8)) / 2f));
+                    sw = Math.Min(sw, half);
+                    gw = Math.Min(gw, half);
+                }
+                if (_signedIn)
+                {
+                    SignOut.SetBounds((int)x, (int)y, gw, Theme.Field);
+                    SignOut.Visible = true;
+                    Switch.SetBounds((int)(x + gw + Ui.S(8)), (int)y, sw, Theme.Field);
+                }
+                else
+                {
+                    SignOut.Visible = false;
+                    Switch.SetBounds((int)x, (int)y, Math.Min((int)available, sw + gw + Ui.S(8)), Theme.Field);
+                }
+                Switch.Visible = true;
             }
         }
 
@@ -440,27 +475,37 @@ namespace JoeBrowser
 
             public void SetRows(Row[] rows) { _rows = rows ?? new Row[0]; Invalidate(); }
 
+            /// <summary>True when the two actions cannot share one line and need a second one.</summary>
+            private bool ActionStacked(int width)
+            {
+                int avail = Math.Max(Ui.S(80), width - Ui.S(32));
+                bool hasSecond = !string.IsNullOrEmpty(Secondary.Text);
+                if (!hasSecond) return false;
+                return Primary.PreferredWidth(Ui.S(140)) + Secondary.PreferredWidth(Ui.S(140)) + Ui.S(8) > avail;
+            }
+
             public int NeededHeight(int width)
             {
                 int y = Ui.S(16) + Theme.LineHeight(Theme.Small) + Ui.S(8);   // eyebrow
                 y += Theme.LineHeight(Theme.H2) + Ui.S(12);                  // title
                 foreach (var r in _rows) y += RowHeight(r, width) + Ui.S(8);
-                /* The action row is always one field high; whether one or two buttons are shown
-                   does not change the card's height, which is what keeps two cards side by side
-                   on the same baseline. */
+                /* The paint puts the secondary action on a line ABOVE the primary when the two
+                   do not fit. That line has to be reserved here, or it is drawn over the last
+                   row of the card - the overlap a narrow window showed on the security card. */
                 y += Theme.Field + Ui.S(16) + Ui.S(2);
+                if (ActionStacked(width)) y += Theme.Field + Ui.S(8);
                 return y;
             }
 
             private static int RowHeight(Row r, int width)
             {
                 int label = Theme.LineHeight(Theme.Caption);
-                int value = Theme.LineHeight(r.Strong ? Theme.H3 : Theme.Body);
-                /* One line when the label and the value fit on one line, two when they do not.
-                   The threshold is measured from the text, so a translation that makes the label
-                   longer makes the row taller instead of covering the value. */
-                int labelW = (int)(width * 0.42f);
-                int valueW = Math.Max(Ui.S(60), width - labelW - Ui.S(32));
+                /* Measured against the same inner width and split the paint uses. The old
+                   calculation used the full card width for one and the padded width for the
+                   other, so a wrapped value could be taller than its reserved row. */
+                float w = Math.Max(Ui.S(80), width - Ui.S(32));
+                int labelW = (int)(w * 0.42f);
+                int valueW = Math.Max(Ui.S(50), (int)(w - labelW - Ui.S(12)));
                 int valueH = Measure(r.Value, r.Strong ? Theme.H3 : Theme.Body, valueW);
                 return Math.Max(label, valueH) + Ui.S(6);
             }
@@ -511,10 +556,11 @@ namespace JoeBrowser
                 bool hasSecond = !string.IsNullOrEmpty(Secondary.Text);
                 int primW = Primary.PreferredWidth(Ui.S(140));
                 int secW = hasSecond ? Secondary.PreferredWidth(Ui.S(140)) : 0;
-                if (primW + secW + Ui.S(8) > avail)
+                if (ActionStacked(Width))
                 {
                     /* Too narrow for both: the primary keeps the width it needs, the secondary
-                       takes what is left on its own line above rather than being cut. */
+                       takes its own line above. NeededHeight reserves that line now, so it no
+                       longer covers the last row of the card. */
                     Primary.SetBounds((int)pad, by, Math.Min(primW, avail), Theme.Field);
                     Secondary.SetBounds((int)pad, by - Theme.Field - Ui.S(8), Math.Min(secW, avail), Theme.Field);
                 }

@@ -113,6 +113,38 @@ namespace JoeBrowser
     x.fillStyle = '#069'; x.fillText('JoeBrowser 123', 2, 2);
     o.canvas = cc.toDataURL().length;
   } catch (e) { o.canvas = -1; }
+  /* The three things a real checker site looks for that the old probe never asked:
+     a named global left behind by the injector, a patched API whose toString prints its
+     JavaScript source, and a canvas whose read-back path disagrees with its encode path. */
+  try {
+    var suspect = /^(?:cdc_|\$cdc_|\$wdc_|__jb|__joe|__webdriver|__driver|__selenium|__fxdriver|__nightmare|__playwright|__pw_|__puppeteer|__lastWatir|domAutomation|callPhantom|_phantom)/i;
+    var found = [], roots = [window, document];
+    for (var q = 0; q < roots.length; q++) {
+      var names = Object.getOwnPropertyNames(roots[q]);
+      for (var w = 0; w < names.length; w++) if (suspect.test(names[w])) found.push(names[w]);
+    }
+    o.injected = found.join(',');
+  } catch (e) { o.injected = ''; }
+  try {
+    var probes = [];
+    try { probes.push(['canvas.getImageData', CanvasRenderingContext2D.prototype.getImageData]); } catch (e) {}
+    try { probes.push(['canvas.toDataURL', HTMLCanvasElement.prototype.toDataURL]); } catch (e) {}
+    try { probes.push(['webgl.getParameter', WebGLRenderingContext.prototype.getParameter]); } catch (e) {}
+    var bad = [], ts = Function.prototype.toString;
+    for (var t = 0; t < probes.length; t++)
+      if (ts.call(probes[t][1]).indexOf('[native code]') < 0) bad.push(probes[t][0]);
+    o.natives = bad.join(',');
+  } catch (e) { o.natives = ''; }
+  try {
+    var cs = document.createElement('canvas'); cs.width = 80; cs.height = 30;
+    var cx = cs.getContext('2d');
+    cx.fillStyle = '#f60'; cx.fillRect(0, 0, 40, 20);
+    cx.fillStyle = '#069'; cx.fillText('JoeBrowser 123', 2, 12);
+    var before = cs.toDataURL();
+    var px = cx.getImageData(0, 0, cs.width, cs.height);
+    cx.putImageData(px, 0, 0);
+    o.canvasStable = before === cs.toDataURL();
+  } catch (e) { o.canvasStable = false; }
   try {
     var base = ['monospace', 'sans-serif', 'serif'];
     var probe = 'mmmmmmmmmmlli';
@@ -210,6 +242,23 @@ new Promise(function (resolve) {
             bool chromeObj = Bool(d, "chrome");
             result.Items.Add(new LeakItem("Browser object", chromeObj,
                 chromeObj ? "window.chrome is present" : "window.chrome is missing, and Chromium always exposes it"));
+
+            string injected = Str(d, "injected");
+            result.Items.Add(new LeakItem("Injected globals", injected.Length == 0,
+                injected.Length == 0
+                    ? "No automation or application globals are visible on window/document"
+                    : "Visible globals: " + injected));
+
+            string natives = Str(d, "natives");
+            result.Items.Add(new LeakItem("Native function shapes", natives.Length == 0,
+                natives.Length == 0
+                    ? "Canvas and WebGL methods still print [native code]"
+                    : "Prints JavaScript source: " + natives));
+
+            bool canvasStable = Bool(d, "canvasStable");
+            result.Items.Add(new LeakItem("Canvas read/encode agreement", canvasStable,
+                canvasStable ? "A read-back leaves the exported image unchanged"
+                    : "Reading the bitmap and encoding it again produced a different image"));
 
             // --- identity -----------------------------------------------------------
             string ua = Str(d, "ua");

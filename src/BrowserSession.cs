@@ -360,6 +360,9 @@ namespace JoeBrowser
 
             if (browser.IsFirefox)
             {
+                /* The master switch is read in the Chromium branch below; Firefox returns
+                   before it, so the Tools-page setting had no effect on this engine. */
+                s._masterExtensions = settings == null || settings.EnableExtensions;
                 s.LaunchFirefox(fp, dataDir, startUrl);
                 return s;
             }
@@ -427,6 +430,13 @@ namespace JoeBrowser
             args.Add("--password-store=basic");
             args.Add("--use-mock-keychain");
             args.Add("--lang=" + (fp.Language ?? "en-US"));
+            /* A browser launched with a debugging port must not answer navigator.webdriver or
+               expose the AutomationControlled Blink feature. Some Chromium builds enable it as
+               soon as a remote debugging endpoint is requested, and the CDP script overrides
+               navigator.webdriver only AFTER the document starts - a first-frame check would
+               still see it. Disabling the feature at launch closes that window on every
+               Chromium engine: Chrome, Brave, Chromium and Edge. */
+            args.Add("--disable-blink-features=AutomationControlled");
             /* Sets the Accept-Language header in the network service, with no CDP domain
                enabled. Previously the header was stamped through Network.setExtraHTTPHeaders,
                which required Network.enable - the single clearest indication to a page that the
@@ -508,16 +518,15 @@ namespace JoeBrowser
             }
             ApplyWebRtcFlags(args, fp);
 
-            /* Original unpacked extensions. Chrome 137+ hides --load-extension behind a
-               feature flag on branded builds, so disable that flag and always inject the
-               same first-party tools through CDP as a guaranteed fallback.
+            /* Unpacked extensions. Chrome 137+ hides --load-extension behind a feature flag on
+               branded builds, so that flag is disabled below and the same first-party tools are
+               injected through CDP as a guaranteed fallback.
 
-               Store extensions only behave on Chrome, Brave and Chromium: Microsoft Edge and
-               branded Chrome both drop the switch, Firefox is a different engine entirely,
-               and the owner's requirement is explicit - the shipped pair and the tools are
-               a Chrome/Brave/Chromium feature. On Edge and Firefox the folders are skipped
-               here and the CDP tool script is skipped below, so the app never claims a
-               capability the engine will not honour. */
+               The two included extensions are written by the application, so Chrome, Brave,
+               Chromium and Edge all receive them - there is no store request in this path and
+               nothing that can be blocked by a proxy. Firefox is a different engine entirely:
+               it gets a sideloaded WebExtension for the two built-in page tools, and the
+               app-level proxy alerts fire on every engine including Firefox. */
             bool engineTakesExtensions = string.Equals(browser.EngineKey, "chrome", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(browser.EngineKey, "brave", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(browser.EngineKey, "chromium", StringComparison.OrdinalIgnoreCase) ||
@@ -535,12 +544,11 @@ namespace JoeBrowser
             var folders = !engineTakesExtensions || DiagnosticNoExtensions
                 ? new List<string>()
                 : ExtensionManager.EnabledFolders(profile.Tools, masterExtensions, customExtensions, proxyOn,
-                    /* The two extensions the application ships with load on every Chromium
-                       engine - Chrome, Brave, Chromium and Edge alike. They are written by the
-                       application, not fetched, so there is nothing to be blocked from and no
-                       reason to keep them off one engine and not another. Firefox cannot take
-                       unpacked extensions at all; the tools it does support are injected
-                       through the browser instead. */
+                    /* The two included extensions load on every Chromium engine - Chrome, Brave,
+                       Chromium and Edge alike. The built-in editions are written by the
+                       application before this call, so a profile opened offline or behind a
+                       blocked store still has both. Firefox cannot take Chromium unpacked
+                       extensions at all; the tools it does support are sideloaded instead. */
                     true);
             if (folders.Count > 0)
             {
@@ -651,6 +659,9 @@ namespace JoeBrowser
             await TrySend("Runtime.enable", null, _primarySession).ConfigureAwait(false);
         }
 
+        // Diagnostic hook, assigned at runtime by test harnesses; the compiler sees no
+        // static assignment and reports CS0649.
+#pragma warning disable CS0649
         public Action<string, Dictionary<string, object>> DebugEvents;
 
         /// <summary>Diagnostic only: launch without any extension loaded.</summary>
@@ -658,6 +669,7 @@ namespace JoeBrowser
 
         /// <summary>Diagnostic only: launch without the injected fingerprint script.</summary>
         public static bool DiagnosticNoInjection;
+#pragma warning restore CS0649
 
         private void OnCdpEvent(string method, Dictionary<string, object> args)
         {
@@ -928,7 +940,10 @@ namespace JoeBrowser
                 if (!string.IsNullOrEmpty(FingerprintFactory.MachineRenderer)) return;
                 var res = await TrySendResult("Runtime.evaluate", new Dictionary<string, object>
                 {
-                    { "expression", "window.__jbRealGl || ''" },
+                    /* The value is parked under a non-enumerable symbol key rather than a named
+                       window property: an enumerable __jbRealGl holding the host's real GPU was
+                       itself a one-line detection shortcut. Read once, then delete it. */
+                    { "expression", "(function(){var s=Symbol.for('jb.gpu');var v=window[s]||'';try{delete window[s];}catch(e){}return v;})()" },
                     { "returnByValue", true }
                 }, sessionId).ConfigureAwait(false);
                 var inner = Get<Dictionary<string, object>>(res, "result");
@@ -1004,12 +1019,148 @@ namespace JoeBrowser
             _proc.Exited += delegate { Cleanup(); };
         }
 
+        /// <summary>
+        /// Firefox has no DevTools pipe this app can inject through, so paste-as-human and the
+        /// restored right-click menu used to be Chromium-only - a profile opened on Firefox had
+        /// the tools switched on in the UI and nothing happening in the page. Firefox loads an
+        /// unpacked WebExtension sideloaded into the profile's extensions folder; this one
+        /// carries the same two behaviours, with no network fetch and no store dependency.
+        /// The proxy offline / rotation alerts are raised by the application itself from the
+        /// relay, so they already fire on every engine including Firefox.
+        /// </summary>
+        internal const string FirefoxToolsId = "joe-tools@joebrowser.local";
+
+        internal const string FirefoxToolsManifest = @"{
+  ""manifest_version"": 2,
+  ""name"": ""Joe Browser Tools"",
+  ""version"": ""1.0.0"",
+  ""description"": ""Human paste and a restored right-click menu for Joe Browser profiles."",
+  ""browser_specific_settings"": {
+    ""gecko"": { ""id"": ""joe-tools@joebrowser.local"", ""strict_min_version"": ""78.0"" }
+  },
+  ""content_scripts"": [{
+    ""matches"": [""<all_urls>""],
+    ""js"": [""content.js""],
+    ""run_at"": ""document_start"",
+    ""all_frames"": true
+  }],
+  ""permissions"": []
+}";
+
+        internal const string FirefoxToolsContent = @"(function () {
+  'use strict';
+  var HUMAN = __JB_HUMAN__, RIGHT = __JB_RIGHT__;
+  var MIN = 26, MAX = 92;
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function editable(el) {
+    if (!el) return false;
+    if (el.isContentEditable) return true;
+    var tag = el.tagName ? el.tagName.toLowerCase() : '';
+    if (tag === 'textarea') return true;
+    if (tag !== 'input') return false;
+    return !/^(button|checkbox|radio|submit|reset|file|image|hidden|range|color)$/i.test(el.type || 'text');
+  }
+  function insert(el, ch) {
+    var ok = false;
+    try { ok = document.execCommand('insertText', false, ch); } catch (e) {}
+    if (ok) return true;
+    var start = el.selectionStart;
+    if (typeof start !== 'number') return false;
+    var end = typeof el.selectionEnd === 'number' ? el.selectionEnd : start;
+    try {
+      el.value = el.value.slice(0, start) + ch + el.value.slice(end);
+      el.selectionStart = el.selectionEnd = start + ch.length;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    } catch (e) { return false; }
+  }
+  async function humanType(text) {
+    var el = document.activeElement;
+    if (!editable(el)) return;
+    for (var i = 0; i < text.length; i++) {
+      if (!insert(el, text[i])) return;
+      await wait(MIN + Math.random() * (MAX - MIN));
+    }
+  }
+  /* Ctrl+V types the clipboard one character at a time. Stopping the event here also keeps a
+     page's own paste handler from dropping the whole string in a second time. Very large pastes
+     are left alone: a script or a spreadsheet is not something a person types. */
+  document.addEventListener('paste', function (e) {
+    if (!HUMAN) return;
+    var text = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+    if (!text || text.length > 4000 || !editable(document.activeElement)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    humanType(text);
+  }, true);
+  /* Absolute enable right click and copy: a capture listener at the document keeps the page's
+     own handlers from cancelling the native menu or the selection. The default action still runs,
+     so the browser's menu, copy and cut all work. */
+  function restore(e) { e.stopImmediatePropagation(); }
+  if (RIGHT) ['contextmenu', 'selectstart', 'copy', 'cut'].forEach(function (name) {
+    document.addEventListener(name, restore, true);
+  });
+})();";
+
+        /// <summary>Prefs that let a sideloaded, unsigned profile extension load and stay enabled.</summary>
+        internal static readonly string[] FirefoxToolsPrefs = new[]
+        {
+            "user_pref(\"extensions.autoDisableScopes\", 0);",
+            "user_pref(\"extensions.enabledScopes\", 15);",
+            "user_pref(\"xpinstall.signatures.required\", false);",
+            "user_pref(\"extensions.sideloadUpdates.enabled\", false);"
+        };
+
+        /// <summary>Writes the extension into a Firefox profile. Idempotent: only changed files
+        /// are written, and the two Tools-page switches are baked into the content script so a
+        /// switch that is off stays off on Firefox too.</summary>
+        internal static bool WriteFirefoxTools(string firefoxDir, bool humanPaste, bool rightClick)
+        {
+            try
+            {
+                string dir = Path.Combine(firefoxDir, "extensions", FirefoxToolsId);
+                Directory.CreateDirectory(dir);
+                string script = FirefoxToolsContent
+                    .Replace("__JB_HUMAN__", humanPaste ? "true" : "false")
+                    .Replace("__JB_RIGHT__", rightClick ? "true" : "false");
+                WriteIfChanged(Path.Combine(dir, "manifest.json"), FirefoxToolsManifest);
+                WriteIfChanged(Path.Combine(dir, "content.js"), script);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Firefox tools extension could not be written", ex);
+                return false;
+            }
+        }
+
+        /// <summary>Defaults for the self test and for callers that do not carry a profile.</summary>
+        internal static bool WriteFirefoxTools(string firefoxDir)
+        {
+            return WriteFirefoxTools(firefoxDir, true, true);
+        }
+
+        private static void WriteIfChanged(string path, string content)
+        {
+            try { if (File.Exists(path) && File.ReadAllText(path) == content) return; } catch { }
+            File.WriteAllText(path, content, new UTF8Encoding(false));
+        }
+
         private bool WriteFirefoxPrefs(string dir, FingerprintConfig fp)
         {
             try
             {
                 Directory.CreateDirectory(dir);
                 var sb = new StringBuilder();
+                if (_masterExtensions)
+                {
+                    /* Firefox has no CDP channel, so the two built-in page tools ride in a
+                       sideloaded WebExtension instead. Written on every launch so an app update
+                       repairs it, but only when its bytes actually changed. */
+                    var tc = Profile != null ? Profile.Tools : null;
+                    if (WriteFirefoxTools(dir, tc == null || tc.HumanPaste, tc == null || tc.EnableRightClick))
+                        foreach (string pref in FirefoxToolsPrefs) sb.AppendLine(pref);
+                }
                 sb.AppendLine("user_pref(\"browser.startup.homepage\", \"" + Escape(startUrlSafe()) + "\");");
                 sb.AppendLine("user_pref(\"browser.startup.page\", 1);");
                 sb.AppendLine("user_pref(\"datareporting.healthreport.uploadEnabled\", false);");

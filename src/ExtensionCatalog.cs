@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Net;
 using System.Text;
+using System.Threading;
 using System.Web.Script.Serialization;
 
 namespace JoeBrowser
@@ -85,12 +86,44 @@ namespace JoeBrowser
         public static string ImportedRoot { get { return Path.Combine(AppPaths.Extensions, "imported"); } }
 
         /// <summary>
+        /// Home of the two first-party editions the application writes itself. Kept apart
+        /// from ImportedRoot on purpose: a store download unpacks into ImportedRoot and may
+        /// delete that folder while it works, and a fallback that lived there could be taken
+        /// away by the very download that was meant to improve it.
+        /// </summary>
+        public static string ShippedRoot { get { return Path.Combine(AppPaths.Extensions, "shipped"); } }
+
+        public static string ShippedFolder(string id) { return Path.Combine(ShippedRoot, id); }
+
+        /// <summary>
+        /// The folder a shipped extension really loads from. The store listing is preferred -
+        /// it is the real thing, with its own updates - but the built-in edition is written by
+        /// the application and is always there, offline and on the very first launch. Returns
+        /// empty only when both are unusable, which means the writer failed as well.
+        /// </summary>
+        public static string ResolveDefaultFolder(string id, out bool builtin)
+        {
+            builtin = false;
+            try
+            {
+                ExtensionManager.EnsureShippedFallbacks();
+                string store = Path.Combine(ImportedRoot, id);
+                if (UsableManifest(Path.Combine(store, "manifest.json"))) return store;
+                string own = ShippedFolder(id);
+                if (UsableManifest(Path.Combine(own, "manifest.json"))) { builtin = true; return own; }
+            }
+            catch (Exception ex) { Log.Error("Could not resolve shipped extension " + id, ex); }
+            return "";
+        }
+
+        /// <summary>
         /// Extensions the user asked to ship with every Chromium profile.
         ///
-        /// They used to be fetched from the Chrome Web Store. They are written by the
-        /// application instead - see ExtensionManager.WriteShipped - so they are there on
-        /// the first run, on a machine behind a proxy that blocks the store, and offline.
-        /// The ids are the ones the library already knows, so a profile that had them
+        /// Each has two possible editions: the real Chrome Web Store package, fetched in the
+        /// background when the store is reachable, and a first-party edition written by the
+        /// application (ExtensionManager.EnsureShippedFallbacks). The built-in edition is the
+        /// guarantee: "always installed" cannot depend on a third party answering an HTTP
+        /// request. The ids are the ones the library already knows, so a profile that had them
         /// keeps them and a user who removed one keeps it removed.
         /// </summary>
         public static readonly string[][] DefaultStoreExtensions = new[]
@@ -111,10 +144,14 @@ namespace JoeBrowser
         }
 
         /// <summary>
-        /// Adds the shipped store extensions that are already unpacked on disk to the library,
-        /// with no network access. Called at start, because the library is what the Extensions
-        /// page and the launch path read; a download there would put a web request in front of
-        /// the first window.
+        /// Makes sure the library has a row for each shipped extension, with no network access.
+        /// Called at start, because the library is what the Extensions page and the launch path
+        /// read; a download there would put a web request in front of the first window.
+        ///
+        /// The row points at whichever edition is actually on disk. A row left over from a
+        /// previous build that points at a folder which no longer loads is repointed rather
+        /// than duplicated: two rows for one extension used to make Chromium refuse the whole
+        /// --load-extension list.
         /// </summary>
         public static void ListPresentDefaults()
         {
@@ -126,37 +163,54 @@ namespace JoeBrowser
                 {
                     string id = entry[0];
                     if (IsRemovedByUser(id)) continue;
-                    string target = Path.Combine(ImportedRoot, id);
-                    /* A folder without a usable manifest is a half-finished download, and it is
-                       what made the pair look installed while the browser refused to load them.
-                       Remove it so the downloader can try again from a clean state. */
-                    if (!UsableManifest(Path.Combine(target, "manifest.json")))
-                    {
-                        try { if (Directory.Exists(target)) Directory.Delete(target, true); } catch { }
-                        continue;
-                    }
-                    bool listed = false;
+                    bool builtin;
+                    string target = ResolveDefaultFolder(id, out builtin);
+                    if (target.Length == 0) continue;
+                    string manifest = Path.Combine(target, "manifest.json");
+                    ExtensionItem row = null;
                     foreach (var e in items)
                     {
                         if (e == null || string.IsNullOrEmpty(e.Folder)) continue;
                         try
                         {
                             if (e.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase))
-                            { listed = true; break; }
+                            { row = e; break; }
                         }
                         catch { }
                     }
-                    if (listed) continue;
-                    items.Add(new ExtensionItem
+                    if (row == null)
                     {
-                        Name = entry[1],
-                        Folder = target,
-                        Enabled = true,
-                        Source = "store",
-                        StoreUrl = StoreUrlFor(id),
-                        Version = VersionFromManifest(Path.Combine(target, "manifest.json"))
-                    });
-                    changed = true;
+                        row = new ExtensionItem
+                        {
+                            Name = entry[1],
+                            Folder = target,
+                            Enabled = true,
+                            Source = builtin ? "builtin" : "store",
+                            StoreUrl = StoreUrlFor(id),
+                            StoreId = id
+                        };
+                        items.Add(row);
+                        changed = true;
+                    }
+                    /* A store download that arrived after the built-in row was written takes
+                       over the row. Re-pointing it keeps one row and one folder per extension.
+                       A row that Load() had disabled because its OLD folder was missing is
+                       repaired here; a row the user switched off keeps its off state. */
+                    if (!string.Equals(row.Folder.TrimEnd('\\', '/'), target.TrimEnd('\\', '/'),
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        bool oldWasBroken = !UsableManifest(Path.Combine(row.Folder, "manifest.json"));
+                        row.Folder = target;
+                        if (oldWasBroken) row.Enabled = true;
+                        changed = true;
+                    }
+                    string source = builtin ? "builtin" : "store";
+                    if (row.Source != source) { row.Source = source; changed = true; }
+                    if (string.IsNullOrEmpty(row.StoreId)) { row.StoreId = id; changed = true; }
+                    string version = VersionFromManifest(manifest);
+                    if (row.Version != version) { row.Version = version; changed = true; }
+                    string icon = IconFromFolder(target);
+                    if (row.Icon != icon) { row.Icon = icon; changed = true; }
                 }
                 if (changed) Save(items);
             }
@@ -310,23 +364,21 @@ namespace JoeBrowser
         }
 
         /* ---- a status a page can render -------------------------------------------------------
-           The shipped pair arrives by download, and a download can fail: a proxy that blocks the
-           store, a machine that is offline at first launch, a region the listing is not served
-           in. When that happened the library simply had no row for the extension, so the app
-           looked as though it never shipped it - which is indistinguishable, from the user's
-           side, from "the extension is not installed". These read the evidence that already
-           exists and give the page one of five states to draw. */
+           The built-in edition is always on disk, so "not installed" is no longer a state the
+           shipped pair can reach on a working machine. What can vary is which edition is
+           running - the real store listing or the first-party fallback - and the tooltip says
+           so. These read the evidence that already exists and give the page one state to draw. */
 
         /// <summary>A state of one shipped extension.</summary>
         public enum DefaultState
         {
-            /// <summary>Its folder is on disk and Chromium can load it.</summary>
+            /// <summary>An edition is on disk and Chromium can load it.</summary>
             Present,
             /// <summary>The user removed it on purpose; it stays removed.</summary>
             RemovedByUser,
-            /// <summary>Not on disk yet; the next launch will fetch it.</summary>
+            /// <summary>The built-in writer has not produced a usable folder yet.</summary>
             Pending,
-            /// <summary>The last fetch failed; the reason is kept.</summary>
+            /// <summary>Neither edition could be produced; the reason is kept.</summary>
             Failed,
             /// <summary>Not shipped with this build.</summary>
             Unknown
@@ -341,24 +393,25 @@ namespace JoeBrowser
             foreach (var entry in DefaultStoreExtensions)
                 if (string.Equals(entry[0], id, StringComparison.OrdinalIgnoreCase)) { known = true; name = entry[1]; break; }
             if (!known) return DefaultState.Unknown;
-            if (IsRemovedByUser(id)) return DefaultState.RemovedByUser;
-            string folder = Path.Combine(ImportedRoot, id);
-            try
-            {
-                if (UsableManifest(Path.Combine(folder, "manifest.json"))) return DefaultState.Present;
-            }
-            catch { }
+            if (IsRemovedByUser(id)) { detail = "You removed this extension. It stays removed until you add it back."; return DefaultState.RemovedByUser; }
+            bool builtin;
+            string folder = ResolveDefaultFolder(id, out builtin);
             string skip = Path.Combine(AppPaths.Extensions, ".store-" + id + ".skip");
-            try
+            string reason = "";
+            try { if (File.Exists(skip)) reason = File.ReadAllText(skip).Trim(); } catch { }
+            if (folder.Length > 0)
             {
-                if (File.Exists(skip))
-                {
-                    detail = File.ReadAllText(skip).Trim();
-                    return DefaultState.Failed;
-                }
+                /* Both editions count as installed. The tooltip says which one is running and,
+                   when the store could not be reached, why the built-in edition is standing in:
+                   a silent substitution is the kind of thing that looks like a bug later. */
+                detail = builtin
+                    ? name + " - built-in edition, always available offline." +
+                      (reason.Length > 0 ? " The Web Store copy could not be fetched: " + reason : "")
+                    : name + " - the Chrome Web Store edition is installed.";
+                return DefaultState.Present;
             }
-            catch { }
-            detail = name;
+            if (reason.Length > 0) { detail = reason; return DefaultState.Failed; }
+            detail = name + " - the built-in copy could not be written.";
             return DefaultState.Pending;
         }
 
@@ -394,11 +447,18 @@ namespace JoeBrowser
         /// </summary>
         public static int FetchMissing(bool force)
         {
+            /* Startup and the Extensions page both ask for this. One store request at a time:
+               two 15-second downloads racing each other used to produce a pair of half-written
+               folders and two "DefaultsChanged" refreshes. */
+            if (Interlocked.CompareExchange(ref _fetchBusy, 1, 0) != 0) return 0;
             int added = 0;
             try
             {
-                var items = Load();
-                bool changed = false;
+                /* The guarantee first, with no network: both built-in editions are on disk and
+                   listed before a single byte is requested from the store. A profile launched
+                   during this call loads the pair even if the store never answers. */
+                ExtensionManager.EnsureShippedFallbacks();
+                ListPresentDefaults();
                 foreach (var entry in DefaultStoreExtensions)
                 {
                     string id = entry[0];
@@ -407,12 +467,10 @@ namespace JoeBrowser
                     bool present = false;
                     try { present = UsableManifest(Path.Combine(target, "manifest.json")); } catch { }
                     if (present) continue;
-                    /* The pair comes from the Chrome Web Store, not from the application.
-                       They are the two the owner named, and a user who wants them has the
-                       real thing - the listing, the version and the behaviour the store
-                       publishes - rather than a look-alike the application wrote. They are
-                       installed by default for a new profile and can be removed, and the
-                       removal is remembered. */
+
+                    /* The real listing is an upgrade, not a dependency. A proxy that blocks the
+                       store, an offline first run or a withdrawn listing leaves the built-in
+                       edition in place, and the library still says "Installed" - truthfully. */
                     string skip = Path.Combine(AppPaths.Extensions, ".store-" + id + ".skip");
                     if (!force)
                     {
@@ -422,35 +480,21 @@ namespace JoeBrowser
                         }
                         catch { }
                     }
-                    bool listed = false;
-                    foreach (var e in items)
-                    {
-                        if (e == null || string.IsNullOrEmpty(e.Folder)) continue;
-                        if (e.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase)) { listed = true; break; }
-                    }
                     try
                     {
                         var item = ImportFromUrl(StoreUrlFor(id));
                         item.Name = entry[1];
                         item.Source = "store";
-                        if (!listed) items.Add(item);
-                        else
-                        {
-                            foreach (var e in items)
-                                if (e != null && e.Folder != null &&
-                                    e.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    e.Folder = item.Folder;
-                                    e.Enabled = true;
-                                }
-                        }
-                        changed = true;
+                        item.StoreId = id;
                         added++;
                         try { if (File.Exists(skip)) File.Delete(skip); } catch { }
+                        /* Re-point the one row that already exists; never add a second. */
+                        ListPresentDefaults();
                     }
                     catch (Exception ex)
                     {
-                        Log.Error("Could not fetch default extension " + id, ex);
+                        Log.Info("Web Store copy of " + id + " unavailable; the built-in edition stays installed. " +
+                                 (ex.Message ?? ""));
                         try
                         {
                             Directory.CreateDirectory(AppPaths.Extensions);
@@ -459,11 +503,18 @@ namespace JoeBrowser
                         catch { }
                     }
                 }
-                if (changed) Save(items);
             }
             catch (Exception ex) { Log.Error("Default extension fetch failed", ex); }
+            finally
+            {
+                Interlocked.Exchange(ref _fetchBusy, 0);
+                var h = DefaultsChanged;
+                if (h != null) { try { h(); } catch { } }
+            }
             return added;
         }
+
+        private static int _fetchBusy;
 
         /// <summary>The one line worth keeping from a download failure.</summary>
         private static string ShortReason(Exception ex)
@@ -503,90 +554,12 @@ namespace JoeBrowser
 
         public static void EnsureDefaults()
         {
-            try
-            {
-                var items = Load();
-                bool changed = false;
-                foreach (var entry in DefaultStoreExtensions)
-                {
-                    string id = entry[0];
-                    /* The user removed it. That decision outranks the fact that this app ships
-                       it, and it is the difference between "cannot be removed" and "stays
-                       removed". */
-                    if (IsRemovedByUser(id)) continue;
-                    string target = Path.Combine(ImportedRoot, id);
-                    /* "Listed" only counts when the folder the entry points at still holds a
-                       manifest Chromium will load. The old check accepted any entry whose folder
-                       path happened to end in the id - including one Load() had already disabled
-                       because its folder was broken - so a half-written download stayed listed
-                       and never downloaded again. */
-                    bool listed = false;
-                    foreach (var e in items)
-                    {
-                        if (e == null || string.IsNullOrEmpty(e.Folder)) continue;
-                        try
-                        {
-                            if (e.Folder.TrimEnd('\\', '/').EndsWith(id, StringComparison.OrdinalIgnoreCase) &&
-                                UsableManifest(Path.Combine(e.Folder, "manifest.json")))
-                            { listed = true; break; }
-                        }
-                        catch { }
-                    }
-                    if (listed) continue;
-
-                    if (UsableManifest(Path.Combine(target, "manifest.json")))
-                    {
-                        items.Add(new ExtensionItem
-                        {
-                            Name = entry[1],
-                            Folder = target,
-                            Enabled = true,
-                            Source = "store",
-                            StoreUrl = StoreUrlFor(id),
-                            Version = VersionFromManifest(Path.Combine(target, "manifest.json"))
-                        });
-                        changed = true;
-                        continue;
-                    }
-
-                    /* A failed download must not stop a browser from launching. Retry at most
-                       once a day; the manual import box on the Extensions page remains available. */
-                    string skip = Path.Combine(AppPaths.Extensions, ".store-" + id + ".skip");
-                    try
-                    {
-                        if (File.Exists(skip) &&
-                            (DateTime.UtcNow - File.GetLastWriteTimeUtc(skip)).TotalHours < 24) continue;
-                    }
-                    catch { }
-
-                    try
-                    {
-                        var item = ImportFromUrl(StoreUrlFor(id));
-                        item.Name = entry[1];
-                        item.Source = "store";
-                        items.Add(item);
-                        changed = true;
-                        try { if (File.Exists(skip)) File.Delete(skip); } catch { }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error("Could not fetch default extension " + id, ex);
-                        try
-                        {
-                            Directory.CreateDirectory(AppPaths.Extensions);
-                            File.WriteAllText(skip, ex.Message ?? "failed", new UTF8Encoding(false));
-                        }
-                        catch { }
-                    }
-                }
-                if (changed) Save(items);
-            }
-            catch (Exception ex) { Log.Error("Default extension setup failed", ex); }
-            finally
-            {
-                var h = DefaultsChanged;
-                if (h != null) { try { h(); } catch { } }
-            }
+            /* One path for startup, profile creation and the retry button. The old version had
+               its own copy of the download loop, so a fix to one silently left the other with
+               the bug - and the two together could start two downloads of the same folder.
+               FetchMissing writes the built-in pair first, lists both rows, then upgrades from
+               the store when it can. */
+            FetchMissing(false);
         }
 
         /// <summary>Folders of the shipped store extensions that are actually present.</summary>
@@ -611,13 +584,11 @@ namespace JoeBrowser
                 if (IsRemovedByUser(entry[0])) continue;
                 bool enabled;
                 if (states.TryGetValue(entry[0], out enabled) && !enabled) continue;
-                string folder = Path.Combine(ImportedRoot, entry[0]);
-                try
-                {
-                    if (Directory.Exists(folder) && UsableManifest(Path.Combine(folder, "manifest.json")))
-                        result.Add(folder);
-                }
-                catch { }
+                bool builtin;
+                string folder = ResolveDefaultFolder(entry[0], out builtin);
+                /* The resolver already proved the manifest loads. Calling it here is what makes
+                   the pair present on a machine that has never reached the Web Store at all. */
+                if (folder.Length > 0) result.Add(folder);
             }
             return result;
         }

@@ -30,9 +30,9 @@ both in place for you.
 | **Pinned builds** | Pin a profile to an exact version, so a vendor update never moves it. Chrome reaches back over the last eight majors, so 157, 156, 155 and 154 are all available. |
 | **Any browser you have** | Chrome, Chromium, Brave, Edge and Firefox already on the PC are detected with their version and path, and can be used as they are. |
 | **Proxies** | HTTP, HTTPS and SOCKS5 with authentication. Credentials are applied by a local relay, so a password never appears in a browser command line. Swap the proxy of a running profile without closing its tabs. |
-| **Fingerprint check** | A fifteen point probe inside the profile's own session, plus one click buttons that open the well known checkers in that same session. |
+| **Fingerprint check** | A fifteen point probe inside the profile's own session, plus one click buttons that open iphey, pixelscan, browserscan, ipfighter, whoer.net and whoer.com in that same session. |
 | **History per profile** | Every page a profile visits, including the redirect hops, isolated per account and clearable. |
-| **Extensions** | Three first party tools written by this app, two extensions included with every Chromium profile, and anything you add from a Chrome Web Store link, a `.crx` or a folder. The included pair work on their own - in any Chromium that loads them - and removing one keeps it removed. |
+| **Extensions** | Three first party tools written by this app, two extensions included with every Chromium profile — written locally, not fetched, so they are there on the first run and behind a proxy — and anything you add from a Chrome Web Store link, a `.crx` or a folder. Firefox gets paste as human and right-click restore through a sideloaded WebExtension. The included pair work on their own, and removing one keeps it removed. |
 | **Built to be read** | 16 px body text, one measured layout at every window width, and no control that cuts its own label. |
 | **Private by default** | Profile data stays in `%APPDATA%\JoeBrowser`. Proxy passwords and the account store are encrypted with Windows DPAPI. No telemetry, no server, no cloud. |
 
@@ -86,7 +86,58 @@ whatever the message said, so a short confirmation was a long empty bar with a s
 one end. The switch is a switch now - a pill with a round knob - and the sort button is a
 button with an icon instead of a line of text.
 
-## What changed in 1.14.0
+## What changed in 1.15.0
+
+**The two default extensions are always installed.** HTTP Tracker Plus and Absolute
+Enable Right Click and Copy used to be fetched from the Chrome Web Store on every first
+launch: a proxy that blocks the store, a machine that is offline, or a region the listing
+is not served in meant the pair was absent, and the Extensions page reported "not
+installed" with no way to repair it. The application now writes first party MV3 editions
+of both extensions locally — no network access, no store account, no download timeout in
+front of a browser launch. They are there on the first run, behind a proxy, and offline.
+The real store version takes over the row if a later fetch succeeds, and a user who
+removed one keeps it removed.
+
+**Paste as human and right-click restore work on Firefox.** These two built-in features
+were Chromium-only: they depended on `--load-extension` and CDP injection, neither of
+which Firefox supports. A Firefox WebExtension is now sideloaded into every Firefox
+profile's data directory, with `prefs.js` entries that enable sideloaded extensions and
+disable signature enforcement. The extension carries the same paste-as-human typing
+engine and the same context-menu/copy/selection restoration as the Chromium tools.
+
+**The GPU string is no longer enumerable.** The fingerprint script parked the host's real
+WebGL renderer and vendor on `window.__jbRealGl` — a named, enumerable own property that a
+single `for-in` loop over `window` could find. It now lives under a `Symbol` key, which is
+non-enumerable and invisible to `Object.keys`, `JSON.stringify`, and every fingerprint
+checker that walks own properties.
+
+**Automation markers are cleaned more aggressively.** The script already removed
+`navigator.webdriver`, `window.chrome` runtime markers, and Puppeteer/Playwright
+leftovers. It now also strips `window.cdc_adoQpoasnfa76pfcZLmcfl_*` (Chrome DevTools
+Controller) properties, the `Notification.permission` automation tell, and the
+`console.debug` override that some automation frameworks leave behind.
+`--disable-blink-features=AutomationControlled` is now passed to every Chromium launch.
+
+**The leak-check dialog has all six checker sites.** iphey.com, pixelscan.net,
+browserscan.net, ipfighter.com, whoer.net and whoer.com are all one click away in the
+in-session dialog, each opening in the profile's own browser so the fingerprint under
+test is the one the checker sees.
+
+**Settings and Account pages are measured, not fixed.** The Settings page at narrow
+window widths had the Save button covering the title, wrapped labels overlapping each
+other, and path fields clipped behind Browse buttons. Every row is now measured against
+the live width: labels wrap, controls stack vertically when they do not fit side by side,
+and the header reserves two rows when the toolbar needs them. The Account page does the
+same for action buttons — "Sign out" and "Switch account" stack on separate lines instead
+of truncating.
+
+**The theme switch is a switch.** It was a moon icon and a text label with no visible
+state; it is now a pill track with an animated knob, a focus ring, keyboard support
+(Space/Enter), and an accessibility role.
+
+**Compiler warnings are cleaned.** The build produces zero warnings: unused fields are
+removed, events subscribed cross-class are suppressed, and the unreachable-code guard is
+rewritten so the compiler does not fold it away.
 
 **The window no longer lies about what it is running.** A pre-release build is a
 build the fingerprint sites have never seen, and "a version that does not exist" is

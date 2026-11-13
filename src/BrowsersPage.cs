@@ -58,7 +58,9 @@ namespace JoeBrowser
         private bool _reload;
 
         /// <summary>Raised for the actions this page cannot carry out itself.</summary>
+#pragma warning disable CS0067
         public event EventHandler<BrowserActionEventArgs> ActionRequested;
+#pragma warning restore CS0067
 
         /// <summary>Raised when the page has something to tell the user.</summary>
         public event EventHandler<BrowserMessageEventArgs> MessageRaised;
@@ -548,7 +550,9 @@ namespace JoeBrowser
         public event EventHandler ActionRequested;
 
         private readonly JBButton _action;
-        private bool _hover;
+#pragma warning disable CS0414
+        private bool _hover; // tracked but painting uses _hoverT tween
+#pragma warning restore CS0414
         private readonly AnimValue _hoverT;
 
         public BuildRow(string title, string engine, string version, string subtitle, bool installed)

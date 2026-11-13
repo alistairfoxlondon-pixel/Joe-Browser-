@@ -9,14 +9,16 @@ using System.Text;
 namespace JoeBrowser
 {
     /// <summary>
-    /// Builds and owns the three original Joe Browser extensions. They are unpacked MV3
-    /// extensions written to the local user data folder - nothing is downloaded, no store
-    /// account is involved, and no third-party code is bundled.
+    /// Builds and owns the first-party extensions. They are unpacked MV3 packages written to
+    /// the local user data folder - nothing is downloaded, no store account is involved, and
+    /// no third-party code is bundled. This covers the built-in tools (human paste, proxy
+    /// watch) and a built-in edition of each of the two included extensions, so both are
+    /// present on the first run even with no network.
     ///
-    /// Chrome 137+ ignores --load-extension on branded builds, so every tool also has a
-    /// first-party CDP fallback (BuildToolScript) that is injected into each document. The
-    /// unpacked extension and the injected script share one protocol, so either one working
-    /// is enough for the feature to be usable.
+    /// Chrome 137+ hides --load-extension behind a feature flag on branded builds, so every
+    /// tool also has a first-party CDP fallback (BuildToolScript) that is injected into each
+    /// document. The unpacked extension and the injected script share one protocol, so either
+    /// one working is enough for the feature to be usable.
     /// </summary>
     internal static class ExtensionManager
     {
@@ -76,10 +78,10 @@ namespace JoeBrowser
                         WriteIcon(ProxyWatch);
                     });
 
-                    /* The two extensions that ride along with every profile come from the
-                       Chrome Web Store, not from here: they are the ones the owner named,
-                       and a user who wants them gets the real listing rather than a
-                       look-alike. The application's own tools are the ones written here. */
+                    /* The two included extensions are guaranteed here, before anything asks the
+                       network. The real store listings are fetched in the background as an
+                       upgrade; this is what a first run behind a blocked store loads instead. */
+                    EnsureShippedFallbacks();
 
                     // Retire the old guard folder so a stale copy is never loaded alongside
                     // the new enable-right-click extension, and retire the private copy of
@@ -303,6 +305,140 @@ namespace JoeBrowser
             if (!same) File.WriteAllText(path, content, new UTF8Encoding(false));
         }
 
+        /* ------------------------------------------------------------------ *
+         * The two included extensions, guaranteed offline
+         * ------------------------------------------------------------------ *
+         * "Always installed" cannot be a promise about somebody else's server. The Chrome Web
+         * Store copy is still fetched in the background when it is reachable - that is the real
+         * listing and the one the library prefers - but a first-party edition of each is written
+         * here, into its own folder, before any network call. A machine that is offline on its
+         * first run, behind a proxy that blocks the store, or in a region where a listing was
+         * withdrawn, still launches Chrome, Brave or Chromium with both extensions on the
+         * command line. A user who removes one still has it removed: the removal mark is checked
+         * by ExtensionCatalog.DefaultFolders, not by this writer.
+         *
+         * Neither edition touches the page's JavaScript objects. The tracker observes requests
+         * through the browser's webRequest events and shows them in its own popup; the right-click
+         * tool works on DOM attributes and trusted events from the extension's isolated world.
+         * Nothing here wraps fetch, XHR, canvas or WebGL in the page's own world, and nothing is
+         * appended to the page's visible DOM - the fingerprint stays exactly what it was. */
+
+        private static readonly object FallbackGate = new object();
+        private static bool _fallbacksBuilt;
+
+        /// <summary>Writes both included extensions once per process. Safe to call from the
+        /// catalog, the launch path and startup, on any thread and in any order.</summary>
+        public static void EnsureShippedFallbacks()
+        {
+            lock (FallbackGate)
+            {
+                if (_fallbacksBuilt) return;
+                try
+                {
+                    Directory.CreateDirectory(ExtensionCatalog.ShippedRoot);
+                    WriteShippedOne(ExtensionCatalog.HttpTrackerId, "http-tracker",
+                        HttpTrackerFallbackManifest, HttpTrackerFallbackWorker,
+                        HttpTrackerFallbackContent, HttpTrackerFallbackPopupHtml,
+                        HttpTrackerFallbackPopupJs);
+                    WriteShippedOne(ExtensionCatalog.RightClickId, "right-click",
+                        RightClickFallbackManifest, RightClickFallbackWorker,
+                        RightClickFallbackContent, null, null);
+                    _fallbacksBuilt = true;
+                }
+                catch (Exception ex) { Log.Error("Could not write the included extensions", ex); }
+            }
+        }
+
+        private static void WriteShippedOne(string id, string logo, string manifest, string worker,
+            string content, string popupHtml, string popupJs)
+        {
+            try
+            {
+                string dir = ExtensionCatalog.ShippedFolder(id);
+                Directory.CreateDirectory(dir);
+                WriteTo(dir, "manifest.json", manifest);
+                WriteTo(dir, "service-worker.js", worker);
+                if (content != null) WriteTo(dir, "content.js", content);
+                if (popupHtml != null) WriteTo(dir, "popup.html", popupHtml);
+                if (popupJs != null) WriteTo(dir, "popup.js", popupJs);
+                WriteShippedIcon(dir, logo);
+                /* A stale file from an older edition must not survive an update: Chromium reads
+                   every file the manifest names, and a leftover content.js from a build that no
+                   longer declares one is at best dead weight. */
+                if (content == null) TryDeleteFile(Path.Combine(dir, "content.js"));
+                if (popupHtml == null) TryDeleteFile(Path.Combine(dir, "popup.html"));
+                if (popupJs == null) TryDeleteFile(Path.Combine(dir, "popup.js"));
+            }
+            catch (Exception ex) { Log.Error("Could not write included extension " + id, ex); }
+        }
+
+        private static void WriteTo(string dir, string file, string content)
+        {
+            Directory.CreateDirectory(dir);
+            string path = Path.Combine(dir, file);
+            bool same = false;
+            try { same = File.Exists(path) && File.ReadAllText(path, Encoding.UTF8) == content; } catch { }
+            if (!same) File.WriteAllText(path, content, new UTF8Encoding(false));
+        }
+
+        private static void TryDeleteFile(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
+        }
+
+        private static void WriteShippedIcon(string dir, string id)
+        {
+            try
+            {
+                string stamp = Path.Combine(dir, "icon.version");
+                string existing = File.Exists(stamp) ? (File.ReadAllText(stamp) ?? "").Trim() : "";
+                if (existing == IconVersion.ToString()) return;
+                foreach (int size in new[] { 16, 48, 128 })
+                    DrawLogo(id, size).Save(Path.Combine(dir, "icon" + size + ".png"), ImageFormat.Png);
+                DrawLogo(id, 48).Save(Path.Combine(dir, "icon.png"), ImageFormat.Png);
+                File.WriteAllText(stamp, IconVersion.ToString());
+            }
+            catch (Exception ex) { Log.Error("Included extension icon failed", ex); }
+        }
+
+        private const string IconList = @"""16"": ""icon16.png"", ""48"": ""icon48.png"", ""128"": ""icon128.png""";
+
+        private const string HttpTrackerFallbackManifest = @"{
+  ""manifest_version"": 3,
+  ""name"": ""HTTP Tracker Plus"",
+  ""version"": ""1.0.0"",
+  ""description"": ""See the redirect chain, status and hosts of the requests this tab makes."",
+  ""permissions"": [""webRequest"", ""storage"", ""tabs""],
+  ""host_permissions"": [""<all_urls>""],
+  ""background"": { ""service_worker"": ""service-worker.js"" },
+  ""action"": {
+    ""default_title"": ""HTTP Tracker Plus"",
+    ""default_popup"": ""popup.html"",
+    ""default_icon"": { " + IconList + @" }
+  },
+  ""icons"": { " + IconList + @" }
+}";
+
+        private const string RightClickFallbackManifest = @"{
+  ""manifest_version"": 3,
+  ""name"": ""Absolute Enable Right Click and Copy"",
+  ""version"": ""1.3.0"",
+  ""description"": ""Restores the right-click menu, text selection and copy on sites that block them."",
+  ""permissions"": [""storage"", ""activeTab"", ""scripting"", ""tabs""],
+  ""background"": { ""service_worker"": ""service-worker.js"" },
+  ""action"": {
+    ""default_title"": ""Absolute Enable Right Click and Copy"",
+    ""default_icon"": { " + IconList + @" }
+  },
+  ""icons"": { " + IconList + @" },
+  ""content_scripts"": [{
+    ""matches"": [""<all_urls>""],
+    ""js"": [""content.js""],
+    ""run_at"": ""document_start"",
+    ""all_frames"": true
+  }]
+}";
+
         /// <summary>
         /// Folders passed to --load-extension. Validates that each path really holds a manifest.
         /// Custom folders are copied into the profile-neutral extensions root so the command
@@ -313,12 +449,12 @@ namespace JoeBrowser
             var result = new List<string>();
             if (!masterSwitch || tools == null) return result;
             EnsureAll();
-            /* The two extensions that ride along with every profile come from the Chrome
-               Web Store. They load for every Chromium engine, they are not downloaded from
-               here - this is the launch path, and a fifteen second HTTP timeout in front of
-               every launch is why they often looked missing. The download runs off the
-               launch path from Start() and on profile creation, and the Extensions page
-               offers an immediate retry.
+            /* The two included extensions load on every Chromium engine, from the store copy
+               when it was downloaded and from the built-in edition otherwise. Nothing is
+               fetched here: this is the launch path, and a fifteen second HTTP timeout in
+               front of every launch is exactly why they used to look missing. The store
+               upgrade runs off the launch path from Start() and on profile creation, and the
+               Extensions page offers an immediate retry.
                Every folder this method emits goes through the comma guard: Chromium splits the
                switch on commas, and a Windows account named "Smith, J" once silently corrupted
                the whole list, so the browser loaded NO extensions at all. */
@@ -330,13 +466,10 @@ namespace JoeBrowser
                that a proxy is actually configured - on a direct connection it makes no
                requests and shows nothing. */
             if (tools.ProxyWatch) Add(result, Dir(ProxyWatch));
-            /* The right-click tool is the extension the application ships with. The private
-               copy was retired: two extensions doing the same job fight each other inside
-               the page, and the shipped one is the one the user can see and remove. */
-            /* The right-click tool is the store's own extension now, and it is in the list
-               above with the other one. The per-profile switch that used to hide it is
-               gone from the editor: the extension is a normal library row, and that row is
-               what turns it off. */
+            /* Right-click restoration is one of the two included extensions in the list above.
+               The private copy was retired; two extensions doing the same job fought each other
+               inside the page. The CDP tool runtime carries the same behaviour for engines that
+               refuse unpacked extensions, so there is still exactly one implementation per page. */
 
             // Extensions added from the Extensions page are applied to every Chromium profile.
             if (customExtensions)
@@ -738,7 +871,6 @@ if (cfg.human && !extOwnsPaste) {
     armed = false;
     humanType(text);
   }, true);
-  }
   /* The extension's own right-click entry (Paste as human) is the visible way in when the
      unpacked extension loads. When it does not - Chrome 137+ branded builds refuse
      --load-extension - there is no menu entry anywhere, and the feature looked missing even
@@ -1417,6 +1549,210 @@ chrome.runtime.onMessage.addListener(function(m, s, send){
 
         private const string ProxyWatchCss = @"
 #jb-banner { font-family: Segoe UI, Arial, sans-serif; }
+";
+
+        /* ------------------------------------------------------------------ *
+         * Sources of the two guaranteed editions
+         * ------------------------------------------------------------------ */
+
+        /// <summary>Observes requests through the browser's own events. Nothing is injected into
+        /// the page, so a checker site sees no wrapper, no global and no extra DOM node.</summary>
+        private const string HttpTrackerFallbackWorker = @"
+/* HTTP Tracker Plus - built-in edition. */
+const KEY = 'jb.http.chain';
+const redirects = new Map();
+function hostOf(u){ try { return new URL(u).hostname; } catch(e) { return ''; } }
+async function store(tabId, rec){
+  if (tabId == null || tabId < 0) return;
+  let all = {};
+  try { const st = await chrome.storage.local.get([KEY]); all = st[KEY] || {}; } catch(e) {}
+  const arr = all[tabId] || [];
+  arr.push(rec);
+  if (arr.length > 150) arr.splice(0, arr.length - 150);
+  all[tabId] = arr;
+  try { await chrome.storage.local.set({ [KEY]: all }); } catch(e) {}
+  try { await chrome.action.setBadgeText({ tabId: tabId, text: String(arr.length) }); } catch(e) {}
+}
+chrome.webRequest.onBeforeRedirect.addListener(function(d){
+  const list = redirects.get(d.requestId) || [];
+  list.push(d.redirectUrl);
+  redirects.set(d.requestId, list);
+}, { urls: ['<all_urls>'] });
+chrome.webRequest.onCompleted.addListener(function(d){
+  const chain = redirects.get(d.requestId) || [];
+  redirects.delete(d.requestId);
+  store(d.tabId, { url: d.url, host: hostOf(d.url), status: d.statusCode,
+    type: d.type, redirects: chain, at: Date.now() });
+}, { urls: ['<all_urls>'] });
+chrome.webRequest.onErrorOccurred.addListener(function(d){
+  redirects.delete(d.requestId);
+  store(d.tabId, { url: d.url, host: hostOf(d.url), status: 0,
+    type: d.type, error: d.error, redirects: [], at: Date.now() });
+}, { urls: ['<all_urls>'] });
+chrome.tabs.onRemoved.addListener(function(tabId){
+  try {
+    chrome.storage.local.get([KEY]).then(function(st){
+      const all = st[KEY] || {};
+      delete all[tabId];
+      chrome.storage.local.set({ [KEY]: all });
+    });
+  } catch(e) {}
+});
+";
+
+        private const string HttpTrackerFallbackContent = null;
+
+        private const string HttpTrackerFallbackPopupHtml = @"<!doctype html>
+<html><head><meta charset='utf-8'><title>HTTP Tracker Plus</title>
+<style>
+  body { margin:0; width:420px; max-height:520px; overflow:auto; background:#12141a; color:#eef1f6;
+         font:12px/1.45 'Segoe UI',Arial,sans-serif; }
+  #head { position:sticky; top:0; padding:11px 14px; background:#12141a;
+          border-bottom:1px solid #333a46; font-size:13px; font-weight:600; }
+  #count { font-weight:400; opacity:.65; margin-left:6px; }
+  #empty { padding:18px 14px; opacity:.65; }
+  .row { display:flex; gap:8px; align-items:baseline; padding:6px 14px; border-bottom:1px solid #232833; }
+  .host { flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .meta { flex:0 0 auto; opacity:.6; font-variant-numeric:tabular-nums; }
+  .track { color:#ffb37a; }
+  .chain { padding:0 14px 8px; opacity:.55; word-break:break-all; }
+</style></head>
+<body><div id='head'>HTTP Tracker Plus<span id='count'></span></div><div id='list'></div>
+<script src='popup.js'></script></body></html>
+";
+
+        private const string HttpTrackerFallbackPopupJs = @"
+chrome.tabs.query({ active: true, currentWindow: true }, function(tabs){
+  const id = tabs && tabs[0] ? tabs[0].id : -1;
+  const KEY = 'jb.http.chain';
+  const TRACK = ['doubleclick.net','google-analytics.com','googletagmanager.com',
+    'googleadservices.com','facebook.net','scorecardresearch.com','hotjar.com',
+    'segment.io','mixpanel.com','amplitude.com','clarity.ms','taboola.com','outbrain.com',
+    'adsrvr.org','adnxs.com','rubiconproject.com','pubmatic.com','criteo.com','appsflyer.com',
+    'clarity.ms','chartbeat.com','sentry.io','intercom.io','hubspot.com','bat.bing.com'];
+  function isTracker(h){
+    for (const t of TRACK) if (h === t || h.endsWith('.' + t)) return true;
+    return false;
+  }
+  chrome.storage.local.get([KEY], function(st){
+    const all = st[KEY] || {};
+    const rows = all[id] || [];
+    const list = document.getElementById('list');
+    document.getElementById('count').textContent = rows.length + ' requests';
+    if (!rows.length) {
+      const p = document.createElement('div');
+      p.id = 'empty';
+      p.textContent = 'Open or reload a page, then come back. Requests are listed newest last.';
+      list.appendChild(p);
+      return;
+    }
+    for (let i = rows.length - 1; i >= 0 && list.children.length < 80; i--) {
+      const r = rows[i];
+      const row = document.createElement('div');
+      row.className = 'row';
+      const host = document.createElement('span');
+      host.className = 'host' + (isTracker(r.host) ? ' track' : '');
+      host.textContent = (r.host || r.url || '') + (isTracker(r.host) ? '  - tracker' : '');
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = (r.status || 'failed') + '  ' + (r.type || '');
+      row.appendChild(host); row.appendChild(meta); list.appendChild(row);
+      if (r.redirects && r.redirects.length) {
+        const chain = document.createElement('div');
+        chain.className = 'chain';
+        chain.textContent = 'Redirects: ' + r.redirects.join('  >  ');
+        list.appendChild(chain);
+      }
+    }
+  });
+});
+";
+
+        private const string RightClickFallbackWorker = @"
+/* Absolute Enable Right Click and Copy - built-in edition. The toolbar button toggles it. */
+function paint(on){ try { chrome.action.setBadgeText({ text: on ? 'ON' : '' }); } catch(e){} }
+chrome.runtime.onInstalled.addListener(function(){
+  chrome.storage.local.set({ enabled: true }); paint(true);
+});
+chrome.action.onClicked.addListener(async function(tab){
+  const st = await chrome.storage.local.get(['enabled']);
+  const next = !(st.enabled !== false);
+  await chrome.storage.local.set({ enabled: next });
+  paint(next);
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const t of tabs) if (t.id != null)
+      chrome.tabs.sendMessage(t.id, { __jb: 'rightClickEnabled', value: next },
+        function(){ void chrome.runtime.lastError; });
+  } catch(e) {}
+});
+";
+
+        private const string RightClickFallbackContent = @"
+/* Absolute Enable Right Click and Copy - built-in edition.
+   Runs in the extension's isolated world: the page cannot see this script, no page object is
+   replaced, and no visible node is added. It restores what a site took away through DOM
+   attributes and CSS, and stops trusted blocker events from reaching the page's handlers. */
+(function(){
+  'use strict';
+  if (window.__jbRightClickExt) return;
+  window.__jbRightClickExt = true;
+  var on = true;
+  var EVENTS = ['contextmenu','copy','cut','selectstart','dragstart','mousedown','mouseup'];
+  function stop(e){
+    if (!on) return;
+    try { if (e.isTrusted) e.stopImmediatePropagation(); } catch(x) {}
+  }
+  for (var i = 0; i < EVENTS.length; i++) {
+    try { window.addEventListener(EVENTS[i], stop, true); } catch(x) {}
+  }
+  var ATTRS = ['oncontextmenu','onselectstart','ondragstart','oncopy','oncut','onmousedown','onmouseup'];
+  function strip(root){
+    try {
+      if (!root) return;
+      if (root.removeAttribute) for (var a = 0; a < ATTRS.length; a++) root.removeAttribute(ATTRS[a]);
+      root.oncontextmenu = null; root.onselectstart = null; root.ondragstart = null;
+      root.oncopy = null; root.oncut = null;
+      if (root.querySelectorAll) {
+        var els = root.querySelectorAll('[oncontextmenu],[onselectstart],[ondragstart],[oncopy],[oncut]');
+        for (var j = 0; j < els.length; j++)
+          for (var b = 0; b < ATTRS.length; b++) els[j].removeAttribute(ATTRS[b]);
+      }
+    } catch(x) {}
+  }
+  function unlock(){
+    if (!on) return;
+    strip(document.documentElement); strip(document.body);
+    /* The CDP tool runtime injects the same rule when it is present. One style per page,
+       never two: a page that watches its own DOM should see as little as possible. */
+    try {
+      if (document.querySelector('style[data-jb]')) return;
+      var st = document.createElement('style');
+      st.setAttribute('data-jb', 'selection');
+      st.textContent = 'html,body,body *{-webkit-user-select:text!important;-moz-user-select:text!important' +
+        ';-ms-user-select:text!important;user-select:text!important}';
+      (document.head || document.documentElement).appendChild(st);
+    } catch(x) {}
+  }
+  unlock();
+  document.addEventListener('DOMContentLoaded', unlock, { once: true });
+  try {
+    var pending = 0;
+    var mo = new MutationObserver(function(){
+      if (pending || !on) return;
+      pending = setTimeout(function(){ pending = 0; unlock(); }, 500);
+    });
+    if (document.documentElement) mo.observe(document.documentElement, { childList: true, subtree: true });
+  } catch(x) {}
+  try {
+    chrome.runtime.onMessage.addListener(function(m){
+      if (!m || m.__jb !== 'rightClickEnabled') return;
+      on = !!m.value;
+      if (on) unlock();
+    });
+    chrome.storage.local.get(['enabled']).then(function(st){ on = st.enabled !== false; if (on) unlock(); });
+  } catch(x) {}
+})();
 ";
 
     }

@@ -25,10 +25,14 @@ namespace JoeBrowser
         public event EventHandler FocusRequested;
         public event EventHandler CloseRequested;
         public event EventHandler PickToggled;
+        // These two are subscribed to from MainForm via delegates; the compiler does not
+        // see the cross-class subscription and reports CS0067. Pragma keeps the build clean.
+#pragma warning disable CS0067
         public event EventHandler RenameRequested;
         public event EventHandler ClearCacheRequested;
         public event EventHandler LeakTestRequested;
         public event EventHandler HistoryRequested;
+#pragma warning restore CS0067
 
         /* Card metrics, derived from the type scale rather than guessed. The card was 200 tall
            with the action bar 14 px from the bottom edge and a 28 px chip row that started at
