@@ -36,6 +36,7 @@ namespace JoeBrowser
         private string _browserFullVersion;
         private bool _browserIsBrave;
         private bool _browserIsEdge;
+        private string _browserEngineKey;
         /// <summary>False on the engines that refuse extensions (Edge branded builds, Firefox):
         /// the CDP tool injection is skipped too, so the app never pretends a tool is running
         /// where the engine will not carry one.</summary>
@@ -242,6 +243,7 @@ namespace JoeBrowser
             s._browserFullVersion = browser.Version;
             s._browserIsBrave = browser.IsBrave;
             s._browserIsEdge = browser.IsEdge;
+            s._browserEngineKey = browser.EngineKey;
 
             var fp = profile.Fp ?? new FingerprintConfig();
             /* The profile has to report the build it actually runs. It was launching
@@ -271,11 +273,13 @@ namespace JoeBrowser
                 /* A profile that claims a card this PC does not have is one of the few things a
                    scanner can see without a database of anything: the name says one GPU and the
                    limits that come with it come from another - browserscan prints "WebGL
-                   exception -5%". A new profile answers with the machine's own adapter, and a
-                   stored profile claimed whatever the pool rolled for it; the claim is corrected
-                   to the adapter the machine really has, because that is what a real browser on
-                   this machine reports. Firefox keeps its direct reports, which are already true. */
-                if (!string.IsNullOrEmpty(FingerprintFactory.MachineRenderer) && IsChromiumLike(browser))
+                   exception -5%". A Windows profile therefore answers with the machine's own
+                   adapter, because that is what a real browser on this machine reports. Only
+                   Windows: a macOS, Linux or phone identity is a whole claimed platform, and a
+                   Direct3D11 adapter string inside a Metal or Adreno environment is an
+                   impossibility, not a repair. Firefox keeps its direct reports, already true. */
+                if (!string.IsNullOrEmpty(FingerprintFactory.MachineRenderer) && IsChromiumLike(browser) &&
+                    FingerprintFactory.IsWindowsTarget(fp.Os))
                 {
                     if (!string.Equals(fp.WebGlRenderer, FingerprintFactory.MachineRenderer, StringComparison.Ordinal))
                     {
@@ -430,22 +434,21 @@ namespace JoeBrowser
             args.Add("--password-store=basic");
             args.Add("--use-mock-keychain");
             args.Add("--lang=" + (fp.Language ?? "en-US"));
-            /* A browser launched with a debugging port must not answer navigator.webdriver or
-               expose the AutomationControlled Blink feature. Some Chromium builds enable it as
-               soon as a remote debugging endpoint is requested, and the CDP script overrides
-               navigator.webdriver only AFTER the document starts - a first-frame check would
-               still see it. Disabling the feature at launch closes that window on every
-               Chromium engine: Chrome, Brave, Chromium and Edge. */
-            args.Add("--disable-blink-features=AutomationControlled");
+            /* navigator.webdriver is forced false by the document-start fingerprint script,
+               which runs before any page script on every Chromium engine, so no launch flag is
+               needed for it. --disable-blink-features=AutomationControlled is deliberately NOT
+               passed: Chrome surfaces that flag as an "unsupported command-line flag" infobar,
+               which is both a visible glitch and an automation tell no real browser shows. */
             /* Sets the Accept-Language header in the network service, with no CDP domain
                enabled. Previously the header was stamped through Network.setExtraHTTPHeaders,
                which required Network.enable - the single clearest indication to a page that the
                browser is under remote control. */
             if (!string.IsNullOrEmpty(fp.AcceptLanguage))
             {
-                /* A hand-edited header carrying a quote or a newline would corrupt the whole
-                   command line, so those characters never reach the flag. */
-                string acc = fp.AcceptLanguage.Replace("\"", "").Replace("\r", "").Replace("\n", "").Trim();
+                /* Bare tags only: Chrome adds the q weights itself, both here and in the
+                   setUserAgentOverride acceptLanguage list. A hand-edited value carrying a quote
+                   or newline would corrupt the command line, so those never reach the flag. */
+                string acc = BareLanguageTags(fp.AcceptLanguage);
                 if (acc.Length > 0) args.Add("--accept-lang=\"" + acc + "\"");
             }
             args.Add("--window-size=" + winW + "," + winH);
@@ -522,11 +525,11 @@ namespace JoeBrowser
                branded builds, so that flag is disabled below and the same first-party tools are
                injected through CDP as a guaranteed fallback.
 
-               The two included extensions are written by the application, so Chrome, Brave,
-               Chromium and Edge all receive them - there is no store request in this path and
-               nothing that can be blocked by a proxy. Firefox is a different engine entirely:
-               it gets a sideloaded WebExtension for the two built-in page tools, and the
-               app-level proxy alerts fire on every engine including Firefox. */
+               The two included store extensions are written by the application and default to
+               Chrome, Brave and Chromium only - Edge and Firefox are deliberately excluded.
+               Firefox is a different engine entirely: it gets a sideloaded WebExtension for the
+               two built-in page tools, and the app-level proxy alerts fire on every engine
+               including Firefox. */
             bool engineTakesExtensions = string.Equals(browser.EngineKey, "chrome", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(browser.EngineKey, "brave", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(browser.EngineKey, "chromium", StringComparison.OrdinalIgnoreCase) ||
@@ -541,15 +544,17 @@ namespace JoeBrowser
             s._masterExtensions = settings == null || settings.EnableExtensions;
             bool masterExtensions = s._masterExtensions && engineTakesExtensions;
             bool customExtensions = settings == null || settings.EnableCustomExtensions;
+            /* The two included store extensions (HTTP Tracker Plus, Absolute Enable Right Click)
+               are default-installed on Chrome, Chromium and Brave only. Edge and Firefox must not
+               receive them automatically: Edge gets the same page behaviour through the CDP tool
+               runtime below, and Firefox through its sideloaded WebExtension. */
+            bool storePairEngines = string.Equals(browser.EngineKey, "chrome", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(browser.EngineKey, "brave", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(browser.EngineKey, "chromium", StringComparison.OrdinalIgnoreCase);
             var folders = !engineTakesExtensions || DiagnosticNoExtensions
                 ? new List<string>()
                 : ExtensionManager.EnabledFolders(profile.Tools, masterExtensions, customExtensions, proxyOn,
-                    /* The two included extensions load on every Chromium engine - Chrome, Brave,
-                       Chromium and Edge alike. The built-in editions are written by the
-                       application before this call, so a profile opened offline or behind a
-                       blocked store still has both. Firefox cannot take Chromium unpacked
-                       extensions at all; the tools it does support are sideloaded instead. */
-                    true);
+                    storePairEngines);
             if (folders.Count > 0)
             {
                 /* Every folder is on the command line twice, once for each switch. Duplicates
@@ -815,7 +820,15 @@ namespace JoeBrowser
                     workerCap = !string.Equals(cap, _browserFullVersion, StringComparison.Ordinal);
                 }
                 catch { }
-                var meta = BuildUaMetadata(fp, null, _browserFullVersion, workerCap);
+                /* The worker is still unstamped here, so it is a clean source for the binary's
+                   own hints when no page has been read yet. Sharing the one cache keeps the
+                   worker's GREASE brand identical to the page's instead of a fallback list. */
+                if (_realHints == null)
+                {
+                    var read = await ReadRealClientHintsAsync(sessionId).ConfigureAwait(false);
+                    if (read != null) _realHints = read;
+                }
+                var meta = BuildUaMetadata(fp, _realHints, _browserFullVersion, workerCap);
                 string script = FingerprintScript.Build(fp, fp.UserAgent, fp.Platform, lang, languages, meta);
                 /* No Runtime.enable here: on a worker session it waits for a domain handshake
                    that never completes on every build, while evaluate reaches the default
@@ -1274,6 +1287,21 @@ namespace JoeBrowser
             return true;
         }
 
+        /// <summary>Chrome appends its own q weights to both --accept-lang and the
+        /// setUserAgentOverride acceptLanguage list, so an already-weighted header would be
+        /// weighted twice ("en;q=0.9;q=0.9"). Both callers hand over bare, deduped tags and let
+        /// the network service produce the weights.</summary>
+        private static string BareLanguageTags(string accept)
+        {
+            var tags = new List<string>();
+            foreach (string part in (accept ?? "").Split(','))
+            {
+                string tag = part.Split(';')[0].Replace("\"", "").Replace("\r", "").Replace("\n", "").Trim();
+                if (tag.Length > 0 && !tags.Contains(tag)) tags.Add(tag);
+            }
+            return string.Join(",", tags);
+        }
+
         private async Task ApplyFingerprintAsync(FingerprintConfig fp, string navigateTo, string session)
         {
             string lang = string.IsNullOrEmpty(fp.Language) ? "en-US" : fp.Language;
@@ -1284,7 +1312,7 @@ namespace JoeBrowser
             if (string.IsNullOrWhiteSpace(fp.AcceptLanguage) ||
                 fp.AcceptLanguage.IndexOf(lang, StringComparison.OrdinalIgnoreCase) < 0)
                 fp.AcceptLanguage = FingerprintFactory.AcceptLanguageFor(lang);
-            string acceptLanguage = fp.AcceptLanguage;
+            string acceptLanguage = BareLanguageTags(fp.AcceptLanguage);
 
             await TrySend("Page.enable", null, session);
             /* Deliberately no Network.enable. Enabling that domain is the clearest CDP tell a
@@ -1553,11 +1581,34 @@ namespace JoeBrowser
                 fp.BrowserVersion = own;
                 if (Profile != null) Profile.BrowserVersion = own;
             }
-            return BuildUaMetadata(fp, await ReadRealClientHintsAsync(session).ConfigureAwait(false), own, cappedClaim);
+            /* The hints are a property of the binary, so one clean read per launch is enough.
+               A re-apply (new target, live edit) runs on a page this session has already
+               stamped: reading "real" hints there reads our own override back and feeds it
+               into the next one, which is how the GREASE brand decayed to the fallback. */
+            Dictionary<string, object> real = _realHints;
+            bool stamped;
+            lock (_scriptState) stamped = _fpScripts.ContainsKey(session ?? "");
+            if (real == null && !stamped)
+            {
+                real = await ReadRealClientHintsAsync(session).ConfigureAwait(false);
+                if (real == null)
+                {
+                    /* The first about:blank can answer before its execution context exists,
+                       and a null there used to decay the GREASE brand to a fallback no real
+                       browser emits. One retry after the commit gets the binary's own hints. */
+                    await Task.Delay(400).ConfigureAwait(false);
+                    real = await ReadRealClientHintsAsync(session).ConfigureAwait(false);
+                }
+                if (real != null) _realHints = real;
+            }
+            return BuildUaMetadata(fp, real, own, cappedClaim);
         }
 
         /// <summary>The build the running browser claims for itself, before any override.</summary>
         private string _truthVersion;
+
+        /// <summary>The running binary's own client hints, read once from an unstamped page.</summary>
+        private Dictionary<string, object> _realHints;
 
         private async Task<string> ReadRunningBuildAsync(string session)
         {
@@ -1600,9 +1651,11 @@ namespace JoeBrowser
                the user agent string imitates. Brave keeps Chrome's user agent word for word and
                puts its own name only here, and the reverse holds for Edge: a real Edge that
                reports Google Chrome is a mismatch, because everything else Edge exposes (its
-               own extension store, its escape hatch pages) still says Edge. */
+               own extension store, its escape hatch pages) still says Edge. A bare Chromium
+               build likewise ships no Google Chrome brand at all - only Chromium and GREASE. */
             string brandName = edge || _browserIsEdge ? "Microsoft Edge"
                 : _browserIsBrave ? "Brave"
+                : _browserEngineKey == "chromium" ? "Chromium"
                 : "Google Chrome";
 
             // The GREASE brand ("Not_A Brand", "Not;A=Brand", …) and its version rotate with the
@@ -1677,28 +1730,24 @@ namespace JoeBrowser
             /* The GREASE brand is the version the binary ships, so a claim ahead of the binary
                would carry the Canary's token beside a 157 user agent - a mismatch on its own.
                Not-A.Brand 99 is what a real 157 answers with (verified on this machine); it is
-               only used when the claim was capped, which is the case where the live token does
-               not belong. Move it with LatestStable in the same release. */
-            if (cappedClaim)
+               used when the claim was capped, and also whenever no live hint could be read, so
+               a cold about:blank never falls back to a token no shipping browser emits. Move it
+               with LatestStable in the same release. */
+            if (cappedClaim || greaseBrand == null)
             {
                 greaseBrand = "Not-A.Brand";
                 greaseVersion = "99";
                 greaseFull = "99.0.0.0";
             }
-            if (greaseBrand != null)
-            {
-                reduced.Add(new Dictionary<string, object> { { "brand", greaseBrand }, { "version", greaseVersion ?? "8" } });
-                fullListOut.Add(new Dictionary<string, object> { { "brand", greaseBrand }, { "version", greaseFull } });
-            }
-            else
-            {
-                reduced.Add(new Dictionary<string, object> { { "brand", "Not_A Brand" }, { "version", "8" } });
-                fullListOut.Add(new Dictionary<string, object> { { "brand", "Not_A Brand" }, { "version", "8.0.0.0" } });
-            }
+            reduced.Add(new Dictionary<string, object> { { "brand", greaseBrand }, { "version", greaseVersion ?? "8" } });
+            fullListOut.Add(new Dictionary<string, object> { { "brand", greaseBrand }, { "version", greaseFull } });
             reduced.Add(new Dictionary<string, object> { { "brand", "Chromium" }, { "version", major.ToString() } });
-            reduced.Add(new Dictionary<string, object> { { "brand", brandName }, { "version", major.ToString() } });
             fullListOut.Add(new Dictionary<string, object> { { "brand", "Chromium" }, { "version", chromiumFull } });
-            fullListOut.Add(new Dictionary<string, object> { { "brand", brandName }, { "version", brandFull } });
+            if (brandName != "Chromium")
+            {
+                reduced.Add(new Dictionary<string, object> { { "brand", brandName }, { "version", major.ToString() } });
+                fullListOut.Add(new Dictionary<string, object> { { "brand", brandName }, { "version", brandFull } });
+            }
 
             string platform = FingerprintFactory.IsMac(fp.Os) ? "macOS"
                 : (FingerprintFactory.IsLinux(fp.Os) ? "Linux" : (android ? "Android" : "Windows"));
@@ -1726,6 +1775,12 @@ namespace JoeBrowser
 
             string architecture = samePlatform ? Str(real, "architecture") : (android ? "arm" : "x86");
             if (string.IsNullOrEmpty(architecture)) architecture = android ? "arm" : "x86";
+            /* Apple Silicon answers "arm" here, and the claimed GPU is what decides: an x86 hint
+               beside an M-series Metal renderer describes a Mac Apple never shipped. The host's
+               own value cannot be trusted either - an Intel Mac running an M4 profile must still
+               say arm. */
+            if (platform == "macOS" && !string.IsNullOrEmpty(fp.WebGlRenderer))
+                architecture = fp.WebGlRenderer.IndexOf("Apple M", StringComparison.OrdinalIgnoreCase) >= 0 ? "arm" : "x86";
             string bitness = samePlatform ? Str(real, "bitness") : (android ? "" : "64");
             if (string.IsNullOrEmpty(bitness)) bitness = android ? "" : "64";
             string model = samePlatform ? Str(real, "model") : "";

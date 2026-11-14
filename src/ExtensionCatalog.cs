@@ -674,13 +674,17 @@ namespace JoeBrowser
         /// to be passed to the browser twice; Chromium then refuses the whole list and says
         /// nothing, so every extension in the profile silently disappeared.
         /// </summary>
-        public static List<string> EnabledFolders()
+        public static List<string> EnabledFolders(bool includeShipped = true)
         {
             var result = new List<string>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var e in Load())
             {
                 if (!e.Enabled || string.IsNullOrEmpty(e.Folder)) continue;
+                /* The shipped pair is governed solely by the engine gate in
+                   ExtensionManager.EnabledFolders (storePair). Listing it here as a "custom"
+                   row would re-add it on Edge and Firefox, where it must never auto-load. */
+                if (!includeShipped && DefaultIdOf(e).Length > 0) continue;
                 /* The removal mark outranks the library entry. A stale extensions.json written
                    by an older build (or a save that raced the background fetch) would otherwise
                    hand a removed shipped extension straight back to --load-extension. */
@@ -1175,13 +1179,14 @@ namespace JoeBrowser
             }
         }
 
-        /// <summary>Recommended extensions. Links are store searches, never invented ids.</summary>
+        /// <summary>Recommended extensions. Links are store searches, never invented ids.
+        /// The two that ship Included (HTTP Tracker Plus, Absolute Enable Right Click) are not
+        /// repeated here: a recommendation for something already installed reads as a duplicate
+        /// and pushes the genuinely optional picks below the fold.</summary>
         public static string[][] Recommended()
         {
             return new[]
             {
-                new[] { "Enable Right Click & Copy", "Restore the context menu and copying on sites that block it.", "enable%20right%20click", "copy" },
-                new[] { "HTTP Tracker Plus", "See redirects and request chains while you browse.", "http%20tracker", "route" },
                 new[] { "Ad Blocker", "A clean, quiet browsing session without pop-ups.", "uBlock%20Origin", "shield" },
                 new[] { "Google Translate", "Translate pages inline without leaving the profile.", "google%20translate", "translate" },
                 new[] { "Cookie Editor", "Inspect and edit cookies for the running profile.", "cookie%20editor", "cookie" }

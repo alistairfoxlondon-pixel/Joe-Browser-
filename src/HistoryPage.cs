@@ -333,8 +333,11 @@ namespace JoeBrowser
                     y = Ui.FlowButtons(group, pad, y, inner, Ui.S(8), bh) + Ui.S(14);
                 }
 
-                _title.SetBounds(pad, y, inner, Ui.S(30));
-                y += Ui.S(32);
+                /* The heading is set in the 32 px display face, whose line box is taller than
+                   30 px: a fixed 30 px box cut the descenders off "History". */
+                int titleH = Theme.LineHeight(Theme.Display);
+                _title.SetBounds(pad, y, inner, titleH);
+                y += titleH + Ui.S(2);
                 /* The subtitle wraps, so its box is measured rather than assumed: a two line
                    hint used to run into the first row of the list. */
                 _subtitleHeight = MeasureLines(_subtitle.Text, Theme.Caption, inner);

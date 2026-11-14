@@ -48,8 +48,14 @@ $lines.Add("/nologo")
 $lines.Add("/target:winexe")
 $lines.Add("/platform:anycpu")
 $lines.Add("/langversion:7.3")
-$lines.Add("/optimize+")
-$lines.Add("/debug-")
+if ($Configuration -eq "Debug") {
+    $lines.Add("/optimize-")
+    $lines.Add("/debug+")
+    $lines.Add("/define:DEBUG;TRACE")
+} else {
+    $lines.Add("/optimize+")
+    $lines.Add("/debug-")
+}
 $lines.Add('/win32icon:"' + (Join-Path $src "app.ico") + '"')
 $lines.Add('/win32manifest:"' + (Join-Path $src "app.manifest") + '"')
 # Embed the same artwork as a managed resource so windows, dialogs and the About page can

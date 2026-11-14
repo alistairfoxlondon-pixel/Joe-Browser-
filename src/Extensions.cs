@@ -449,12 +449,13 @@ namespace JoeBrowser
             var result = new List<string>();
             if (!masterSwitch || tools == null) return result;
             EnsureAll();
-            /* The two included extensions load on every Chromium engine, from the store copy
-               when it was downloaded and from the built-in edition otherwise. Nothing is
-               fetched here: this is the launch path, and a fifteen second HTTP timeout in
-               front of every launch is exactly why they used to look missing. The store
-               upgrade runs off the launch path from Start() and on profile creation, and the
-               Extensions page offers an immediate retry.
+            /* The two included extensions load only on the engines that ship them (Chrome,
+               Chromium, Brave - the storePair gate); Edge and Firefox never auto-load them.
+               They come from the store copy when it was downloaded and from the built-in
+               edition otherwise. Nothing is fetched here: this is the launch path, and a
+               fifteen second HTTP timeout in front of every launch is exactly why they used
+               to look missing. The store upgrade runs off the launch path from Start() and on
+               profile creation, and the Extensions page offers an immediate retry.
                Every folder this method emits goes through the comma guard: Chromium splits the
                switch on commas, and a Windows account named "Smith, J" once silently corrupted
                the whole list, so the browser loaded NO extensions at all. */
@@ -472,9 +473,11 @@ namespace JoeBrowser
                refuse unpacked extensions, so there is still exactly one implementation per page. */
 
             // Extensions added from the Extensions page are applied to every Chromium profile.
+            // The shipped pair is excluded here (includeShipped: storePair) so it only ever
+            // arrives via the gated DefaultFolders branch above - never on Edge or Firefox.
             if (customExtensions)
             {
-                foreach (string folder in ExtensionCatalog.EnabledFolders()) Add(result, folder);
+                foreach (string folder in ExtensionCatalog.EnabledFolders(storePair)) Add(result, folder);
             }
 
             string extra = tools.CustomExtensions ?? "";

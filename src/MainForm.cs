@@ -17,7 +17,10 @@ namespace JoeBrowser
            longest navigation label at 150% without an ellipsis, and a 72 header band gives the
            page title and its one line of state room to breathe instead of sitting on the rule
            below them. */
-        private const int SidebarW = 268;
+        private int _sidebarW = 268;
+        private bool _railCollapsed;
+        /// <summary>Scaled sidebar width; narrows to an icon rail on a small window.</summary>
+        private int Sb { get { return Ui.S(_sidebarW); } }
         private const int HeaderH = 76;
         private const int ContentPad = 32;
 
@@ -41,6 +44,7 @@ namespace JoeBrowser
         // Header toolbar
         private JBTextBox _search;
         private JBButton _newBtn, _saveSettings, _sortBtn;
+        private bool _sortIcon;
 
         // Multi-select
         private readonly List<string> _picks = new List<string>();
@@ -332,7 +336,7 @@ namespace JoeBrowser
             /* The floor is derived from what must never be cut: one profile card (320), the
                page gutters (64) and the navigation rail (280). A narrower window had to clip one
                of them - at the old 1000 the card grid lost its right-hand gutter. */
-            MinimumSize = new Size(Ui.S(Theme.NavbarWidth + ProfileCard.CardMinW + 64), Ui.S(680));
+            MinimumSize = new Size(Ui.S(520), Ui.S(540));
 
             // The app is a workspace, not a dialog: it opens across the whole working area and
             // remembers the size it was closed at. Nothing is capped at a fixed 1280 box.
@@ -370,7 +374,14 @@ namespace JoeBrowser
         protected override void OnActivated(EventArgs e)
         {
             base.OnActivated(e);
+            EnsureCardsMatchProfiles();
+            /* A window coming back from minimised can still carry the clamped bounds a minimise
+               layout left behind. Lay it out at the restored size before the one-piece paint so the
+               first frame back is the window as it is, not a fragment of it. LayoutAll repositions
+               controls; it does not rebuild cards, so a click in flight is not lost. */
+            if (_built && WindowState != FormWindowState.Minimized) LayoutAll();
             RepaintAsOnePiece();
+            DumpGrid("OnActivated");
         }
 
         /// <summary>
@@ -380,14 +391,14 @@ namespace JoeBrowser
         protected override void OnDpiChanged()
         {
             base.OnDpiChanged();
-            MinimumSize = new Size(Ui.S(Theme.NavbarWidth + ProfileCard.CardMinW + 64), Ui.S(680));
+            MinimumSize = new Size(Ui.S(520), Ui.S(540));
             LayoutAll();
             Invalidate(true);
         }
 
         public override Color SurfaceAt(Point clientLocation)
         {
-            return clientLocation.X < Ui.S(SidebarW) ? Theme.Sidebar : BackColor;
+            return clientLocation.X < Sb ? Theme.Sidebar : BackColor;
         }
 
         protected override void OnSurfaceChanged()
@@ -455,7 +466,7 @@ namespace JoeBrowser
                 }
                 /* The title band is painted, not a control, so it has to be checked against the
                    toolbar by arithmetic: anything that reaches into it covers the page name. */
-                int textX = Ui.S(SidebarW) + Ui.S(ContentPad);
+                int textX = Sb + Ui.S(ContentPad);
                 var title = new Rectangle(textX, Ui.S(10),
                     Math.Max(Ui.S(120), ClientSize.Width - textX - Ui.S(ContentPad) - _toolbarReserve), Ui.S(52));
                 foreach (Control c in new Control[] { _search, _sortBtn, _newBtn, _saveSettings })
@@ -2244,7 +2255,7 @@ namespace JoeBrowser
             var g = e.Graphics;
             Ui.Quality(g);
             int w = ClientSize.Width, h = ClientSize.Height;
-            int sb = Ui.S(SidebarW);
+            int sb = Sb;
             int headerH = _headerH;
 
             g.Clear(Theme.Bg);
@@ -2260,9 +2271,12 @@ namespace JoeBrowser
                header was a logo and a name at 24 px with the rest of the rail starting 100 px
                below it, which left a hole where a designed app puts its title block. */
             float logoSize = Ui.S(26);
-            var logoBox = new RectangleF(Ui.S(20), Ui.S(20), logoSize, logoSize);
+            var logoBox = _railCollapsed
+                ? new RectangleF((sb - logoSize) / 2f, Ui.S(20), logoSize, logoSize)
+                : new RectangleF(Ui.S(20), Ui.S(20), logoSize, logoSize);
             Logo.Draw(g, logoBox);
-            Ui.Text(g, "Joe Browser", Theme.H3, Theme.Text, Ui.S(54), Ui.S(20), sb - Ui.S(66));
+            if (!_railCollapsed)
+                Ui.Text(g, "Joe Browser", Theme.H3, Theme.Text, Ui.S(54), Ui.S(20), sb - Ui.S(66));
             /* The tagline under the brand mark is gone: premium tools like AdsPower and GoLogin
                show no subtitle below the logo, and "Anti detect workspace" read as filler. */
 
@@ -2332,6 +2346,52 @@ namespace JoeBrowser
             return n;
         }
 
+        /// <summary>JB_GRID_DEBUG=1 dumps the grid/header state so a vanished-card report can be
+        /// read from the log instead of guessed at. Off by default; costs nothing when unset.</summary>
+        private static readonly bool _gridDebug =
+            string.Equals(Environment.GetEnvironmentVariable("JB_GRID_DEBUG"), "1", StringComparison.Ordinal);
+
+        private void DumpGrid(string where)
+        {
+            if (!_gridDebug) return;
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.Append("GRID ").Append(where)
+                  .Append(" page=").Append(_page)
+                  .Append(" profiles=").Append(_profiles == null ? -1 : _profiles.Count)
+                  .Append(" cards=").Append(_cards.Count)
+                  .Append(" shown=").Append(ShownCount())
+                  .Append(" hostVis=").Append(_host != null && _host.Visible)
+                  .Append(" emptyVis=").Append(_emptyPanel != null && _emptyPanel.Visible)
+                  .Append(" filter='").Append(_filter ?? "").Append('\'')
+                  .Append(" hostBounds=").Append(_host == null ? Rectangle.Empty : _host.Bounds)
+                  .Append(" gridH=").Append(_grid == null ? -1 : _grid.Height);
+                foreach (var kv in _cards)
+                    sb.Append(" [").Append(kv.Key).Append(" vis=").Append(kv.Value.Visible)
+                      .Append(' ').Append(kv.Value.Bounds).Append(']');
+                Log.Info(sb.ToString());
+            }
+            catch { }
+        }
+
+        /// <summary>The grid and the header must agree. If a reload ever left them apart - an
+        /// interrupted build, a store read that raced a write - rebuild once on the next activation
+        /// or visit to Profiles instead of showing "No profiles yet" over a populated workspace.
+        /// Cheap and a no-op whenever the two already match.</summary>
+        private void EnsureCardsMatchProfiles()
+        {
+            if (_profiles == null || !_built) return;
+            if (_cards.Count == _profiles.Count)
+            {
+                bool missing = false;
+                foreach (var p in _profiles) if (!_cards.ContainsKey(p.Id)) { missing = true; break; }
+                if (!missing) return;
+            }
+            Log.Info("Grid/profile mismatch (" + _cards.Count + " cards, " + _profiles.Count + " profiles); rebuilding.");
+            ReloadCards(false);
+        }
+
         /// <summary>
         /// Height the rail needs for nine destinations in two captioned groups, at the given row
         /// height and gap. Used to pick the density that fits the window instead of discovering
@@ -2347,9 +2407,41 @@ namespace JoeBrowser
         private void LayoutAll()
         {
             if (!_built) return;
+            /* Minimising reports a near-zero client size. Laying out against it clamps every panel
+               to its minimum and leaves those clamped bounds behind for the restore to paint. Skip
+               it: the window is not visible, and the restored size re-lays everything on the way
+               back (OnActivated). */
+            if (WindowState == FormWindowState.Minimized) return;
             SuspendLayout();
             int w = ClientSize.Width, h = ClientSize.Height;
-            int sb = Ui.S(SidebarW);
+            /* Below tablet width the rail becomes an icon strip so the content keeps the room.
+               The destinations stay one click away and the tooltip names each one. */
+            bool collapsed = w < Ui.S(900);
+            if (collapsed != _railCollapsed)
+            {
+                _railCollapsed = collapsed;
+                if (collapsed)
+                {
+                    JBButton[] navs = { _navProfiles, _navHistory, _navAccount, _navProxies, _navExtensions, _navBrowsers, _navSettings, _navTools, _navAbout };
+                    foreach (var n in navs) { n.Tip = n.Text; n.Text = ""; }
+                }
+                else
+                {
+                    /* Restore the labels directly: ApplyLanguage ends in a layout pass, and
+                       calling it from inside LayoutAll would nest one layout in another. */
+                    _navProfiles.Text = L10n.T("nav.profiles");
+                    _navHistory.Text = L10n.T("nav.history");
+                    _navAccount.Text = L10n.T("nav.account");
+                    _navProxies.Text = L10n.T("nav.proxies");
+                    _navExtensions.Text = L10n.T("nav.extensions");
+                    _navBrowsers.Text = L10n.T("nav.browsers");
+                    _navSettings.Text = L10n.T("nav.settings");
+                    _navTools.Text = L10n.T("header.tools");
+                    _navAbout.Text = L10n.T("nav.about");
+                }
+            }
+            _sidebarW = collapsed ? 76 : 268;
+            int sb = Sb;
             int headerH = Ui.S(HeaderH);
 
             /* The rail is laid out from one running y instead of eleven hand computed offsets.
@@ -2380,8 +2472,12 @@ namespace JoeBrowser
             }
             int navY = railTop;
 
-            _navGroupWorkspace.SetBounds(navX + Ui.S(10), navY, navW, Theme.Row);
-            navY += Theme.Row + Ui.S(4);
+            _navGroupWorkspace.Visible = !_railCollapsed;
+            if (!_railCollapsed)
+            {
+                _navGroupWorkspace.SetBounds(navX + Ui.S(10), navY, navW, Theme.Row);
+                navY += Theme.Row + Ui.S(4);
+            }
             _navProfiles.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
             _navHistory.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
             _navAccount.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
@@ -2390,14 +2486,18 @@ namespace JoeBrowser
             _navBrowsers.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
 
             navY += Ui.S(8);
-            _navGroupSystem.SetBounds(navX + Ui.S(10), navY, navW, Theme.Row);
-            navY += Theme.Row + Ui.S(4);
+            _navGroupSystem.Visible = !_railCollapsed;
+            if (!_railCollapsed)
+            {
+                _navGroupSystem.SetBounds(navX + Ui.S(10), navY, navW, Theme.Row);
+                navY += Theme.Row + Ui.S(4);
+            }
             _navSettings.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
             _navTools.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
             _navAbout.SetBounds(navX, navY, navW, navRow); navY += navRow + navGap;
 
             /* Nine destinations and two captions. The switch gives way before a destination does. */
-            _themeSwitch.Visible = navY <= _themeSwitch.Top;
+            _themeSwitch.Visible = !_railCollapsed && navY <= _themeSwitch.Top;
 
             // caption buttons, flush with the top right corner
             int cw = Ui.S(46), ch = Ui.S(34);
@@ -2439,8 +2539,6 @@ namespace JoeBrowser
             bool twoRows = minNeeded > 0 && (toolbarRight - minNeeded - textX) < titleRoom;
             int allowedLeft = twoRows ? textX : textX + titleRoom;
             int toolbarY = twoRows ? headerBase + Ui.S(7) : (headerBase - Ui.S(34)) / 2 - Ui.S(4);
-            headerH = twoRows ? headerBase + Ui.S(48) : headerBase;
-            _headerH = headerH;
 
             _newBtn.Visible = profilesPage;
             _sortBtn.Visible = false;
@@ -2462,32 +2560,51 @@ namespace JoeBrowser
 
             /* The search field is the useful part of a profile toolbar, so it comes before
                the sort button when space is short. Neither is ever placed left of the room
-               the title needs. */
-            bool showSort = false, showSearch = false;
-            int searchW = 0;
+               the title needs. On a narrow row the sort button collapses to its icon first,
+               and the search field takes a row of its own rather than disappearing: a toolbar
+               that silently drops its controls reads as a broken page. */
+            bool showSort = false, showSearch = false, searchOwnRow = false, sortIcon = false;
+            int searchW = 0, sortWEff = sortW;
             if (profilesPage)
             {
-                showSearch = cursor - searchMin >= allowedLeft;
+                int capacity = toolbarRight - allowedLeft;
+                sortIcon = capacity < newW + gap + sortW + gap + searchMin;
+                sortWEff = sortIcon ? Ui.S(38) : sortW;
+                showSort = newLeft - gap - sortWEff >= allowedLeft;
+                if (showSort) sortLeft = newLeft - gap - sortWEff;
+                int searchRoom = (showSort ? sortLeft : newLeft) - gap - allowedLeft;
+                showSearch = searchRoom >= searchMin;
                 if (showSearch)
                 {
-                    searchW = Math.Min(twoRows ? Ui.S(360) : Ui.S(280), cursor - allowedLeft);
-                    searchLeft = cursor - searchW;
-                    cursor = searchLeft - gap;
+                    searchW = Math.Min(twoRows ? Ui.S(360) : Ui.S(280), searchRoom);
+                    searchLeft = (showSort ? sortLeft : newLeft) - gap - searchW;
                 }
-                showSort = cursor - sortW >= allowedLeft;
-                if (showSort) { sortLeft = cursor - sortW; cursor = sortLeft - gap; }
+                else if (twoRows)
+                {
+                    searchOwnRow = true;
+                    showSearch = true;
+                    searchW = toolbarRight - allowedLeft;
+                    searchLeft = allowedLeft;
+                }
+                _sortIcon = sortIcon;
+                _sortBtn.Text = sortIcon ? "" : "Sort: " + SortNames[SortIndex];
+                _sortBtn.Tip = sortIcon
+                    ? "Sort: " + SortNames[SortIndex] + ". Click to change."
+                    : "Change the order of the list";
             }
 
             _sortBtn.Visible = showSort;
             _search.Visible = showSearch;
+            headerH = twoRows ? headerBase + Ui.S(48) + (searchOwnRow ? Ui.S(42) : 0) : headerBase;
+            _headerH = headerH;
 
             int toolbarLeft = profilesPage
                 ? (showSort ? sortLeft : showSearch ? searchLeft : newLeft)
                 : settingsPage ? saveLeft : toolbarRight;
 
             if (profilesPage) _newBtn.SetBounds(newLeft, toolbarY, newW, Ui.S(34));
-            if (showSort) _sortBtn.SetBounds(sortLeft, toolbarY, sortW, Ui.S(34));
-            if (showSearch) _search.SetBounds(searchLeft, toolbarY, searchW, Ui.S(34));
+            if (showSort) _sortBtn.SetBounds(sortLeft, toolbarY, sortWEff, Ui.S(34));
+            if (showSearch) _search.SetBounds(searchLeft, searchOwnRow ? toolbarY + Ui.S(42) : toolbarY, searchW, Ui.S(34));
             if (settingsPage) _saveSettings.SetBounds(saveLeft, toolbarY, saveW, Ui.S(34));
 
             /* The paint pass trims the title to this reserve. It is derived from the actual
@@ -3004,6 +3121,7 @@ namespace JoeBrowser
             }
 
             bool profiles = page == 0;
+            if (profiles) EnsureCardsMatchProfiles();
             /* The rail shows which half of the workspace is on screen. The groups are the
                first six destinations and the last four. */
             bool inWorkspace = page <= 3 || page == 8 || page == 9;
@@ -3011,11 +3129,16 @@ namespace JoeBrowser
             if (_navGroupSystem != null) _navGroupSystem.Active = !inWorkspace;
             /* A search that matches nothing leaves cards in the grid but none on screen.
                Showing the scroll host because _cards.Count > 0 put it under the empty state
-               and gave the wheel a grid nobody could see. Both views read the same number. */
-            _host.Visible = profiles && ShownCount() > 0;
+               and gave the wheel a grid nobody could see. Both views read the same number.
+               The host is raised before counting: ShownCount reads effective visibility, so
+               counting while the host was still hidden from the previous page reported zero
+               and latched the empty state over profiles that exist. */
+            _host.Visible = profiles;
+            int shownNow = ShownCount();
+            _host.Visible = profiles && shownNow > 0;
             if (!profiles) _picks.Clear();
             _bulk.Visible = profiles && _picks.Count > 1;
-            _emptyPanel.Visible = profiles && ShownCount() == 0;
+            _emptyPanel.Visible = profiles && shownNow == 0;
             _proxyPage.Visible = page == 1;
             _extensionPage.Visible = page == 2;
             _browsersPage.Visible = page == 3;
@@ -3057,8 +3180,8 @@ namespace JoeBrowser
                field's pixels stayed on the window after the Profiles page was left. The whole
                header is invalidated - including the second row a narrow window uses - so no
                part of the previous page's toolbar survives the switch. */
-            Invalidate(new Rectangle(Ui.S(SidebarW), 0,
-                Math.Max(1, ClientSize.Width - Ui.S(SidebarW)),
+            Invalidate(new Rectangle(Sb, 0,
+                Math.Max(1, ClientSize.Width - Sb),
                 Math.Max(Ui.S(HeaderH + 48), _headerH)));
 
             /* The newly visible page has to come forward over the other page containers...
@@ -3113,6 +3236,7 @@ namespace JoeBrowser
                 if (active != null && !active.Focused && Visible) active.Focus();
             }
             catch { }
+            DumpGrid("SetPageCore");
         }
 
         private void ReloadCards(bool fromDisk)
@@ -3138,11 +3262,13 @@ namespace JoeBrowser
             }
             ApplySort();
 
-            foreach (var c in _cards.Values) c.Dispose();
-            _cards.Clear();
-            _grid.Batch(delegate { _grid.Controls.Clear(); });
-
-            _grid.Batch(delegate
+            /* Build the replacement cards before touching the live grid. The old order disposed
+               and cleared every card first, so anything that threw mid-build left the grid empty
+               while the header still counted the profiles - the "No profiles yet" screen over a
+               workspace that still had its profile. Building first means a failed build changes
+               nothing on screen. */
+            var fresh = new List<ProfileCard>(_profiles.Count);
+            try
             {
                 foreach (var p in _profiles)
                 {
@@ -3167,8 +3293,26 @@ namespace JoeBrowser
                     card.DuplicateRequested += delegate { DuplicateProfile(id); };
                     card.DeleteRequested += delegate { DeleteProfile(id); };
                     card.PickToggled += delegate { TogglePick(id, (ModifierKeys & Keys.Shift) != 0); };
+                    fresh.Add(card);
+                }
+            }
+            catch (Exception ex)
+            {
+                foreach (var c in fresh) { try { c.Dispose(); } catch { } }
+                Log.Error("Rebuild cards failed; keeping the previous grid", ex);
+                DumpGrid("ReloadCardsFailed");
+                return;
+            }
+
+            foreach (var c in _cards.Values) c.Dispose();
+            _cards.Clear();
+            _grid.Batch(delegate
+            {
+                _grid.Controls.Clear();
+                foreach (var card in fresh)
+                {
                     _grid.Controls.Add(card);
-                    _cards[id] = card;
+                    _cards[card.Model.Id] = card;
                 }
             });
 
@@ -3182,6 +3326,7 @@ namespace JoeBrowser
             PrunePicks();
             ApplyFilter();
             Invalidate();
+            DumpGrid("ReloadCards");
         }
 
         /// <summary>Collision counters from the last reload, for the header subtitle.</summary>
@@ -3307,6 +3452,7 @@ namespace JoeBrowser
             Restack();
             _emptyPanel.Invalidate();
             Invalidate();
+            DumpGrid("ApplyFilter");
         }
 
         /// <summary>One place that undoes a search, used by Esc, the empty panel and the filter chip.</summary>
@@ -3343,9 +3489,9 @@ namespace JoeBrowser
             int subLines = Math.Max(1, Ui.WrapLines(g, sub, Theme.Small, contentW).Count);
             subLines = Math.Min(3, subLines);
             float subH = subLines * Theme.LineHeight(Theme.Small);
-            float stepsH = searching ? 0f : Ui.S(3) * Ui.S(30) + Ui.S(2) * Ui.S(10);
-            float blockH = badge + Ui.S(20) + titleH + Ui.S(8) + subH
-                + (searching ? 0f : Ui.S(24) + stepsH) + Ui.S(28) + Ui.S(34);
+            /* No numbered how-to list: the subtitle and the single action already say what to
+               do, and three steps of instructions read as filler on a first-run screen. */
+            float blockH = badge + Ui.S(20) + titleH + Ui.S(8) + subH + Ui.S(28) + Ui.S(34);
             float top = Math.Max(Ui.S(16), (_emptyPanel.Height - blockH) / 2f);
 
             float badgeX = (w - badge) / 2f;
@@ -3361,31 +3507,6 @@ namespace JoeBrowser
             y += titleH + Ui.S(8);
             Ui.Text(g, sub, Theme.Small, Theme.TextDim, (w - contentW) / 2f, y, contentW, "center", subLines);
             y += subH;
-
-            if (!searching)
-            {
-                y += Ui.S(24);
-                string[] steps =
-                {
-                    "Press New profile. A full identity is generated for you.",
-                    "Optionally attach a proxy on the new profile's Proxy tab.",
-                    "Press Open. That profile opens in its own browser window."
-                };
-                for (int i = 0; i < steps.Length; i++)
-                {
-                    var row = new RectangleF((w - contentW) / 2f, y, contentW, Ui.S(30));
-                    /* A numbered step reads as instructions; a bullet list reads as marketing.
-                       The numeral is a filled circle so it survives at any contrast setting. */
-                    float dot = Ui.S(22);
-                    var dr = new RectangleF(row.X, row.Y + (row.Height - dot) / 2f, dot, dot);
-                    Ui.Fill(g, dr, dot / 2f, Theme.Panel2);
-                    Ui.Text(g, (i + 1).ToString(), Theme.Caption, Theme.TextDim, dr.X, dr.Y + Ui.S(2), dr.Width, "center");
-                    Ui.Text(g, steps[i], Theme.Small, Theme.TextDim, dr.Right + Ui.S(12),
-                        row.Y + (row.Height - Theme.LineHeight(Theme.Small)) / 2f, contentW - dot - Ui.S(12));
-                    y += Ui.S(30) + Ui.S(10);
-                }
-                y += Ui.S(10);
-            }
 
             /* Where the button goes, in panel coordinates, for LayoutAll to place the real
                control on top of the paint. */
@@ -3502,7 +3623,7 @@ namespace JoeBrowser
         {
             var p = _profiles.FirstOrDefault(x => x.Id == id);
             if (p == null) return;
-            using (var dlg = new EditorForm(p, false, _settings, tab))
+            using (var dlg = new EditorForm(p, false, _settings, tab, new List<Profile>(_profiles)))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 var updated = dlg.Result;
@@ -3695,7 +3816,7 @@ namespace JoeBrowser
                     .OrderBy(p => p.Fp == null ? "" : p.Fp.Os ?? "")
                     .ThenBy(p => p.Name ?? "", StringComparer.OrdinalIgnoreCase).ToList(); break;
             }
-            if (_sortBtn != null) _sortBtn.Text = "Sort: " + SortNames[SortIndex];
+            if (_sortBtn != null) _sortBtn.Text = _sortIcon ? "" : "Sort: " + SortNames[SortIndex];
         }
 
         private void CycleSort()
@@ -4358,7 +4479,7 @@ namespace JoeBrowser
         private void CentreToast()
         {
             if (_toast == null) return;
-            int sb = Ui.S(SidebarW);
+            int sb = Sb;
             int contentW = Math.Max(Ui.S(200), ClientSize.Width - sb);
             int maxW = Math.Min(Ui.S(560), Math.Max(Ui.S(220), contentW - Ui.S(64)));
             _toast.Place(sb + contentW / 2, ClientSize.Height - Ui.S(16), maxW);
