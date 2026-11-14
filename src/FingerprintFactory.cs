@@ -513,6 +513,14 @@ namespace JoeBrowser
                 cores = new[] { 8, 8 };
                 mem = low ? new[] { 4 } : new[] { 8 };
             }
+            else if (IsMac(os))
+            {
+                /* Apple silicon core counts are fixed per chip, and navigator.hardwareConcurrency
+                   reports them without SMT: a 24-core answer beside an M4 Pro renderer describes
+                   a Mac Apple never shipped, which one hardware check exposes. */
+                cores = MacCoresFor(pair[1]);
+                mem = new[] { 8 };
+            }
             else if (IsMobileOs(os))
             {
                 cores = high ? new[] { 8, 8 } : (low ? new[] { 4, 6 } : new[] { 6, 8 });
@@ -557,6 +565,27 @@ namespace JoeBrowser
             fp.UserAgent = "";
             fp.Platform = "";
             fp.Brand = "";
+        }
+
+        /// <summary>Logical cores of the exact Mac chip the renderer names; Intel Macs report
+        /// threads, so a 4-core Intel MacBook answers 8.</summary>
+        private static int[] MacCoresFor(string renderer)
+        {
+            string r = renderer ?? "";
+            if (r.IndexOf("M4 Max", StringComparison.OrdinalIgnoreCase) >= 0) return new[] { 16, 16 };
+            if (r.IndexOf("M4 Pro", StringComparison.OrdinalIgnoreCase) >= 0) return new[] { 14, 14 };
+            if (r.IndexOf("M4", StringComparison.OrdinalIgnoreCase) >= 0) return new[] { 10, 10 };
+            if (r.IndexOf("M3 Pro", StringComparison.OrdinalIgnoreCase) >= 0) return new[] { 12, 12 };
+            if (r.IndexOf("M3", StringComparison.OrdinalIgnoreCase) >= 0) return new[] { 8, 8 };
+            if (r.IndexOf("M2", StringComparison.OrdinalIgnoreCase) >= 0) return new[] { 8, 8 };
+            if (r.IndexOf("M1", StringComparison.OrdinalIgnoreCase) >= 0) return new[] { 8, 8 };
+            if (r.IndexOf("Intel", StringComparison.OrdinalIgnoreCase) >= 0) return new[] { 8, 8 };
+            /* The discrete Radeon Pro cards Apple shipped (5500M/5300M/560X) only ever sat in
+               Intel MacBook Pros, so the renderer names AMD but the chip underneath is Intel:
+               six or eight cores, never the sixteen an Apple Silicon default would claim. */
+            if (r.IndexOf("Radeon", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                r.IndexOf("AMD", StringComparison.OrdinalIgnoreCase) >= 0) return new[] { 8, 8 };
+            return new[] { 16, 16 };
         }
 
         /// <summary>
@@ -772,6 +801,35 @@ namespace JoeBrowser
                         fp.WebGlVendor = gpuPool[at][0];
                         repaired++;
                     }
+                    /* An in-pool renderer still names a chip, and the core count has to be that
+                       chip's: a profile re-rolled onto another Mac otherwise keeps the previous
+                       chip's threads beside the new adapter. */
+                    if (IsMac(os))
+                    {
+                        int cores = MacCoresFor(gpuPool[at][1])[0];
+                        if (fp.Cores != cores) { fp.Cores = cores; repaired++; }
+                        if (fp.Memory != 8) { fp.Memory = 8; repaired++; }
+                    }
+                }
+                else if (!IsWindowsTarget(os))
+                {
+                    /* A non-Windows identity is a whole claimed platform: its browser reports a
+                       Metal, Adreno or Mali adapter, never the host's Direct3D11 card. An
+                       out-of-pool renderer here is stored corruption - an older build stamped
+                       the host adapter into every profile - so the claimed platform's pool
+                       takes over, and on a Mac the core count follows the chip. */
+                    string[] dev = DeviceIdentity(fp);
+                    string[] pair = mobile && dev.Length >= 4 && !string.IsNullOrEmpty(dev[3])
+                        ? new[] { dev[2], dev[3] }
+                        : gpuPool[(fp.Seed & 0x7fffffff) % gpuPool.Count];
+                    fp.WebGlVendor = pair[0];
+                    fp.WebGlRenderer = pair[1];
+                    if (IsMac(os))
+                    {
+                        fp.Cores = MacCoresFor(pair[1])[0];
+                        fp.Memory = 8;
+                    }
+                    repaired++;
                 }
                 else
                 {
@@ -1219,8 +1277,9 @@ namespace JoeBrowser
         }
 
         /// <summary>
-        /// Chrome and Edge always ship a four-part build in the UA string. "131.0.0.0" is a
-        /// pattern no real browser produces, so the installed build number is reused where possible.
+        /// The four-part build for the client hints and the in-page version probes. The UA string
+        /// itself is reduced (major.0.0.0) since M113; the hints are where a real Chromium still
+        /// publishes its full build, and "131.0.0.0" there is a pattern no real browser produces.
         /// </summary>
         public static string FullChromiumVersion(BrowserInfo browser, int major)
         {

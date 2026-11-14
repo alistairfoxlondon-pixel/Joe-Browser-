@@ -15,9 +15,8 @@ namespace JoeBrowser
         private readonly ProxyConfig _proxy;
         private readonly ToolConfig _tools;
         private readonly bool _isNew;
-        /// <summary>Profiles already in the workspace, so a new one can be proven distinct
-        /// from all of them rather than merely random. Null in an edit, where the point is to
-        /// keep the identity the user already has.</summary>
+        /// <summary>Profiles already in the workspace. A new profile is proven distinct from
+        /// all of them; an edit re-rolls against all but itself and warns on duplicate names.</summary>
         private readonly List<Profile> _siblings;
         private readonly int _initialTab;
         private bool _systemTarget;
@@ -81,12 +80,9 @@ namespace JoeBrowser
         /// <summary>True once the user has moved the proxy watch switch by hand.</summary>
         private bool _watchTouched;
 
-        public EditorForm(Profile profile, bool isNew, AppSettings settings, int initialTab = 0)
-            : this(profile, isNew, settings, initialTab, null) { }
-
         /// <param name="siblings">Profiles already stored. A new profile is re-rolled against
         /// them, so what the editor shows is already known to be unlike the rest of the
-        /// workspace; an edit passes null and keeps its identity.</param>
+        /// workspace; an edit re-rolls against all but itself, which WorstMatch skips by id.</param>
         public EditorForm(Profile profile, bool isNew, AppSettings settings, int initialTab, List<Profile> siblings)
         {
             _isNew = isNew;
@@ -352,6 +348,14 @@ namespace JoeBrowser
                profile on one exact version even after the everyday browser updates. */
             _lblKernel = Lbl(_tabGeneral, "BROWSER BUILD");
             _kernel = Pick(_tabGeneral, "layers");
+            /* The hint has to exist before BuildKernelOptions: that call fills its text, and the
+               selection it restores is suppressed, so no later event would ever fill it. */
+            _kernelHint = new JBLabel(LabelRole.Faint, "");
+            _kernelHint.TextAlign = ContentAlignment.MiddleLeft;
+            // Wrapped, not ellipsised: this is the only place that explains what pinning a build
+            // costs, so a truncated sentence would be worse than no sentence.
+            _kernelHint.Wrap = true;
+            _tabGeneral.Controls.Add(_kernelHint);
             BuildKernelOptions();
             _kernel.SelectedIndexChanged += delegate
             {
@@ -391,12 +395,6 @@ namespace JoeBrowser
                 LayoutAll();
             };
             _tabGeneral.Controls.Add(_kernelManage);
-            _kernelHint = new JBLabel(LabelRole.Faint, "");
-            _kernelHint.TextAlign = ContentAlignment.MiddleLeft;
-            // Wrapped, not ellipsised: this is the only place that explains what pinning a build
-            // costs, so a truncated sentence would be worse than no sentence.
-            _kernelHint.Wrap = true;
-            _tabGeneral.Controls.Add(_kernelHint);
 
             _name.EnterPressed += OnEnterKey;
             _startUrl.EnterPressed += OnEnterKey;
@@ -529,7 +527,11 @@ namespace JoeBrowser
             _getBrowser.Visible = missing;
             _browserNote.Visible = missing;
             if (!missing) return;
-            _browserNote.Text = BrowserFetcher.Label(key) + " is not installed on this PC";
+            /* "built-in" in the picker and "not installed" in the note read as a contradiction.
+               For the bundled engine the truth is that it has not been downloaded yet. */
+            _browserNote.Text = key == "chromium"
+                ? "The built-in Chromium build is not downloaded yet."
+                : BrowserFetcher.Label(key) + " is not installed on this PC.";
         }
 
         private async System.Threading.Tasks.Task FetchBrowserCore()
@@ -702,7 +704,7 @@ namespace JoeBrowser
                 SetError("");
             };
             _tabFp.Controls.Add(_matchGpu);
-            _matchGpu.Visible = !string.IsNullOrEmpty(FingerprintFactory.MachineRenderer);
+            _matchGpu.Visible = !string.IsNullOrEmpty(FingerprintFactory.MachineRenderer) && FingerprintFactory.IsWindowsTarget(_fp.Os);
 
             _regen = new JBButton { Kind = BtnKind.Soft, Icon = "refresh", Text = "New fingerprint" };
             _regen.Click += delegate
@@ -755,10 +757,7 @@ namespace JoeBrowser
         /// </summary>
         private List<Profile> Others()
         {
-            if (_siblings != null) return _siblings;
-            var self = new List<Profile>();
-            if (!_isNew && _profile != null) self.Add(_profile);
-            return self;
+            return _siblings;
         }
 
         /// <summary>
@@ -1158,6 +1157,10 @@ namespace JoeBrowser
                 _os.Icon = FingerprintFactory.DeviceIcon(_fp.Os);
                 if (!string.Equals(FingerprintFactory.OsList[osIdx], _fp.Os, StringComparison.OrdinalIgnoreCase))
                     _fp.Os = ResolveOs(FingerprintFactory.OsList[osIdx]);
+                /* The machine's adapter is a Windows answer. Offering it under a macOS or phone
+                   target would put a Direct3D11 string inside a Metal or Adreno identity. */
+                if (_matchGpu != null)
+                    _matchGpu.Visible = !string.IsNullOrEmpty(FingerprintFactory.MachineRenderer) && FingerprintFactory.IsWindowsTarget(_fp.Os);
 
                 _screens = FingerprintFactory.ScreensFor(_fp.Os);
                 var screenItems = new List<string>();
@@ -1303,6 +1306,10 @@ namespace JoeBrowser
                previous tab's pixels for one frame. Force a full repaint of its children. */
             JBScrollHost[] hosts = { _hostGeneral, _hostFp, _hostPriv, _hostProxy, _hostTools };
             foreach (JBScrollHost h in hosts) h.Invalidate(true);
+            /* Layout branches skip controls whose page is hidden, so a page that was laid out
+               while hidden keeps default bounds for them - the canvas note then paints at 0,0
+               over the next tab's first row. Re-layout now that this page is the visible one. */
+            LayoutAll();
             /* Focus follows the tab. Without this the first control of the newly shown page is
                never focused, so Tab after switching a tab started from the old page and the
                keyboard user was dropped back where they came from. */
@@ -1356,7 +1363,7 @@ namespace JoeBrowser
                with an ellipsis, which reads as a shortened name and not as two names in one cell. */
             int tabNeed = _tabs.PreferredWidth(Ui.S(72));
             _close.SetBounds(w - pad - Ui.S(32), Ui.S(16), Ui.S(32), Ui.S(32));
-            _title.SetBounds(pad, Ui.S(16), Math.Max(Ui.S(120), w - pad * 2 - Ui.S(48)), Ui.S(32));
+            _title.SetBounds(pad, Ui.S(16), Math.Max(Ui.S(120), w - pad * 2 - Ui.S(48)), Theme.LineHeight(Theme.Display));
             _tabs.SetBounds(pad, Ui.S(58), Math.Min(Math.Max(Ui.S(360), tabNeed), w - pad * 2), Ui.S(38));
 
             int top = Ui.S(108);
@@ -1477,11 +1484,13 @@ namespace JoeBrowser
             if (_getBrowser != null && _getBrowser.Visible)
             {
                 /* The button is as wide as its own label: a fixed width cut "Download" into
-                   "Downl...", which reads as a broken control rather than a button. */
+                   "Downl...", which reads as a broken control rather than a button. The row sits
+                   on its own line below the kernel hint instead of being pulled back up into the
+                   gap above, which is what let the next row print over it. */
                 int gw = Math.Min(Ui.S(200), _getBrowser.PreferredWidth(Ui.S(118)));
-                _getBrowser.SetBounds(cw - gw, y - rg + Ui.S(2), gw, Ui.S(34));
-                _browserNote.SetBounds(0, y - rg + Ui.S(6), cw - gw - Ui.S(12), Ui.S(26));
-                y += Ui.S(34) + Ui.S(6);
+                _getBrowser.SetBounds(cw - gw, y, gw, Ui.S(34));
+                _browserNote.SetBounds(0, y + Ui.S(4), cw - gw - Ui.S(12), Ui.S(26));
+                y += Ui.S(34) + Ui.S(10);
             }
 
             if (_moreOptions)
@@ -2198,7 +2207,7 @@ namespace JoeBrowser
                 SuppressSurfaceEvents(() =>
                 {
                     ClientSize = new Size(finalWidth, finalHeight);
-                    _title.SetBounds(textX, pad + Ui.S(2), ClientSize.Width - textX - pad, Ui.S(32));
+                    _title.SetBounds(textX, pad + Ui.S(2), ClientSize.Width - textX - pad, Theme.LineHeight(Theme.Display));
                     _message.SetBounds(textX, bodyTop, textW, mh);
                     _detail.SetBounds(textX, bodyTop + mh + Ui.S(8), textW, dh);
                     _ok.SetBounds(ClientSize.Width - pad - saveW, finalBottom, saveW, Ui.S(Theme.ControlHeight));

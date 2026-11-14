@@ -1503,7 +1503,9 @@ namespace JoeBrowser
                    Drawn as a bare text line on the rail it read as a link in a list rather than
                    the page you are on, which is the one piece of state a shell must show. */
                 float navIcon = Ui.S(22);
-                float iconX = Ui.S(14);
+                /* Icon-only rail (small window): centre the mark instead of leaving it at the
+                   label's left inset with an empty gap where the text used to be. */
+                float iconX = hasText ? Ui.S(14) : (Width - navIcon) / 2f;
                 if (hasIcon)
                 {
                     var box = new RectangleF(iconX, (Height - navIcon) / 2f, navIcon, navIcon);

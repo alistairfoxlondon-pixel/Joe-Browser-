@@ -292,7 +292,7 @@ namespace JoeBrowser
             int w = ClientSize.Width, h = ClientSize.Height;
             int pad = Ui.S(24);
 
-            _title.SetBounds(pad, Ui.S(14), Math.Max(Ui.S(100), w - pad * 2 - Ui.S(40)), Ui.S(32));
+            _title.SetBounds(pad, Ui.S(14), Math.Max(Ui.S(100), w - pad * 2 - Ui.S(40)), Theme.LineHeight(Theme.Display));
             _close.SetBounds(w - pad - Ui.S(30), Ui.S(14), Ui.S(30), Ui.S(30));
 
             int footerH = Ui.S(56);
